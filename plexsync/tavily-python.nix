@@ -1,14 +1,9 @@
 {
   lib,
-  buildPythonPackage,
+  pythonPackages,
   fetchPypi,
-  setuptools,
-  wheel,
-  httpx,
-  requests,
-  tiktoken,
 }:
-buildPythonPackage rec {
+pythonPackages.buildPythonPackage rec {
   pname = "tavily-python";
   version = "0.4.0";
   pyproject = true;
@@ -19,12 +14,12 @@ buildPythonPackage rec {
     hash = "sha256-5FFwQd0TXxcYWNfmWnyuCFWXhxu9waE9J5kKy1NuVcM=";
   };
 
-  build-system = [
+  build-system = with pythonPackages; [
     setuptools
     wheel
   ];
 
-  dependencies = [
+  dependencies = with pythonPackages; [
     httpx
     requests
     tiktoken
