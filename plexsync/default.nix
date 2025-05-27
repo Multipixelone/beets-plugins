@@ -31,6 +31,7 @@ python3Packages.buildPythonApplication {
   dependencies = with pythonPackages; [
     plexapi
     spotipy
+    enlighten
     openai
     pydantic
     dateutil
