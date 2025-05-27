@@ -41,6 +41,7 @@ python3Packages.buildPythonApplication {
     pillow
     json-repair
 
+    (pkgs.callPackage ./jiosaavn-python.nix {inherit pythonPackages;})
     # (pkgs.callPackages ./agno.nix {inherit pythonPackages;})
     # (pkgs.callPackages ./tavily.nix {inherit pythonPackages;})
     # (pkgs.callPackages ./exa-py.nix {inherit pythonPackages;})
@@ -50,7 +51,6 @@ python3Packages.buildPythonApplication {
     sed -i -e '/agno/d' setup.py
     sed -i -e '/tavily-python/d' setup.py
     sed -i -e '/exa_py/d' setup.py
-    sed -i -e '/jiosaavn-python/d' setup.py
     printf 'from pkgutil import extend_path\n__path__ = extend_path(__path__, __name__)\n' >beetsplug/__init__.py
   '';
 
