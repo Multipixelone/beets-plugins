@@ -44,7 +44,26 @@
         tcp = tcp;
         userrating = userrating;
         plexsync = plexsync;
-        default = self.packages.${system}.tcp;
+        default = pkgs.beets.override {
+          pluginOverrides = {
+            tcp = {
+              enable = true;
+              propagatedBuildInputs = [tcp];
+            };
+            plexsync = {
+              enable = true;
+              propagatedBuildInputs = [plexsync];
+            };
+            filetote = {
+              enable = true;
+              propagatedBuildInputs = [pkgs.beetsPackages.filetote];
+            };
+            alternatives = {
+              enable = true;
+              propagatedBuildInputs = [pkgs.beetsPackages.alternatives];
+            };
+          };
+        };
       };
       devShells.default = env;
     });
