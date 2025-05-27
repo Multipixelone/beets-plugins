@@ -43,7 +43,7 @@ python3Packages.buildPythonApplication {
 
     (pkgs.callPackage ./jiosaavn-python.nix {inherit pythonPackages;})
     # (pkgs.callPackages ./agno.nix {inherit pythonPackages;})
-    # (pkgs.callPackages ./tavily.nix {inherit pythonPackages;})
+    (pkgs.callPackages ./tavily-python.nix {inherit pythonPackages;})
     # (pkgs.callPackages ./exa-py.nix {inherit pythonPackages;})
   ];
 
