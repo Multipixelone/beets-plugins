@@ -25,6 +25,7 @@
       # packages
       tcp = pkgs.callPackage ./tcp.nix {inherit beets pythonPackages version;};
       userrating = pkgs.callPackage ./userrating {inherit beets pythonPackages version;};
+      plexsync = pkgs.callPackage ./plexsync {inherit beets pythonPackages version;};
 
       # devEnv
       env = pkgs.mkShell {
@@ -42,6 +43,7 @@
       packages = {
         tcp = tcp;
         userrating = userrating;
+        plexsync = plexsync;
         default = self.packages.${system}.tcp;
       };
       devShells.default = env;
