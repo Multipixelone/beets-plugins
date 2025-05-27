@@ -4,7 +4,7 @@
   python3Packages,
   pythonPackages,
 }:
-python3Packages.buildPythonApplication rec {
+python3Packages.buildPythonPackage rec {
   version = "0.2";
   pname = "jiosaavn-python";
   pyproject = true;

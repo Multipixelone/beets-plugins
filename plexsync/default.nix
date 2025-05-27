@@ -6,7 +6,7 @@
   fetchFromGitHub,
   version,
 }:
-python3Packages.buildPythonApplication {
+python3Packages.buildPythonPackage {
   inherit version;
   pname = "beets-plexsync";
   pyproject = true;
