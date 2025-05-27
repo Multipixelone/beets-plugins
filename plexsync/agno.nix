@@ -31,6 +31,10 @@ pythonPackages.buildPythonPackage rec {
     typing-extensions
   ];
 
+  pythonImportsCheck = [
+    "agno"
+  ];
+
   meta = {
     description = "a lightweight, high-performance library for building Agents";
     homepage = "https://agno.com";
