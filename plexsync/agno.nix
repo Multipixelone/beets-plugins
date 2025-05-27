@@ -18,6 +18,7 @@ pythonPackages.buildPythonPackage rec {
 
   dependencies = with pythonPackages; [
     docstring-parser
+    ollama
     gitpython
     pydantic-settings
     pydantic
