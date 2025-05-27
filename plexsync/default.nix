@@ -42,13 +42,12 @@ python3Packages.buildPythonApplication {
     json-repair
 
     (pkgs.callPackage ./jiosaavn-python.nix {inherit pythonPackages;})
-    # (pkgs.callPackages ./agno.nix {inherit pythonPackages;})
+    (pkgs.callPackage ./agno.nix {inherit pythonPackages;})
     (pkgs.callPackage ./tavily-python.nix {inherit pythonPackages;})
     # (pkgs.callPackages ./exa-py.nix {inherit pythonPackages;})
   ];
 
   postPatch = ''
-    sed -i -e '/agno/d' setup.py
     sed -i -e '/exa_py/d' setup.py
     printf 'from pkgutil import extend_path\n__path__ = extend_path(__path__, __name__)\n' >beetsplug/__init__.py
   '';
