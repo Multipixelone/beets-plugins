@@ -16,10 +16,12 @@
       # python definitions & modules
       beets = pkgs.beetsPackages.beets-minimal;
       pythonPackages = pkgs.python3Packages;
+      python310Packages = pkgs.python310Packages;
 
       # packages
       tcp = pkgs.callPackage ./tcp.nix {inherit beets pythonPackages;};
       stylize = pkgs.callPackage ./stylize.nix {inherit beets pythonPackages;};
+      savedformats = pkgs.callPackage ./savedformats.nix {inherit beets pythonPackages;};
       userrating = pkgs.callPackage ./userrating {inherit beets pythonPackages version;};
       plexsync = pkgs.callPackage ./plexsync {inherit beets pythonPackages;};
 
@@ -33,6 +35,10 @@
           stylize = {
             enable = true;
             propagatedBuildInputs = [stylize];
+          };
+          savedformats = {
+            enable = true;
+            propagatedBuildInputs = [savedformats];
           };
           plexsync = {
             enable = true;
@@ -65,6 +71,7 @@
       packages = {
         tcp = tcp;
         stylize = stylize;
+        savedformats = savedformats;
         userrating = userrating;
         plexsync = plexsync;
 
