@@ -14,7 +14,7 @@
       version = toString (self.shortRev or self.dirtyShortRev or self.lastModified or "unknown");
       pkgs = nixpkgs.legacyPackages.${system};
       # python definitions & modules
-      beets = pkgs.beets;
+      beets = pkgs.beetsPackages.beets-minimal;
       pythonPackages = pkgs.python3Packages;
       pythonModules = with pythonPackages; [
         pkgs.beets
