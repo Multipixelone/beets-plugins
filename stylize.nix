@@ -29,7 +29,7 @@ python3Packages.buildPythonApplication rec {
   ];
 
   dependencies = with pythonPackages; [
-    titlecase
+    click
   ];
 
   # postPatch = ''
