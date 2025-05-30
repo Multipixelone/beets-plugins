@@ -4,11 +4,10 @@
   beets,
   python3Packages,
   pythonPackages,
-  version,
 }:
 python3Packages.buildPythonApplication rec {
-  inherit version;
   pname = "beets-stylize";
+  version = "1.2.1";
   pyproject = true;
   doCheck = false;
   pytestCheckHook = false;
@@ -16,7 +15,7 @@ python3Packages.buildPythonApplication rec {
   src = fetchFromGitHub {
     repo = "beets-stylize";
     owner = "kergoth";
-    tag = "v1.2.1";
+    tag = "v${version}";
     hash = "sha256-ZxRw/IwvEtS9iPN01cbBdSgNNGvYavu5HogsA8Y2m0w=";
   };
 

@@ -4,10 +4,9 @@
   beets,
   python3Packages,
   pythonPackages,
-  version,
 }:
 python3Packages.buildPythonApplication rec {
-  inherit version;
+  version = "1.0";
   pname = "beets-tcp";
   pyproject = true;
   doCheck = false;
@@ -44,7 +43,7 @@ python3Packages.buildPythonApplication rec {
 
     setup(
       name='${pname}',
-      version='1.0',
+      version='${version}',
 
       packages=['beetsplug'],
       install_requires=['beets>=1.3.11'],

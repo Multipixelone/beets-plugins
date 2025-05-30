@@ -23,10 +23,10 @@
       ];
 
       # packages
-      tcp = pkgs.callPackage ./tcp.nix {inherit beets pythonPackages version;};
-      stylize = pkgs.callPackage ./stylize.nix {inherit beets pythonPackages version;};
+      tcp = pkgs.callPackage ./tcp.nix {inherit beets pythonPackages;};
+      stylize = pkgs.callPackage ./stylize.nix {inherit beets pythonPackages;};
       userrating = pkgs.callPackage ./userrating {inherit beets pythonPackages version;};
-      plexsync = pkgs.callPackage ./plexsync {inherit beets pythonPackages version;};
+      plexsync = pkgs.callPackage ./plexsync {inherit beets pythonPackages;};
 
       # devEnv
       env = pkgs.mkShell {

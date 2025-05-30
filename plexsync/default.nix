@@ -4,11 +4,10 @@
   python3Packages,
   pythonPackages,
   fetchFromGitHub,
-  version,
 }:
-python3Packages.buildPythonPackage {
-  inherit version;
+python3Packages.buildPythonPackage rec {
   pname = "beets-plexsync";
+  version = "1c618ae78a4951255f414bd77afdf4ad01901d90";
   pyproject = true;
   doCheck = false;
   pytestCheckHook = false;
@@ -16,7 +15,7 @@ python3Packages.buildPythonPackage {
   src = fetchFromGitHub {
     owner = "arsaboo";
     repo = "beets-plexsync";
-    rev = "1c618ae78a4951255f414bd77afdf4ad01901d90";
+    rev = version;
     hash = "sha256-LTXUO5ARwf3JkpDa+IZW3cZ8x2onmMcJzIo+P3E893U=";
   };
 
