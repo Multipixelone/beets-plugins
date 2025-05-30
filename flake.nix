@@ -24,6 +24,7 @@
 
       # packages
       tcp = pkgs.callPackage ./tcp.nix {inherit beets pythonPackages version;};
+      stylize = pkgs.callPackage ./stylize.nix {inherit beets pythonPackages version;};
       userrating = pkgs.callPackage ./userrating {inherit beets pythonPackages version;};
       plexsync = pkgs.callPackage ./plexsync {inherit beets pythonPackages version;};
 
@@ -42,6 +43,7 @@
     in {
       packages = {
         tcp = tcp;
+        stylize = stylize;
         userrating = userrating;
         plexsync = plexsync;
         default = pkgs.beets.override {
@@ -49,6 +51,10 @@
             tcp = {
               enable = true;
               propagatedBuildInputs = [tcp];
+            };
+            stylize = {
+              enable = true;
+              propagatedBuildInputs = [stylize];
             };
             plexsync = {
               enable = true;
