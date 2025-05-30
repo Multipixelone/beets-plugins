@@ -16,11 +16,6 @@
       # python definitions & modules
       beets = pkgs.beetsPackages.beets-minimal;
       pythonPackages = pkgs.python3Packages;
-      pythonModules = with pythonPackages; [
-        pkgs.beets
-        setuptools
-        titlecase
-      ];
 
       # packages
       tcp = pkgs.callPackage ./tcp.nix {inherit beets pythonPackages;};
@@ -28,11 +23,37 @@
       userrating = pkgs.callPackage ./userrating {inherit beets pythonPackages version;};
       plexsync = pkgs.callPackage ./plexsync {inherit beets pythonPackages;};
 
+      # beets & plugins
+      beets-plugins = pkgs.beets.override {
+        pluginOverrides = {
+          tcp = {
+            enable = true;
+            propagatedBuildInputs = [tcp];
+          };
+          stylize = {
+            enable = true;
+            propagatedBuildInputs = [stylize];
+          };
+          plexsync = {
+            enable = true;
+            propagatedBuildInputs = [plexsync];
+          };
+          filetote = {
+            enable = true;
+            propagatedBuildInputs = [pkgs.beetsPackages.filetote];
+          };
+          alternatives = {
+            enable = true;
+            propagatedBuildInputs = [pkgs.beetsPackages.alternatives];
+          };
+        };
+      };
+
       # devEnv
       env = pkgs.mkShell {
         venvDir = "./.venv";
         buildInputs = [
-          pythonModules
+          beets-plugins
           pythonPackages.python
           pythonPackages.venvShellHook
           pkgs.autoPatchelfHook
@@ -46,30 +67,8 @@
         stylize = stylize;
         userrating = userrating;
         plexsync = plexsync;
-        default = pkgs.beets.override {
-          pluginOverrides = {
-            tcp = {
-              enable = true;
-              propagatedBuildInputs = [tcp];
-            };
-            stylize = {
-              enable = true;
-              propagatedBuildInputs = [stylize];
-            };
-            plexsync = {
-              enable = true;
-              propagatedBuildInputs = [plexsync];
-            };
-            filetote = {
-              enable = true;
-              propagatedBuildInputs = [pkgs.beetsPackages.filetote];
-            };
-            alternatives = {
-              enable = true;
-              propagatedBuildInputs = [pkgs.beetsPackages.alternatives];
-            };
-          };
-        };
+
+        default = beets-plugins;
       };
       devShells.default = env;
     });
