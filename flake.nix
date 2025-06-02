@@ -16,7 +16,6 @@
       # python definitions & modules
       beets = pkgs.beetsPackages.beets-minimal;
       pythonPackages = pkgs.python3Packages;
-      python310Packages = pkgs.python310Packages;
 
       # packages
       tcp = pkgs.callPackage ./tcp.nix {inherit beets pythonPackages;};
