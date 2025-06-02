@@ -21,6 +21,9 @@
       tcp = pkgs.callPackage ./tcp.nix {inherit beets pythonPackages;};
       stylize = pkgs.callPackage ./stylize.nix {inherit beets pythonPackages;};
       savedformats = pkgs.callPackage ./savedformats.nix {inherit beets pythonPackages;};
+      xtractor = pkgs.callPackage ./xtractor.nix {inherit pkgs beets pythonPackages;};
+      yearfixer = pkgs.callPackage ./yearfixer.nix {inherit beets pythonPackages;};
+      autofix = pkgs.callPackage ./autofix.nix {inherit beets pythonPackages;};
       userrating = pkgs.callPackage ./userrating {inherit beets pythonPackages version;};
       plexsync = pkgs.callPackage ./plexsync {inherit beets pythonPackages;};
 
@@ -38,6 +41,18 @@
           savedformats = {
             enable = true;
             propagatedBuildInputs = [savedformats];
+          };
+          xtractor = {
+            enable = true;
+            propagatedBuildInputs = [xtractor];
+          };
+          yearfixer = {
+            enable = true;
+            propagatedBuildInputs = [yearfixer];
+          };
+          autofix = {
+            enable = true;
+            propagatedBuildInputs = [autofix];
           };
           plexsync = {
             enable = true;
@@ -71,6 +86,9 @@
         tcp = tcp;
         stylize = stylize;
         savedformats = savedformats;
+        xtractor = xtractor;
+        yearfixer = yearfixer;
+        autofix = autofix;
         userrating = userrating;
         plexsync = plexsync;
 
