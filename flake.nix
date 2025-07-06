@@ -13,6 +13,7 @@
       # use git commit as version (i don't like this impl but i'll be brave)
       version = toString (self.shortRev or self.dirtyShortRev or self.lastModified or "unknown");
       pkgs = nixpkgs.legacyPackages.${system};
+      pins = import ./npins;
       # python definitions & modules
       beets = pkgs.beetsPackages.beets-minimal;
       pythonPackages = pkgs.python3Packages;
@@ -64,7 +65,13 @@
           };
           alternatives = {
             enable = true;
-            propagatedBuildInputs = [pkgs.beetsPackages.alternatives];
+            propagatedBuildInputs = [
+              (pkgs.beetsPackages.alternatives.overrideAttrs
+                {
+                  version = pins.beets-alternatives.revision;
+                  src = pins.beets-alternatives;
+                })
+            ];
           };
         };
       };

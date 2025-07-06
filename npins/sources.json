@@ -1,0 +1,24 @@
+{
+  "pins": {
+    "beets-alternatives": {
+      "type": "Git",
+      "repository": {
+        "type": "GitHub",
+        "owner": "geigerzaehler",
+        "repo": "beets-alternatives"
+      },
+      "branch": "main",
+      "submodules": false,
+      "revision": "6398571785c822df8abdd7bd48d46c4292c74afb",
+      "url": "https://github.com/geigerzaehler/beets-alternatives/archive/6398571785c822df8abdd7bd48d46c4292c74afb.tar.gz",
+      "hash": "1isi5lc0knasd22jp9c22dl5b0icx3xl1fa73pzqj740dabfm7bc"
+    },
+    "nixpkgs": {
+      "type": "Channel",
+      "name": "nixpkgs-unstable",
+      "url": "https://releases.nixos.org/nixpkgs/nixpkgs-25.11pre826033.ceb24d94c6fe/nixexprs.tar.xz",
+      "hash": "17p6w3fxlaaal3hr460hwgkjarayi7r8bi0ds17l3ccvf5x5hjcr"
+    }
+  },
+  "version": 5
+}
