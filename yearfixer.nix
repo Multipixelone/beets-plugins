@@ -5,6 +5,10 @@
 }:
 pythonPackages.buildPythonApplication rec {
   pname = "beets-yearfixer";
+  pyproject = true;
+  build-system = [
+    pythonPackages.setuptools
+  ];
   version = "0.0.5";
 
   src = pythonPackages.fetchPypi {

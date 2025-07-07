@@ -6,6 +6,10 @@
 }:
 pythonPackages.buildPythonApplication rec {
   pname = "beets-xtractor";
+  pyproject = true;
+  build-system = [
+    pythonPackages.setuptools
+  ];
   version = "0.4.2";
 
   src = pythonPackages.fetchPypi {

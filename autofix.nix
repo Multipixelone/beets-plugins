@@ -5,6 +5,10 @@
 }:
 pythonPackages.buildPythonApplication rec {
   pname = "beets-autofix";
+  pyproject = true;
+  build-system = [
+    pythonPackages.setuptools
+  ];
   version = "0.1.6";
 
   src = pythonPackages.fetchPypi {
