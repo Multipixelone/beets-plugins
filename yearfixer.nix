@@ -22,6 +22,7 @@ pythonPackages.buildPythonApplication rec {
   ];
 
   propagatedBuildInputs = [
+    pythonPackages.requests
   ];
 
   meta = with lib; {
