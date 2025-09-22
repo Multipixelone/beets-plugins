@@ -38,9 +38,9 @@
       },
       "branch": "ansi_code_rename",
       "submodules": false,
-      "revision": "e96ecfefb6500d560fb0509a687b4f1444749a9b",
-      "url": "https://github.com/Multipixelone/beets-stylize/archive/e96ecfefb6500d560fb0509a687b4f1444749a9b.tar.gz",
-      "hash": "1vvqxiaap5b4nvbm4p1njzk9miaqv9ka80jg0bsmslxcm5zk4g3h"
+      "revision": "f7e2d0c2ea4013e24a754093643b0de29e8d80aa",
+      "url": "https://github.com/Multipixelone/beets-stylize/archive/f7e2d0c2ea4013e24a754093643b0de29e8d80aa.tar.gz",
+      "hash": "1c6y1rmzyyrjfzmbvz7n2cryp75v8nhlvj1xhhilpdxx3wccdhzc"
     },
     "nixpkgs": {
       "type": "Channel",
