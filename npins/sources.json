@@ -9,15 +9,31 @@
       },
       "branch": "main",
       "submodules": false,
-      "revision": "92c55ee50ea3aeb236beec93924298b9800db760",
-      "url": "https://github.com/geigerzaehler/beets-alternatives/archive/92c55ee50ea3aeb236beec93924298b9800db760.tar.gz",
-      "hash": "1ycsr94f64gfafkvxraqgbczrbmpwsfv2zs2fv61p9paiv54l25n"
+      "revision": "1b4ff25fbbba605c129b4c5c5c1998d9d502f406",
+      "url": "https://github.com/geigerzaehler/beets-alternatives/archive/1b4ff25fbbba605c129b4c5c5c1998d9d502f406.tar.gz",
+      "hash": "0ijjwsys9rc5bz8vn4y231nn0l1zlpjqmnc6phqcyrxzbizq2j34"
+    },
+    "beets-filetote": {
+      "type": "GitRelease",
+      "repository": {
+        "type": "GitHub",
+        "owner": "gtronset",
+        "repo": "beets-filetote"
+      },
+      "pre_releases": false,
+      "version_upper_bound": null,
+      "release_prefix": null,
+      "submodules": false,
+      "version": "v1.0.3",
+      "revision": "e004ba148a7567066edbe1a41c76b2fda9a90432",
+      "url": "https://api.github.com/repos/gtronset/beets-filetote/tarball/v1.0.3",
+      "hash": "1h6p34rkv9hq179nnhhmillf3wrvf8vbndaj9wls5awzq27r6biy"
     },
     "nixpkgs": {
       "type": "Channel",
       "name": "nixpkgs-unstable",
-      "url": "https://releases.nixos.org/nixpkgs/nixpkgs-25.11pre837798.e7eabdc701d7/nixexprs.tar.xz",
-      "hash": "1d2wx8lx1sai5bpxh7gf4h7qf65617f27fias2vl3sdfqy16yn6d"
+      "url": "https://releases.nixos.org/nixpkgs/nixpkgs-25.11pre864673.a1f79a1770d0/nixexprs.tar.xz",
+      "hash": "0j33hiaprbpdhax2vxd2rddf5zsayqcj819f47py6vi9jd80byk0"
     }
   },
   "version": 5
