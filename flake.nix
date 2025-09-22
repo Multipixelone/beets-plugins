@@ -62,10 +62,17 @@
             enable = true;
             propagatedBuildInputs = [plexsync];
           };
-          filetote = {
-            enable = true;
-            propagatedBuildInputs = [pkgs.beetsPackages.filetote];
-          };
+          # FIXME when https://github.com/gtronset/beets-filetote/issues/211 is closed
+          # filetote = {
+          #   enable = true;
+          #   propagatedBuildInputs = [
+          #     (pkgs.beetsPackages.filetote.overrideAttrs
+          #       {
+          #         version = pins.beets-filetote.revision;
+          #         src = pins.beets-filetote;
+          #       })
+          #   ];
+          # };
           alternatives = {
             enable = true;
             propagatedBuildInputs = [
