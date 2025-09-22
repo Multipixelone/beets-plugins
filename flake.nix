@@ -32,6 +32,7 @@
 
       # beets & plugins
       beets-plugins = beets.override {
+        # FIXME use mapattrs to make this cleaner
         pluginOverrides = {
           tcp = {
             enable = true;
