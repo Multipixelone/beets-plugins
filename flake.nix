@@ -15,7 +15,7 @@
       pkgs = nixpkgs.legacyPackages.${system};
       pins = import ./npins;
       # python definitions & modules
-      beets = pkgs.beetsPackages.beets-unstable;
+      beets = pkgs.beets;
       pythonPackages = pkgs.python3Packages;
 
       # packages
@@ -29,7 +29,7 @@
       plexsync = pkgs.callPackage ./plexsync {inherit beets pythonPackages;};
 
       # beets & plugins
-      beets-plugins = pkgs.beets-unstable.override {
+      beets-plugins = beets.override {
         pluginOverrides = {
           tcp = {
             enable = true;
