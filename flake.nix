@@ -1,7 +1,9 @@
 {
   description = "Multipixelone beets plugins";
 
-  inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+  # inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+  # FIXME revert to normal nixos-unstable when https://github.com/NixOS/nixpkgs/pull/445208 is merged
+  inputs.nixpkgs.url = "github:doronbehar/nixpkgs/pkg/beetsPackages.alternatives";
   inputs.flake-utils.url = "github:numtide/flake-utils";
 
   outputs = {
