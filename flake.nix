@@ -22,7 +22,7 @@
 
       # packages
       tcp = pkgs.callPackage ./tcp.nix {inherit beets pythonPackages;};
-      stylize = pkgs.callPackage ./stylize.nix {inherit beets pythonPackages;};
+      stylize = pkgs.callPackage ./stylize.nix {inherit pins beets pythonPackages;};
       savedformats = pkgs.callPackage ./savedformats.nix {inherit beets pythonPackages;};
       xtractor = pkgs.callPackage ./xtractor.nix {inherit pkgs beets pythonPackages;};
       yearfixer = pkgs.callPackage ./yearfixer.nix {inherit beets pythonPackages;};

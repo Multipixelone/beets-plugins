@@ -29,6 +29,19 @@
       "url": "https://api.github.com/repos/gtronset/beets-filetote/tarball/v1.0.3",
       "hash": "1h6p34rkv9hq179nnhhmillf3wrvf8vbndaj9wls5awzq27r6biy"
     },
+    "beets-stylize": {
+      "type": "Git",
+      "repository": {
+        "type": "GitHub",
+        "owner": "Multipixelone",
+        "repo": "beets-stylize"
+      },
+      "branch": "ansi_code_rename",
+      "submodules": false,
+      "revision": "e96ecfefb6500d560fb0509a687b4f1444749a9b",
+      "url": "https://github.com/Multipixelone/beets-stylize/archive/e96ecfefb6500d560fb0509a687b4f1444749a9b.tar.gz",
+      "hash": "1vvqxiaap5b4nvbm4p1njzk9miaqv9ka80jg0bsmslxcm5zk4g3h"
+    },
     "nixpkgs": {
       "type": "Channel",
       "name": "nixpkgs-unstable",

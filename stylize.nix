@@ -1,23 +1,19 @@
 {
   lib,
-  fetchFromGitHub,
   beets,
   python3Packages,
   pythonPackages,
+  pins,
 }:
 python3Packages.buildPythonApplication rec {
+  version = pins.beets-stylize.revision;
   pname = "beets-stylize";
-  version = "1.2.1";
+
   pyproject = true;
   doCheck = false;
   pytestCheckHook = false;
 
-  src = fetchFromGitHub {
-    repo = "beets-stylize";
-    owner = "kergoth";
-    tag = "v${version}";
-    hash = "sha256-ZxRw/IwvEtS9iPN01cbBdSgNNGvYavu5HogsA8Y2m0w=";
-  };
+  src = pins.beets-stylize;
 
   nativeBuildInputs = [
     beets
