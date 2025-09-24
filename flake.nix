@@ -17,6 +17,12 @@
       pkgs = nixpkgs.legacyPackages.${system};
       pins = import ./npins;
       # python definitions & modules
+      # beets = pkgs.beets.overrideAttrs (final: prev: {
+      # Combine the existing patches with your new one.
+      # patches = (prev.patches or []) ++ [./convert.patch];
+      # version = pins.beets.revision;
+      # src = pins.beets;
+      # });
       beets = pkgs.beets;
       pythonPackages = pkgs.python3Packages;
 
