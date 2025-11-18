@@ -33,7 +33,7 @@ python3Packages.buildPythonPackage rec {
     enlighten
     openai
     pydantic
-    dateutil
+    python-dateutil
     confuse
     requests
     beautifulsoup4
