@@ -79,15 +79,12 @@
           #       })
           #   ];
           # };
-          alternatives = {
-            enable = true;
-            propagatedBuildInputs = [
-              (pkgs.beetsPackages.alternatives.overrideAttrs
-                {
-                  version = pins.beets-alternatives.revision;
-                  src = pins.beets-alternatives;
-                })
-            ];
+            alternatives = {
+              enable = true;
+              propagatedBuildInputs = [
+                pkgs.python3.pkgs.beets-alternatives
+              ];
+            };
           };
         };
       };
