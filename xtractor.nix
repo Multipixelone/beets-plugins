@@ -29,7 +29,7 @@ pythonPackages.buildPythonApplication rec {
   meta = with lib; {
     description = "A beets plugin to add low and high level musical information to songs.";
     homepage = "https://github.com/adamjakab/BeetsPluginXtractor";
-    maintainers = with maintainers; [johnhamelink];
+    maintainers = with maintainers; [ johnhamelink ];
     license = licenses.mit;
   };
 }

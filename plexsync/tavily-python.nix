@@ -33,6 +33,6 @@ pythonPackages.buildPythonPackage rec {
     description = "Python wrapper for the Tavily API";
     homepage = "https://pypi.org/project/tavily-python";
     license = lib.licenses.mit;
-    maintainers = with lib.maintainers; [happysalada];
+    maintainers = with lib.maintainers; [ happysalada ];
   };
 }

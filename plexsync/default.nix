@@ -40,10 +40,10 @@ python3Packages.buildPythonPackage rec {
     pillow
     json-repair
 
-    (pkgs.callPackage ./jiosaavn-python.nix {inherit pythonPackages;})
-    (pkgs.callPackage ./agno.nix {inherit pythonPackages;})
-    (pkgs.callPackage ./tavily-python.nix {inherit pythonPackages;})
-    (pkgs.callPackage ./exa-py.nix {inherit pythonPackages;})
+    (pkgs.callPackage ./jiosaavn-python.nix { inherit pythonPackages; })
+    (pkgs.callPackage ./agno.nix { inherit pythonPackages; })
+    (pkgs.callPackage ./tavily-python.nix { inherit pythonPackages; })
+    (pkgs.callPackage ./exa-py.nix { inherit pythonPackages; })
   ];
 
   postPatch = ''
