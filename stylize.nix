@@ -1,19 +1,19 @@
 {
   lib,
   beets,
+  beets-stylize,
   python3Packages,
   pythonPackages,
-  pins,
 }:
-python3Packages.buildPythonApplication rec {
-  version = pins.beets-stylize.revision;
+python3Packages.buildPythonApplication {
+  version = beets-stylize.rev;
   pname = "beets-stylize";
 
   pyproject = true;
   doCheck = false;
   pytestCheckHook = false;
 
-  src = pins.beets-stylize;
+  src = beets-stylize;
 
   nativeBuildInputs = [
     beets

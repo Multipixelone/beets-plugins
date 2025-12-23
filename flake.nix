@@ -5,12 +5,17 @@
   # FIXME revert to normal nixos-unstable when https://github.com/NixOS/nixpkgs/pull/445208 is merged
   # inputs.nixpkgs.url = "github:doronbehar/nixpkgs/pkg/beetsPackages.alternatives";
   inputs.flake-utils.url = "github:numtide/flake-utils";
+  inputs.beets-stylize = {
+    url = "github:kergoth/beets-stylize";
+    flake = false;
+  };
 
   outputs =
     {
       self,
       nixpkgs,
       flake-utils,
+      beets-stylize,
     }:
     flake-utils.lib.eachDefaultSystem (
       system:
@@ -18,7 +23,6 @@
         # use git commit as version (i don't like this impl but i'll be brave)
         version = toString (self.shortRev or self.dirtyShortRev or self.lastModified or "unknown");
         pkgs = nixpkgs.legacyPackages.${system};
-        pins = import ./npins;
         # python definitions & modules
         # beets = pkgs.beets.overrideAttrs (final: prev: {
         # Combine the existing patches with your new one.
@@ -31,7 +35,7 @@
 
         # packages
         tcp = pkgs.callPackage ./tcp.nix { inherit beets pythonPackages; };
-        stylize = pkgs.callPackage ./stylize.nix { inherit pins beets pythonPackages; };
+        stylize = pkgs.callPackage ./stylize.nix { inherit beets-stylize beets pythonPackages; };
         savedformats = pkgs.callPackage ./savedformats.nix { inherit beets pythonPackages; };
         xtractor = pkgs.callPackage ./xtractor.nix { inherit pkgs beets pythonPackages; };
         yearfixer = pkgs.callPackage ./yearfixer.nix { inherit beets pythonPackages; };
