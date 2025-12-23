@@ -18,6 +18,7 @@ pythonPackages.buildPythonPackage rec {
 
   dependencies = with pythonPackages; [
     (pkgs.callPackage ./brave-search.nix { inherit pythonPackages; })
+    packaging
     docstring-parser
     ollama
     gitpython
