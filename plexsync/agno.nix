@@ -4,12 +4,12 @@
 }:
 pythonPackages.buildPythonPackage rec {
   pname = "agno";
-  version = "1.5.5";
+  version = "2.3.20";
   pyproject = true;
 
   src = pythonPackages.fetchPypi {
     inherit pname version;
-    sha256 = "sha256-iTcNstRH6SJTCH1oNktkDsY2GFcLyCYfXltwnDz0uHo=";
+    sha256 = "sha256-E/zth3F9qF4A+8T5Vx6C+rOQN208fpJFin4umY3JUMY=";
   };
 
   build-system = with pythonPackages; [
