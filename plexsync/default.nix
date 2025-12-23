@@ -34,11 +34,14 @@ python3Packages.buildPythonPackage rec {
     beautifulsoup4
     pillow
     json-repair
+    instructor
+    pytz
 
     (pkgs.callPackage ./jiosaavn-python.nix { inherit pythonPackages; })
     (pkgs.callPackage ./agno.nix { inherit pythonPackages; })
     (pkgs.callPackage ./tavily-python.nix { inherit pythonPackages; })
     (pkgs.callPackage ./exa-py.nix { inherit pythonPackages; })
+    (pkgs.callPackage ./brave-search.nix { inherit pythonPackages; })
   ];
 
   postPatch = ''
