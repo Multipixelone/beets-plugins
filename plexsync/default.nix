@@ -14,6 +14,10 @@ python3Packages.buildPythonPackage rec {
 
   src = beets-plexsync;
 
+  patches = [
+    ./temperature.patch
+  ];
+
   nativeBuildInputs = [
     beets
   ];

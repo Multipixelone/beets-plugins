@@ -1,0 +1,13 @@
+diff --git a/beetsplug/plexsync.py b/beetsplug/plexsync.py
+index 6339388..0b5e1b0 100644
+--- a/beetsplug/plexsync.py
++++ b/beetsplug/plexsync.py
+@@ -1350,7 +1350,7 @@ class PlexSync(BeetsPlugin):
+         try:
+             self._log.info("Sending request to LLM service")
+             chat = self.llm_client.chat.completions.create(
+-                model=model, messages=messages, temperature=0.7
++                model=model, messages=messages, temperature=1
+             )
+         except Exception as e:
+             self._log.error("Unable to connect to LLM service. Error: {}", e)
