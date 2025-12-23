@@ -1,23 +1,18 @@
 {
   lib,
   beets,
+  beets-plexsync,
   python3Packages,
   pythonPackages,
-  fetchFromGitHub,
 }:
 python3Packages.buildPythonPackage rec {
   pname = "beets-plexsync";
-  version = "1c618ae78a4951255f414bd77afdf4ad01901d90";
+  version = beets-plexsync.rev;
   pyproject = true;
   doCheck = false;
   pytestCheckHook = false;
 
-  src = fetchFromGitHub {
-    owner = "arsaboo";
-    repo = "beets-plexsync";
-    rev = version;
-    hash = "sha256-LTXUO5ARwf3JkpDa+IZW3cZ8x2onmMcJzIo+P3E893U=";
-  };
+  src = beets-plexsync;
 
   nativeBuildInputs = [
     beets

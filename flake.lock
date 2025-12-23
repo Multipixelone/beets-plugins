@@ -1,5 +1,37 @@
 {
   "nodes": {
+    "beets-plexsync": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1763930181,
+        "narHash": "sha256-DdpxojrpWgyhq2P3BqlHLMBt9WCnkd3xeBvPqDSxrJQ=",
+        "owner": "arsaboo",
+        "repo": "beets-plexsync",
+        "rev": "3fec888340d907d568e6711efeab7fd70fdef7f1",
+        "type": "github"
+      },
+      "original": {
+        "owner": "arsaboo",
+        "repo": "beets-plexsync",
+        "type": "github"
+      }
+    },
+    "beets-stylize": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1733241897,
+        "narHash": "sha256-JLUwEBfV6VNzB9xl0/aJ5gwLIg0069fO+cPI6bZI9w8=",
+        "owner": "kergoth",
+        "repo": "beets-stylize",
+        "rev": "15d2b038458959f3ba6e29fc633c258ec662950f",
+        "type": "github"
+      },
+      "original": {
+        "owner": "kergoth",
+        "repo": "beets-stylize",
+        "type": "github"
+      }
+    },
     "flake-utils": {
       "inputs": {
         "systems": "systems"
@@ -20,11 +52,11 @@
     },
     "nixpkgs": {
       "locked": {
-        "lastModified": 1763283776,
-        "narHash": "sha256-Y7TDFPK4GlqrKrivOcsHG8xSGqQx3A6c+i7novT85Uk=",
+        "lastModified": 1766309749,
+        "narHash": "sha256-3xY8CZ4rSnQ0NqGhMKAy5vgC+2IVK0NoVEzDoOh4DA4=",
         "owner": "NixOS",
         "repo": "nixpkgs",
-        "rev": "50a96edd8d0db6cc8db57dab6bb6d6ee1f3dc49a",
+        "rev": "a6531044f6d0bef691ea18d4d4ce44d0daa6e816",
         "type": "github"
       },
       "original": {
@@ -36,6 +68,8 @@
     },
     "root": {
       "inputs": {
+        "beets-plexsync": "beets-plexsync",
+        "beets-stylize": "beets-stylize",
         "flake-utils": "flake-utils",
         "nixpkgs": "nixpkgs"
       }

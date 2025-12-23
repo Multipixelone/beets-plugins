@@ -5,6 +5,10 @@
   # FIXME revert to normal nixos-unstable when https://github.com/NixOS/nixpkgs/pull/445208 is merged
   # inputs.nixpkgs.url = "github:doronbehar/nixpkgs/pkg/beetsPackages.alternatives";
   inputs.flake-utils.url = "github:numtide/flake-utils";
+  inputs.beets-plexsync = {
+    url = "github:arsaboo/beets-plexsync";
+    flake = false;
+  };
   inputs.beets-stylize = {
     url = "github:kergoth/beets-stylize";
     flake = false;
@@ -15,6 +19,7 @@
       self,
       nixpkgs,
       flake-utils,
+      beets-plexsync,
       beets-stylize,
     }:
     flake-utils.lib.eachDefaultSystem (
@@ -41,7 +46,7 @@
         yearfixer = pkgs.callPackage ./yearfixer.nix { inherit beets pythonPackages; };
         autofix = pkgs.callPackage ./autofix.nix { inherit beets pythonPackages; };
         userrating = pkgs.callPackage ./userrating { inherit beets pythonPackages version; };
-        plexsync = pkgs.callPackage ./plexsync { inherit beets pythonPackages; };
+        plexsync = pkgs.callPackage ./plexsync { inherit beets-plexsync beets pythonPackages; };
 
         # beets & plugins
         beets-plugins = beets.override {
