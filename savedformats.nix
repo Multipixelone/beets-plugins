@@ -4,7 +4,7 @@
   beets,
   pythonPackages,
 }:
-pythonPackages.buildPythonApplication rec {
+pythonPackages.buildPythonPackage rec {
   pname = "beets-savedformats";
   version = "776bb16cbb8a161d8ba8651537d172ac9347c4ef";
   pyproject = true;
@@ -26,6 +26,9 @@ pythonPackages.buildPythonApplication rec {
 
     # substituteInPlace pyproject.toml --replace-fail "confuse = \"^2.0.1\"" "confuse=\"1.7.0\""
     substituteInPlace pyproject.toml --replace-fail "rich = \"^13.7.1\"" "rich=\"14.1.0\""
+
+    mkdir -p beetsplug
+    printf 'from pkgutil import extend_path\n__path__ = extend_path(__path__, __name__)\n' >beetsplug/__init__.py
   '';
 
   nativeBuildInputs = [
@@ -44,25 +47,6 @@ pythonPackages.buildPythonApplication rec {
     rich
   ];
 
-  # postPatch = ''
-  #   printf 'from pkgutil import extend_path\n__path__ = extend_path(__path__, __name__)\n' >__init__.py
-  # '';
-
-  # preBuild = ''
-  #   mkdir beetsplug
-  #   cp __init__.py stylize.py beetsplug/
-  #       cat > setup.py << EOF
-  #   from setuptools import setup
-
-  #   setup(
-  #     name='${pname}',
-  #     version='1.0',
-
-  #     packages=['beetsplug'],
-  #     install_requires=['beets>=1.3.11'],
-  #   )
-  #   EOF
-  # '';
   meta = {
     description = "Beets plugin to manage external files";
     maintainers = with lib.maintainers; [
