@@ -5,7 +5,7 @@
   python3Packages,
   pythonPackages,
 }:
-python3Packages.buildPythonApplication rec {
+python3Packages.buildPythonPackage rec {
   version = "1.0";
   pname = "beets-tcp";
   pyproject = true;
@@ -32,6 +32,7 @@ python3Packages.buildPythonApplication rec {
   ];
 
   postPatch = ''
+    mkdir -p beetsplug
     printf 'from pkgutil import extend_path\n__path__ = extend_path(__path__, __name__)\n' >__init__.py
   '';
 
