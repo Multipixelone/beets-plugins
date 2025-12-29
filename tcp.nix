@@ -37,7 +37,7 @@ python3Packages.buildPythonPackage rec {
   '';
 
   preBuild = ''
-    mkdir beetsplug
+    mkdir -p beetsplug
     cp __init__.py tcp.py beetsplug/
         cat > setup.py << EOF
     from setuptools import setup
