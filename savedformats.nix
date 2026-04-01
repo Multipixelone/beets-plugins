@@ -25,7 +25,7 @@ pythonPackages.buildPythonPackage rec {
     substituteInPlace pyproject.toml --replace-fail "poetry.masonry.api" "poetry.core.masonry.api"
 
     # substituteInPlace pyproject.toml --replace-fail "confuse = \"^2.0.1\"" "confuse=\"1.7.0\""
-    substituteInPlace pyproject.toml --replace-fail "rich = \"^13.7.1\"" "rich=\"14.1.0\""
+    substituteInPlace pyproject.toml --replace-fail "rich = \"^13.7.1\"" "rich=\"14.3.3\""
 
     mkdir -p beetsplug
     printf 'from pkgutil import extend_path\n__path__ = extend_path(__path__, __name__)\n' >beetsplug/__init__.py
