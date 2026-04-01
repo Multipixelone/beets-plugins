@@ -31,7 +31,7 @@ python3Packages.buildPythonPackage rec {
     titlecase
   ];
 
-  postPatch = ''
+  prePatch = ''
     mkdir -p beetsplug
     printf 'from pkgutil import extend_path\n__path__ = extend_path(__path__, __name__)\n' >__init__.py
   '';
