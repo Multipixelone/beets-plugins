@@ -48,9 +48,13 @@ python3Packages.buildPythonPackage rec {
     (pkgs.callPackage ./brave-search.nix { inherit pythonPackages; })
   ];
 
-  postPatch = ''
+  prePatch = ''
+    # Ensure beetsplug is a proper namespace package
     mkdir -p beetsplug
-    printf 'from pkgutil import extend_path\n__path__ = extend_path(__path__, __name__)\n' >beetsplug/__init__.py
+    cat > beetsplug/__init__.py << 'EOF'
+    from pkgutil import extend_path
+    __path__ = extend_path(__path__, __name__)
+    EOF
   '';
 
   meta = {
