@@ -39,7 +39,7 @@
         pythonPackages = pkgs.python3Packages;
 
         # packages
-        tcp = pkgs.callPackage ./tcp.nix { inherit beets pythonPackages; };
+        # tcp = pkgs.callPackage ./tcp.nix { inherit beets pythonPackages; };
         stylize = pkgs.callPackage ./stylize.nix { inherit beets-stylize beets pythonPackages; };
         savedformats = pkgs.callPackage ./savedformats.nix { inherit beets pythonPackages; };
         xtractor = pkgs.callPackage ./xtractor.nix { inherit pkgs beets pythonPackages; };
@@ -52,10 +52,10 @@
         beets-plugins = beets.override {
           # FIXME use mapattrs to make this cleaner
           pluginOverrides = {
-            tcp = {
-              enable = true;
-              propagatedBuildInputs = [ tcp ];
-            };
+            # tcp = {
+            #   enable = true;
+            #   propagatedBuildInputs = [ tcp ];
+            # };
             stylize = {
               enable = true;
               propagatedBuildInputs = [ stylize ];
@@ -117,7 +117,7 @@
       in
       {
         packages = {
-          tcp = tcp;
+          # tcp = tcp;
           stylize = stylize;
           savedformats = savedformats;
           xtractor = xtractor;
