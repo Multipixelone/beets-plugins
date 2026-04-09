@@ -52,16 +52,16 @@
     },
     "nixpkgs": {
       "locked": {
-        "lastModified": 1774786042,
-        "narHash": "sha256-PJzal1sml7nmu9ILpn9UBCwqOVTjsDHVvOtaaouKKT0=",
-        "owner": "doronbehar",
+        "lastModified": 1775423009,
+        "narHash": "sha256-vPKLpjhIVWdDrfiUM8atW6YkIggCEKdSAlJPzzhkQlw=",
+        "owner": "NixOS",
         "repo": "nixpkgs",
-        "rev": "8217ea6616013c69849dd4027a0e4fc8028325bc",
+        "rev": "68d8aa3d661f0e6bd5862291b5bb263b2a6595c9",
         "type": "github"
       },
       "original": {
-        "owner": "doronbehar",
-        "ref": "pkg/beets",
+        "owner": "NixOS",
+        "ref": "nixos-unstable",
         "repo": "nixpkgs",
         "type": "github"
       }
