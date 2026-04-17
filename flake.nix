@@ -5,6 +5,10 @@
   # FIXME revert to normal nixos-unstable when https://github.com/NixOS/nixpkgs/pull/445208 is merged
   # inputs.nixpkgs.url = "github:doronbehar/nixpkgs/pkg/beets";
   inputs.flake-utils.url = "github:numtide/flake-utils";
+  inputs.beets-src = {
+    url = "github:Multipixelone/beets/prune-dirs";
+    flake = false;
+  };
   inputs.beets-plexsync = {
     url = "github:arsaboo/beets-plexsync";
     flake = false;
@@ -19,6 +23,7 @@
       self,
       nixpkgs,
       flake-utils,
+      beets-src,
       beets-plexsync,
       beets-stylize,
     }:
@@ -29,13 +34,11 @@
         version = toString (self.shortRev or self.dirtyShortRev or self.lastModified or "unknown");
         pkgs = nixpkgs.legacyPackages.${system};
         # python definitions & modules
-        # beets = pkgs.beets.overrideAttrs (final: prev: {
-        # Combine the existing patches with your new one.
-        # patches = (prev.patches or []) ++ [./convert.patch];
-        # version = pins.beets.revision;
-        # src = pins.beets;
-        # });
-        beets = pkgs.python3Packages.beets;
+        beets = pkgs.python3Packages.beets.overrideAttrs (prev: {
+          src = beets-src;
+          version = beets-src.shortRev or beets-src.lastModified or "unknown";
+          dontCheckRuntimeDeps = true;
+        });
         pythonPackages = pkgs.python3Packages;
 
         # packages
