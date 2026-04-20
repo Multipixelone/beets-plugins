@@ -6,7 +6,7 @@
   # inputs.nixpkgs.url = "github:doronbehar/nixpkgs/pkg/beets";
   inputs.flake-utils.url = "github:numtide/flake-utils";
   inputs.beets-src = {
-    url = "github:Multipixelone/beets/prune-dirs";
+    url = "github:beetbox/beets";
     flake = false;
   };
   inputs.beets-plexsync = {
@@ -34,7 +34,12 @@
         version = toString (self.shortRev or self.dirtyShortRev or self.lastModified or "unknown");
         pkgs = nixpkgs.legacyPackages.${system};
         # python definitions & modules
-        beets = pkgs.python3Packages.beets.overrideAttrs (prev: {
+        beets = (pkgs.python3Packages.beets.override {
+          extraNativeBuildInputs = [
+            pkgs.python3Packages.pytest-factoryboy
+            pkgs.python3Packages.factory-boy
+          ];
+        }).overrideAttrs (prev: {
           src = beets-src;
           version = beets-src.shortRev or beets-src.lastModified or "unknown";
           dontCheckRuntimeDeps = true;
