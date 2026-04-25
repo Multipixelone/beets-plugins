@@ -43,6 +43,12 @@
           src = beets-src;
           version = beets-src.shortRev or beets-src.lastModified or "unknown";
           dontCheckRuntimeDeps = true;
+          # Keep upstream checks enabled, but align nixpkgs' static plugin
+          # expectation with beets-src HEAD adding the `tidal` plugin.
+          preCheck = builtins.replaceStrings
+            [ "echo \"thumbnails\";echo \"titlecase\"" ]
+            [ "echo \"thumbnails\";echo \"tidal\";echo \"titlecase\"" ]
+            prev.preCheck;
         });
         pythonPackages = pkgs.python3Packages;
 
