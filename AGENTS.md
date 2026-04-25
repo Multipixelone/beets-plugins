@@ -6,7 +6,7 @@
 ## Repository layout
 
 - `flake.nix` — central wiring for all package/plugin builds and dev shell.
-- `*.nix` at repo root — package definitions for individual beets plugins: `autofix`, `savedformats`, `stylize`, `tcp`, `xtractor`, `yearfixer` (`tcp` is currently commented out in `flake.nix`).
+- `plugins/*.nix` — package definitions for individual beets plugins: `autofix`, `savedformats`, `stylize`, `tcp`, `xtractor`, `yearfixer` (`tcp` is currently commented out in `flake.nix`).
 - `plexsync/` — local packaging + `temperature.patch` for the `beets-plexsync` plugin, plus Nix expressions for vendored Python deps (`agno`, `brave-search`, `exa-py`, `jiosaavn-python`, `tavily-python`).
 - `userrating/` — vendored Python plugin source, tests, and Nix packaging.
 - `renovate.json` — Renovate configuration for automated dependency updates.

@@ -53,12 +53,12 @@
         pythonPackages = pkgs.python3Packages;
 
         # packages
-        # tcp = pkgs.callPackage ./tcp.nix { inherit beets pythonPackages; };
-        stylize = pkgs.callPackage ./stylize.nix { inherit beets-stylize beets pythonPackages; };
-        savedformats = pkgs.callPackage ./savedformats.nix { inherit beets pythonPackages; };
-        xtractor = pkgs.callPackage ./xtractor.nix { inherit pkgs beets pythonPackages; };
-        yearfixer = pkgs.callPackage ./yearfixer.nix { inherit beets pythonPackages; };
-        autofix = pkgs.callPackage ./autofix.nix { inherit beets pythonPackages; };
+        # tcp = pkgs.callPackage ./plugins/tcp.nix { inherit beets pythonPackages; };
+        stylize = pkgs.callPackage ./plugins/stylize.nix { inherit beets-stylize beets pythonPackages; };
+        savedformats = pkgs.callPackage ./plugins/savedformats.nix { inherit beets pythonPackages; };
+        xtractor = pkgs.callPackage ./plugins/xtractor.nix { inherit pkgs beets pythonPackages; };
+        yearfixer = pkgs.callPackage ./plugins/yearfixer.nix { inherit beets pythonPackages; };
+        autofix = pkgs.callPackage ./plugins/autofix.nix { inherit beets pythonPackages; };
         userrating = pkgs.callPackage ./userrating { inherit beets pythonPackages version; };
         plexsync = pkgs.callPackage ./plexsync { inherit beets-plexsync beets pythonPackages; };
 

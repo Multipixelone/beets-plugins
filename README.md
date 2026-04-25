@@ -14,10 +14,10 @@ My collection of [beets](https://beets.io/) plugins for NixOS, packaged and buil
 
 - [`plexsync`](./plexsync/) — sync beets metadata to Plex-related workflows
 - [`userrating`](./userrating/) — manage user ratings in beets
-- [`yearfixer`](./yearfixer.nix) — package definition for year-related metadata fixes
-- [`xtractor`](./xtractor.nix) — package definition for extraction utilities
-- [`tcp`](./tcp.nix) — package definition for TCP-related plugin tooling
-- [`stylize`](./stylize.nix) — package definition for style/format metadata helpers
+- [`yearfixer`](./plugins/yearfixer.nix) — package definition for year-related metadata fixes
+- [`xtractor`](./plugins/xtractor.nix) — package definition for extraction utilities
+- [`tcp`](./plugins/tcp.nix) — package definition for TCP-related plugin tooling
+- [`stylize`](./plugins/stylize.nix) — package definition for style/format metadata helpers
 
 ## Development
 
