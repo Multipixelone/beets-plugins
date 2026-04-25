@@ -1,0 +1,38 @@
+name: Setup Nix and Attic
+description: Install Nix with the Attic substituter, install attic-client, and log in.
+
+inputs:
+  attic-key:
+    description: Attic auth token (write access)
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Install Nix
+      uses: DeterminateSystems/nix-installer-action@ef8a148080ab6020fd15196c2084a2eea5ff2d25 # v22
+      with:
+        extra-conf: |
+          accept-flake-config = true
+          netrc-file = /etc/nix/netrc
+          extra-substituters = https://attic-cache.fly.dev/system
+          extra-trusted-public-keys = system:qjMAtak3MMVYM2B3EoLvNG9duRTrjdNS65RTagsr+y4=
+
+    - name: Configure Attic substituter credentials
+      shell: bash
+      env:
+        ATTIC_KEY: ${{ inputs.attic-key }}
+      run: |
+        sudo mkdir -p /etc/nix
+        printf 'machine attic-cache.fly.dev login automated password %s\n' "$ATTIC_KEY" \
+          | sudo tee /etc/nix/netrc > /dev/null
+
+    - name: Install attic-client
+      shell: bash
+      run: nix profile install nixpkgs#attic-client
+
+    - name: Login to Attic
+      shell: bash
+      env:
+        ATTIC_KEY: ${{ inputs.attic-key }}
+      run: attic login fly https://attic-cache.fly.dev "$ATTIC_KEY"
