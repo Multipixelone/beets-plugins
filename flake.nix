@@ -59,8 +59,8 @@
         xtractor = pkgs.callPackage ./plugins/xtractor.nix { inherit pkgs beets pythonPackages; };
         yearfixer = pkgs.callPackage ./plugins/yearfixer.nix { inherit beets pythonPackages; };
         autofix = pkgs.callPackage ./plugins/autofix.nix { inherit beets pythonPackages; };
-        userrating = pkgs.callPackage ./userrating { inherit beets pythonPackages version; };
-        plexsync = pkgs.callPackage ./plexsync { inherit beets-plexsync beets pythonPackages; };
+        userrating = pkgs.callPackage ./plugins/userrating { inherit beets pythonPackages version; };
+        plexsync = pkgs.callPackage ./plugins/plexsync { inherit beets-plexsync beets pythonPackages; };
 
         # beets & plugins
         beets-plugins = beets.override {

@@ -12,8 +12,8 @@ My collection of [beets](https://beets.io/) plugins for NixOS, packaged and buil
 
 ## Plugins
 
-- [`plexsync`](./plexsync/) — sync beets metadata to Plex-related workflows
-- [`userrating`](./userrating/) — manage user ratings in beets
+- [`plexsync`](./plugins/plexsync/) — sync beets metadata to Plex-related workflows
+- [`userrating`](./plugins/userrating/) — manage user ratings in beets
 - [`yearfixer`](./plugins/yearfixer.nix) — package definition for year-related metadata fixes
 - [`xtractor`](./plugins/xtractor.nix) — package definition for extraction utilities
 - [`tcp`](./plugins/tcp.nix) — package definition for TCP-related plugin tooling

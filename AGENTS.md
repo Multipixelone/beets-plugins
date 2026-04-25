@@ -7,8 +7,8 @@
 
 - `flake.nix` — central wiring for all package/plugin builds and dev shell.
 - `plugins/*.nix` — package definitions for individual beets plugins: `autofix`, `savedformats`, `stylize`, `tcp`, `xtractor`, `yearfixer` (`tcp` is currently commented out in `flake.nix`).
-- `plexsync/` — local packaging + `temperature.patch` for the `beets-plexsync` plugin, plus Nix expressions for vendored Python deps (`agno`, `brave-search`, `exa-py`, `jiosaavn-python`, `tavily-python`).
-- `userrating/` — vendored Python plugin source, tests, and Nix packaging.
+- `plugins/plexsync/` — local packaging + `temperature.patch` for the `beets-plexsync` plugin, plus Nix expressions for vendored Python deps (`agno`, `brave-search`, `exa-py`, `jiosaavn-python`, `tavily-python`).
+- `plugins/userrating/` — vendored Python plugin source, tests, and Nix packaging.
 - `renovate.json` — Renovate configuration for automated dependency updates.
 - `.github/workflows/`:
   - `ci.yml` — on push/PR, runs `nix flake check --print-build-logs` and `nix build .#packages.x86_64-linux.default --print-build-logs` as separate jobs.
@@ -38,7 +38,7 @@ nix flake check --print-build-logs
 nix build .#packages.x86_64-linux.default --print-build-logs
 ```
 
-For `userrating/` Python changes, also run its tests when feasible.
+For `plugins/userrating/` Python changes, also run its tests when feasible.
 
 ## PR/commit notes
 
