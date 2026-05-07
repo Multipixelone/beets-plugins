@@ -20,8 +20,7 @@ python3Packages.buildPythonApplication {
   ];
 
   build-system = with pythonPackages; [
-    setuptools
-    poetry-core
+    hatchling
   ];
 
   dependencies = with pythonPackages; [
