@@ -43,6 +43,8 @@
           src = beets-src;
           version = beets-src.shortRev or beets-src.lastModified or "unknown";
           dontCheckRuntimeDeps = true;
+          dontCheckPythonMetadata = true;
+          nativeBuildInputs = prev.nativeBuildInputs ++ [ pkgs.python3Packages.hatchling ];
           # Keep upstream checks enabled, but align nixpkgs' static plugin
           # expectation with beets-src HEAD adding the `tidal` plugin.
           preCheck = builtins.replaceStrings
