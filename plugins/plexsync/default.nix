@@ -11,6 +11,9 @@ python3Packages.buildPythonPackage rec {
   pyproject = true;
   doCheck = false;
   pytestCheckHook = false;
+  # version is a git shortrev, not a valid PEP 440 version, so it will
+  # never match the dist-info version from upstream's pyproject.toml.
+  dontCheckPythonMetadata = true;
 
   src = beets-plexsync;
 
