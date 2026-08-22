@@ -3,11 +3,11 @@
     "beets-plexsync": {
       "flake": false,
       "locked": {
-        "lastModified": 1786444242,
-        "narHash": "sha256-pw+QbmKPkIuQitc0lL4YxVmD0IxddQ2Qo8ehT7TYXjE=",
+        "lastModified": 1787328151,
+        "narHash": "sha256-EbNTEndJbjvb29NfhvEmaCBBBxyT3iA56446xsI4HDo=",
         "owner": "arsaboo",
         "repo": "beets-plexsync",
-        "rev": "15e803cb76c306fb1933aa9cd27f105c95a8538b",
+        "rev": "143d57d26ebd2df7ff004f0b6474ae07e1a1d2a8",
         "type": "github"
       },
       "original": {
@@ -19,11 +19,11 @@
     "beets-src": {
       "flake": false,
       "locked": {
-        "lastModified": 1787092132,
-        "narHash": "sha256-ppADX3Ixf+6QyelEiAJQUC+uluLWWhHPkdVBFuaon3A=",
+        "lastModified": 1787342851,
+        "narHash": "sha256-FcVYL78lpG7bH+8hPltpgXRE3Aa65i8pcrROsHKuEA4=",
         "owner": "beetbox",
         "repo": "beets",
-        "rev": "293ae110c743e54921997befe1ea6fb760d59298",
+        "rev": "096106d0e1b3a4389724ac6c46adfcbb8861929d",
         "type": "github"
       },
       "original": {
@@ -68,11 +68,11 @@
     },
     "nixpkgs": {
       "locked": {
-        "lastModified": 1787001381,
-        "narHash": "sha256-Ue1Yo8gfHdD4TMtNewhA4tkSYeFqXThju0nCyJc3ALo=",
+        "lastModified": 1787135253,
+        "narHash": "sha256-RD2kNWCG+Bjo6h+JVjWVNntZs2GtRoeY2xHjts/FNkA=",
         "owner": "NixOS",
         "repo": "nixpkgs",
-        "rev": "ec2d622de0773551768cf98f3fc50cbcc003b9c5",
+        "rev": "ffb3c9b700e759be2ef13237c9d8f953b32a1e46",
         "type": "github"
       },
       "original": {
