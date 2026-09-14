@@ -30,11 +30,29 @@ pythonPackages.buildPythonPackage rec {
     # substituteInPlace pyproject.toml --replace-fail "confuse = \"^2.0.1\"" "confuse=\"1.7.0\""
     substituteInPlace pyproject.toml --replace-fail "rich = \"^13.7.1\"" "rich=\"${pythonPackages.rich.version}\""
 
-    # Compatibility with current beets' functemplate API.
+    # Beets 2.13 caches template source strings; retain the Template for its
+    # public `original` source when evaluating it rather than passing it in.
     substituteInPlace beetsplug/savedformats.py --replace-fail "functemplate.template(templatestr)" "functemplate.Template(templatestr)"
+    substituteInPlace beetsplug/savedformats.py --replace-fail "item.evaluate_template(template)" "item.evaluate_template(template.original)"
 
     mkdir -p beetsplug
     printf 'from pkgutil import extend_path\n__path__ = extend_path(__path__, __name__)\n' >beetsplug/__init__.py
+  '';
+
+  postInstall = ''
+    # Exercise the installed plugin against the packaged beets runtime.
+    (
+      cd "$TMPDIR"
+      HOME="$TMPDIR" PYTHONPATH="$out/${pythonPackages.python.sitePackages}:$PYTHONPATH" ${pythonPackages.python.interpreter} - <<'PY'
+    from beets import config
+    from beets.library import Item
+    from beetsplug.savedformats import SavedFormatsPlugin
+
+    config["item_formats"].set({"saved_title": "$title"})
+    plugin = SavedFormatsPlugin()
+    assert plugin.template_fields["saved_title"](Item(title="Saved title")) == "Saved title"
+    PY
+    )
   '';
 
   nativeBuildInputs = [
