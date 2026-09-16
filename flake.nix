@@ -65,7 +65,7 @@
         plexsync = pkgs.callPackage ./plugins/plexsync { inherit beets-plexsync beets pythonPackages; };
 
         # beets & plugins
-        beets-plugins = beets.override {
+        beets-plugins = (beets.override {
           # FIXME use mapattrs to make this cleaner
           pluginOverrides = {
             # tcp = {
@@ -116,7 +116,12 @@
               ];
             };
           };
-        };
+        }).overrideAttrs (prev: {
+          makeWrapperArgs = prev.makeWrapperArgs ++ [
+            # gst-plugin-scanner inherits this environment; gst-python imports gi.
+            "--prefix PYTHONPATH : ${pythonPackages.pygobject3}/${pythonPackages.python.sitePackages}"
+          ];
+        });
 
         # devEnv
         env = pkgs.mkShell {
