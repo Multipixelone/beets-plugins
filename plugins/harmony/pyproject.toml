@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "beets-harmony"
+version = "0.1.0"
+description = "Interactive, fail-open Harmony assistance for beets imports"
+requires-python = ">=3.14"
+license = "GPL-3.0-only"
+dependencies = [
+  "beets",
+  "requests",
+  "segno",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["beetsplug.harmony*"]
+namespaces = true

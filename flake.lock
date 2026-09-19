@@ -19,16 +19,17 @@
     "beets-src": {
       "flake": false,
       "locked": {
-        "lastModified": 1789704411,
-        "narHash": "sha256-cjGZtzgT41y9NniZ9zMkF3PBK7PK8JnYAArFHSIH3BY=",
+        "lastModified": 1788445743,
+        "narHash": "sha256-OcdgS7u3Jr+K0nS1ejd2/G4oLXbWVwgYE58to133000=",
         "owner": "beetbox",
         "repo": "beets",
-        "rev": "488b13edb4e3df347fa7a135817b698a7e5375ff",
+        "rev": "63b69fa90656279bd3d41fa87ab68be1f98fdaae",
         "type": "github"
       },
       "original": {
         "owner": "beetbox",
         "repo": "beets",
+        "rev": "63b69fa90656279bd3d41fa87ab68be1f98fdaae",
         "type": "github"
       }
     },

@@ -6,7 +6,7 @@
   # inputs.nixpkgs.url = "github:doronbehar/nixpkgs/pkg/beets";
   inputs.flake-utils.url = "github:numtide/flake-utils";
   inputs.beets-src = {
-    url = "github:beetbox/beets";
+    url = "github:beetbox/beets/63b69fa90656279bd3d41fa87ab68be1f98fdaae";
     flake = false;
   };
   inputs.beets-plexsync = {
@@ -63,6 +63,7 @@
         autofix = pkgs.callPackage ./plugins/autofix.nix { inherit beets pythonPackages; };
         userrating = pkgs.callPackage ./plugins/userrating { inherit beets pythonPackages version; };
         plexsync = pkgs.callPackage ./plugins/plexsync { inherit beets-plexsync beets pythonPackages; };
+        harmony = pkgs.callPackage ./plugins/harmony { inherit beets pythonPackages; };
 
         # beets & plugins
         beets-plugins = (beets.override {
@@ -95,6 +96,10 @@
             plexsync = {
               enable = true;
               propagatedBuildInputs = [ plexsync ];
+            };
+            harmony = {
+              enable = true;
+              propagatedBuildInputs = [ harmony ];
             };
             # filetote = {
             #   enable = true;
@@ -146,6 +151,7 @@
           autofix = autofix;
           userrating = userrating;
           plexsync = plexsync;
+          harmony = harmony;
 
           default = beets-plugins;
         };

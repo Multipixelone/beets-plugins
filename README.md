@@ -12,6 +12,7 @@ My collection of [beets](https://beets.io/) plugins for NixOS, packaged and buil
 
 ## Plugins
 
+- [`harmony`](./plugins/harmony/) — interactive Spotify-to-MusicBrainz release assistance (activate explicitly in beets config)
 - [`plexsync`](./plugins/plexsync/) — sync beets metadata to Plex-related workflows
 - [`userrating`](./plugins/userrating/) — manage user ratings in beets
 - [`yearfixer`](./plugins/yearfixer.nix) — package definition for year-related metadata fixes

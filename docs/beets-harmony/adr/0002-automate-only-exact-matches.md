@@ -1,0 +1,3 @@
+# Automate only exact matches
+
+Beets Harmony will select a Spotify Candidate without interaction only when all available Match Evidence agrees, no evidence conflicts, enough duration data exists, and the candidate is clearly separated from its nearest rival. Sparse metadata may produce an editable query but cannot establish an Exact Match by itself; compilations additionally require per-track artist agreement and multi-disc releases require matching disc structure. Ambiguous candidates remain interactive, and every external-service or terminal-integration failure returns control to the ordinary beets prompt without changing files or choosing an import action.
