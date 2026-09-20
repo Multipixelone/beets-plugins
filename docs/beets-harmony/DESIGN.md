@@ -89,10 +89,10 @@ Candidates passing the hard gates are ranked with soft evidence such as date, al
 The canonical hosted URL is:
 
 ```text
-https://harmony.pulsewidth.org.uk/release?url=<encoded-spotify-url>&region=US
+https://harmony.pulsewidth.org.uk/release?url=<encoded-spotify-url>&region=US&category=default
 ```
 
-V1 deliberately omits `category=preferred` because it depends on cookies in the receiving browser. Harmony requires one **Import into MusicBrainz** tap; no supported query parameter safely removes it.
+The handoff requests Harmony's `category=default` provider set. This produces deterministic normal-provider enrichment for the selected Spotify release. V1 does not use `category=preferred`, because it depends on cookies in the receiving browser, or `category=all`, because Harmony explicitly does not recommend it. Harmony requires one **Import into MusicBrainz** tap; no supported query parameter safely removes it.
 
 The plugin always prints the URL. If enabled, it also emits OSC 52 using clipboard selector `c` and renders a terminal QR code with Segno. OSC 52 is a direct short escape sequence, not a separate library. Clipboard and QR failures are warnings and never block or fail the import.
 

@@ -18,7 +18,7 @@ def canonical_harmony_url(spotify_url: str) -> str:
     """Create the sole V1 URL from a supported Spotify *album* reference."""
     decoded_reference = unquote(spotify_url)
     canonical = canonical_album_url(parse_album_reference(decoded_reference))
-    return "{0}?url={1}&region=US".format(HARMONY_RELEASE_URL, quote(canonical, safe=""))
+    return "{0}?url={1}&region=US&category=default".format(HARMONY_RELEASE_URL, quote(canonical, safe=""))
 
 
 def osc52_copy(text: str) -> bytes:

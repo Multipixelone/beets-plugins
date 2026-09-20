@@ -3,6 +3,7 @@ import io
 import sys
 from pathlib import Path
 import unittest
+from urllib.parse import parse_qsl, urlsplit
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -29,6 +30,18 @@ class FakeSegno:
 
 
 class HandoffTest(unittest.TestCase):
+    def test_release_url_requests_default_provider_category(self):
+        handoff_url = canonical_harmony_url(SPOTIFY_URL)
+        parsed = urlsplit(handoff_url)
+
+        self.assertEqual("https", parsed.scheme)
+        self.assertEqual("harmony.pulsewidth.org.uk", parsed.netloc)
+        self.assertEqual("/release", parsed.path)
+        self.assertEqual(
+            [("url", SPOTIFY_URL), ("region", "US"), ("category", "default")],
+            parse_qsl(parsed.query),
+        )
+
     def test_visible_url_osc_bytes_and_qr_use_the_same_canonical_url(self):
         output = io.StringIO()
         bytes_output = io.BytesIO()
