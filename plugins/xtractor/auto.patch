@@ -1,0 +1,162 @@
+--- a/beetsplug/xtractor/__init__.py
++++ b/beetsplug/xtractor/__init__.py
+@@ -8,7 +8,7 @@
+ 
+ from beets.plugins import BeetsPlugin
+ from beets.dbcore import types
+-from confuse import ConfigSource, load_yaml
++from confuse import ConfigError, ConfigSource, load_yaml
+ from beetsplug.xtractor.command import XtractorCommand
+ 
+ 
+@@ -54,6 +54,8 @@
+         config_file_path = os.path.join(os.path.dirname(__file__), self._default_plugin_config_file_name_)
+         source = ConfigSource(load_yaml(config_file_path) or {}, config_file_path)
+         self.config.add(source)
++        if self.config["auto"].get(bool):
++            self.register_listener("import_task_files", self._on_import)
+ 
+         # @todo: activate this to store the attributes in media files
+         # field = mediafile.MediaField(
+@@ -66,5 +68,15 @@
+         # )
+         # self.add_media_field('beats_count', field)
+ 
++    def _on_import(self, session, task):
++        # Files are at their final paths and the importer transaction is closed.
++        command = XtractorCommand(self.config)
++        command.lib = session.lib
++        command.query = []
++        try:
++            command.xtract(task.imported_items())
++        except (OSError, ValueError, KeyError, RuntimeError, ConfigError) as exc:
++            self._log.warning("Automatic analysis failed: {}".format(exc))
++
+     def commands(self):
+         return [XtractorCommand(self.config)]
+--- a/beetsplug/xtractor/command.py
++++ b/beetsplug/xtractor/command.py
+@@ -17,7 +17,7 @@
+ from beets.library import Library, Item, parse_query_string
+ from beets.ui import Subcommand, decargs
+ from beetsplug.xtractor import helper
+-from confuse import Subview
++from confuse import ConfigError, Subview
+ 
+ 
+ class XtractorCommand(Subcommand):
+@@ -120,11 +120,6 @@
+         self.cfg_count_only = options.count_only
+         self.cfg_quiet = options.quiet
+ 
+-        # Auto Thread Count
+-        if self.cfg_threads == 0:
+-            self.cfg_threads = multiprocessing.cpu_count()
+-            self._say("Adjusting max threads to CPU count: {0}".format(self.cfg_threads), True)
+-
+         self.lib = lib
+         self.query = decargs(arguments)
+ 
+@@ -134,24 +129,35 @@
+ 
+         self.xtract()
+ 
+-    def xtract(self):
+-        self.find_items_to_analyse()
+-        self._say("Number of items to be processed: {}".format(len(self.items_to_analyse)), False)
+-
+-        # Count only and exit
+-        if self.cfg_count_only:
++    def xtract(self, items=None):
++        if items is not None and not items:
+             return
++        # Auto Thread Count
++        if self.cfg_threads == 0:
++            self.cfg_threads = multiprocessing.cpu_count()
++            self._say("Adjusting max threads to CPU count: {0}".format(self.cfg_threads), True)
+ 
+-        # Run tasks on selected items
+-        self._execute_on_each_items(self.items_to_analyse, self.run_full_analysis)
++        self.find_items_to_analyse(items)
++        self._say("Number of items to be processed: {}".format(len(self.items_to_analyse)), False)
++        if self.cfg_count_only or not self.items_to_analyse:
++            return
+ 
+-        # Delete profiles (if config wants)
+-        if self.config["keep_profiles"].exists() and not self.config["keep_profiles"].get():
+-            os.unlink(self._get_extractor_profile_path())
+-
+-    def find_items_to_analyse(self):
+-        # Parse the incoming query
+-        parsed_query, parsed_sort = parse_query_string(" ".join(self.query), Item)
++        # Create the shared profile before starting workers.
++        profile_path = self._get_extractor_profile_path()
++        try:
++            self._execute_on_each_items(self.items_to_analyse, self.run_full_analysis)
++        finally:
++            if not self.config["keep_profiles"].get(bool) and os.path.isfile(profile_path):
++                os.unlink(profile_path)
++
++    def find_items_to_analyse(self, items=None):
++        if items is None:
++            parsed_query, parsed_sort = parse_query_string(" ".join(self.query), Item)
++        else:
++            parsed_query = dbcore.query.OrQuery([
++                dbcore.query.MatchQuery("id", item.id) for item in items
++            ])
++            parsed_sort = None
+         combined_query = parsed_query
+ 
+         # Add unprocessed items query
+@@ -180,12 +186,14 @@
+ 
+     def run_full_analysis(self, item):
+         try:
+-            input_path = self._get_input_path_for_item(item)
+-        except FileNotFoundError as e:
+-            self._say("File not found: {0}".format(e))
+-            return
++            self._run_full_analysis(item)
++        except (OSError, ValueError, KeyError, RuntimeError, ConfigError) as exc:
++            helper.__logger__.warning("Analysis failed for %s: %s", item.filepath, exc)
+ 
++    def _run_full_analysis(self, item):
++        input_path = self._get_input_path_for_item(item)
+         if not self._run_analysis(item, input_path):
++            helper.__logger__.warning("Analysis failed for %s", item.filepath)
+             return
+ 
+         self._run_write_to_item(item, input_path)
+@@ -236,7 +244,7 @@
+         # Update and Store Item
+         if not self.cfg_dry_run:
+             for attr in audiodata.keys():
+-                if audiodata.get(attr):
++                if audiodata.get(attr) is not None:
+                     setattr(item, attr, audiodata.get(attr))
+             item.store()
+ 
+@@ -261,6 +269,12 @@
+         self._say("Process stdout: {0}".format(stdout.decode()))
+         self._say("Process stderr: {0}\n".format(stderr.decode()))
+ 
++        if proc.returncode:
++            if os.path.isfile(output_path):
++                os.unlink(output_path)
++            raise RuntimeError("Extractor exited with code {}: {}".format(
++                proc.returncode, stderr.decode(errors="replace")))
++
+         # Make sure file is encoded correctly
+         # Sometimes media files have funky tags
+         helper.asciify_file_content(output_path)
+@@ -333,8 +347,8 @@
+             # Override outputFormat (we only handle json for now)
+             profile_content["outputFormat"] = "json"
+ 
+-            f = open(profile_path, 'w+')
+-            yaml.dump(profile_content, f, allow_unicode=True)
++            with open(profile_path, 'w') as profile_file:
++                yaml.dump(profile_content, profile_file, allow_unicode=True)
+ 
+             if not os.path.isfile(profile_path):
+                 raise FileNotFoundError("Extractor profile({}) not created!".format(profile_path))

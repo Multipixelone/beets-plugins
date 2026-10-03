@@ -58,7 +58,20 @@
         # tcp = pkgs.callPackage ./plugins/tcp.nix { inherit beets pythonPackages; };
         stylize = pkgs.callPackage ./plugins/stylize.nix { inherit beets-stylize beets pythonPackages; };
         savedformats = pkgs.callPackage ./plugins/savedformats.nix { inherit beets pythonPackages; };
-        xtractor = pkgs.callPackage ./plugins/xtractor.nix { inherit pkgs beets pythonPackages; };
+        xtractor-gaia = pkgs.callPackage ./plugins/xtractor/gaia.nix { };
+        xtractor-essentia = pkgs.callPackage ./plugins/xtractor/essentia { gaia = xtractor-gaia; };
+        xtractor-models = pkgs.callPackage ./plugins/xtractor/models.nix {
+          # The SVM histories are CC BY-NC-SA; allow only this named fetch.
+          fetchzip = (import nixpkgs {
+            inherit system;
+            config.allowUnfreePredicate = pkg: pkg.name == "essentia-svm-models-2.1_beta5";
+          }).fetchzip;
+        };
+        xtractor = pkgs.callPackage ./plugins/xtractor.nix {
+          inherit beets pythonPackages;
+          extractor = xtractor-essentia;
+          models = xtractor-models;
+        };
         yearfixer = pkgs.callPackage ./plugins/yearfixer.nix { inherit beets pythonPackages; };
         autofix = pkgs.callPackage ./plugins/autofix.nix { inherit beets pythonPackages; };
         userrating = pkgs.callPackage ./plugins/userrating { inherit beets pythonPackages version; };
@@ -147,6 +160,7 @@
           stylize = stylize;
           savedformats = savedformats;
           xtractor = xtractor;
+          inherit xtractor-essentia xtractor-models;
           yearfixer = yearfixer;
           autofix = autofix;
           userrating = userrating;
