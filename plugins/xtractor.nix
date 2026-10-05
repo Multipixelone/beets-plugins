@@ -29,7 +29,7 @@ pythonPackages.buildPythonApplication rec {
     hash = "sha256-6g0ZGZAmlQ70iWm+erTdbWw+JOAm5DztwoXcFR6loFA=";
   };
 
-  patches = [ ./xtractor/auto.patch ];
+  patches = [ ./xtractor/auto.patch ./xtractor/output-path.patch ];
 
   postPatch = ''
     substituteInPlace beetsplug/xtractor/config_default.yml \

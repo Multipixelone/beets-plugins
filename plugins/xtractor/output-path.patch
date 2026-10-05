@@ -1,0 +1,66 @@
+--- a/beetsplug/xtractor/command.py
++++ b/beetsplug/xtractor/command.py
+@@ -3,13 +3,13 @@
+ #  License: See LICENSE.txt
+ 
+ from concurrent import futures
+-import hashlib
+ import json
+ import multiprocessing
+ from optparse import OptionParser
+ import os
+ from subprocess import Popen, PIPE
+ import tempfile
++import uuid
+ 
+ import yaml
+ 
+@@ -192,7 +192,8 @@
+ 
+     def _run_full_analysis(self, item):
+         input_path = self._get_input_path_for_item(item)
+-        if not self._run_analysis(item, input_path):
++        output_path = self._get_output_path_for_item(item, input_path)
++        if not self._run_analysis(item, input_path, output_path):
+             helper.__logger__.warning("Analysis failed for %s", item.filepath)
+             return
+ 
+@@ -200,7 +201,6 @@
+ 
+         # Delete output files (if config wants)
+         if self.config["keep_output"].exists() and not self.config["keep_output"].get():
+-            output_path = self._get_output_path_for_item(item, input_path)
+             if os.path.isfile(output_path):
+                 os.unlink(output_path)
+ 
+@@ -208,10 +208,11 @@
+         if not self.cfg_dry_run and self.cfg_write:
+             item.try_write(path=input_path)
+ 
+-    def _run_analysis(self, item, input_path):
++    def _run_analysis(self, item, input_path, output_path=None):
+         try:
+             extractor_path = self._get_extractor_path()
+-            output_path = self._get_output_path_for_item(item, input_path)
++            if output_path is None:
++                output_path = self._get_output_path_for_item(item, input_path)
+             profile_path = self._get_extractor_profile_path()
+         except ValueError as e:
+             self._say("Value error: {0}".format(e))
+@@ -294,12 +295,10 @@
+         print('Finished: [%d/%d]\r' % (done, total), end="")
+ 
+     def _get_output_path_for_item(self, item: Item, input_path=None):
+-        identifier = item.get("mb_trackid")
+-        if not identifier or '/' in identifier:
+-            input_path = input_path or self._get_input_path_for_item(item)
+-            identifier = hashlib.md5(input_path.encode('utf-8')).hexdigest()
+-
+-        output_file = "{id}.{ext}".format(
++        # Recording IDs can be shared by multiple library rows.
++        identifier = item.id if item.id is not None else uuid.uuid4()
++
++        output_file = "item-{id}.{ext}".format(
+             id=identifier,
+             ext="json"
+         )

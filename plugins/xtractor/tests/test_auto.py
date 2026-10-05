@@ -4,7 +4,9 @@ from collections import defaultdict
 import json
 from pathlib import Path
 import sys
+from threading import Barrier
 from types import SimpleNamespace
+from uuid import UUID
 
 import beets
 from beets import plugins, util
@@ -213,3 +215,105 @@ def test_empty_import_does_not_analyze_library(environment):
     import_files(env, [])
     assert not env.calls.exists()
     assert not list(env.output.iterdir())
+
+
+def test_output_paths_use_database_ids_for_duplicate_recordings(environment):
+    env = environment
+    plugin = env.load_plugin()
+    command = XtractorCommand(plugin.config)
+    items = [env.make_item("one.flac"), env.make_item("two.flac")]
+    for item in items:
+        item.mb_trackid = "12345678-1234-1234-1234-123456789abc"
+    paths = [command._get_output_path_for_item(item) for item in items]
+    assert paths == [str(env.output / f"item-{item.id}.json") for item in items]
+    assert paths[0] != paths[1]
+    assert command._get_output_path_for_item(items[0]) == paths[0]
+
+
+def test_missing_id_uses_uuid_and_cleans_up_same_output(environment, monkeypatch):
+    env = environment
+    env.cfg["dry-run"] = True
+    plugin = env.load_plugin()
+    command = XtractorCommand(plugin.config)
+    stored = env.make_item()
+    items = [Item(path=stored.path, mb_trackid="shared-recording") for _ in range(2)]
+    assert all(item.id is None for item in items)
+    paths = [Path(command._get_output_path_for_item(item)) for item in items]
+    assert paths[0] != paths[1]
+    for path in paths:
+        assert path.parent == env.output
+        assert path.suffix == ".json"
+        assert UUID(path.stem.removeprefix("item-")).version == 4
+
+    generated = []
+    get_output_path = command._get_output_path_for_item
+
+    def record_output_path(item, input_path=None):
+        path = get_output_path(item, input_path)
+        generated.append(path)
+        return path
+
+    monkeypatch.setattr(command, "_get_output_path_for_item", record_output_path)
+    command.run_full_analysis(items[0])
+    assert len(generated) == 1
+    assert env.calls.read_text().splitlines() == [str(stored.filepath)]
+    assert not list(env.output.glob("*.json"))
+    assert env.lib.get_item(stored.id).get("mood_happy") is None
+
+
+@pytest.mark.parametrize("automatic", [False, True])
+@pytest.mark.parametrize("keep_output", [False, True])
+def test_duplicate_recordings_analyze_concurrently(
+    environment, monkeypatch, caplog, automatic, keep_output
+):
+    env = environment
+    env.cfg["keep_output"] = keep_output
+    plugin = env.load_plugin()
+    items = [env.make_item("one.flac"), env.make_item("two.flac")]
+    expected = {}
+    for item, bpm in zip(items, [111, 222]):
+        item.mb_trackid = "12345678-1234-1234-1234-123456789abc"
+        item.store()
+        expected[str(item.filepath)] = bpm
+
+    # Hold both workers until both outputs exist, before either reads/deletes.
+    barrier = Barrier(2, timeout=10)
+    run_extractor = XtractorCommand._run_essentia_extractor
+
+    def synchronized_extractor(command, extractor_path, input_path, output_path, profile_path):
+        barrier.wait()
+        run_extractor(command, extractor_path, input_path, output_path, profile_path)
+        path = Path(output_path)
+        data = json.loads(path.read_text())
+        data["rhythm"]["bpm"] = expected[input_path]
+        path.write_text(json.dumps(data))
+        barrier.wait()
+
+    monkeypatch.setattr(XtractorCommand, "_run_essentia_extractor", synchronized_extractor)
+
+    def analyze():
+        if automatic:
+            import_files(env, [env.lib.get_item(item.id) for item in items])
+        else:
+            command = XtractorCommand(plugin.config)
+            command.func(env.lib, command.parser.get_default_values(), [])
+
+    analyze()
+    assert sorted(env.calls.read_text().splitlines()) == sorted(expected)
+    for item in items:
+        assert env.lib.get_item(item.id).bpm == expected[str(item.filepath)]
+        assert env.lib.get_item(item.id).get("mood_happy") == 0.0
+    assert "Analysis failed" not in caplog.text
+    assert not (env.output / "profile.yml").exists()
+    if keep_output:
+        assert sorted(path.name for path in env.output.iterdir()) == sorted(
+            f"item-{item.id}.json" for item in items
+        )
+        # A forced run reuses only the output belonging to each library row.
+        env.cfg["force"] = True
+        analyze()
+        assert len(env.calls.read_text().splitlines()) == 2
+        for item in items:
+            assert env.lib.get_item(item.id).bpm == expected[str(item.filepath)]
+    else:
+        assert not list(env.output.iterdir())
