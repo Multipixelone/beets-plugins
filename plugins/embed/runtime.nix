@@ -11,7 +11,10 @@ let
         # This pin's Torch 2.13 expects a newer AOTriton API than its 0.11.1b.
         # Disable optional fused attention in Torch, without rebuilding ROCm.
         # AMCLAP can use ordinary GPU attention instead.
-        env = old.env // { USE_FLASH_ATTENTION = "0"; };
+        env = old.env // {
+          USE_FLASH_ATTENTION = "0";
+          USE_MEM_EFF_ATTENTION = "0";
+        };
       });
       # Codec's upstream tests alone pull in a separate torchvision GPU build.
       # Keep its import check; the worker smoke exercises our audio/text path.

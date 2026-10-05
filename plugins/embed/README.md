@@ -64,7 +64,7 @@ and a reproducible local runtime are required. Model licenses above permit
 personal noncommercial local use; they are distinct from this plugin's
 AGPL-3.0-or-later license. No AudioMuse-AI code is included.
 
-The worker uses ONNX Runtime for EffNet and its heads, and CPU PyTorch for
+The default worker uses ONNX Runtime for EffNet and its heads, and CPU PyTorch for
 AMCLAP, in a separate Python 3.13 environment. Beets keeps its existing Python
 environment. AMCLAP/OMAR source commits, checkpoints, tokenizer files,
 configuration and MPNet initialization weights are fixed-output Nix fetches in
@@ -73,16 +73,119 @@ OMAR keys, removes its unused pretraining logit head, then strictly loads every
 audio projection, text projection and fine-tuned text tensor. An upstream
 partial-load fallback would otherwise risk silently using base MPNet weights.
 
-`link` has an RX 7800 XT (`gfx1101`), but cache preflights at the repository pin
-`e554fab72f81915600f3f449b786fd9af40439a5` and infra pin
-`4975466d324710c576dc11ad614684e6bd8cad8e` require a local ROCm Torch source
-build. The repository pin's ONNX Runtime MIGraphX variant also requires a local
-source build. Those paths would fetch roughly 3.4 GiB / 12 GiB unpacked for
-Torch, or 2.2 GiB / 7.3 GiB for ONNX Runtime, before compilation. They were not
-built. `auto` selects the working cached CPU runtime; `--device gpu` reports
-that choice and falls back to CPU. No GPU benchmark or gfx spoofing is claimed.
-Infra's beets input retains this repository's own nixpkgs pin. Infra was only
-read; wiring into its host configuration and timers remains separate work.
+The default package retains the CPU worker. The optional x86_64-linux package
+`beets-embed-worker-rocm` is intended to accelerate AMCLAP on `link`'s RX 7800 XT (`gfx1101`),
+while EffNet and its heads still use CPU ONNX Runtime. Add this package separately
+to the host's declarative package list to put its executable on `PATH`; it is
+not a dependency of the default beets package. For a temporary invocation:
+
+```sh
+nix shell .#default .#beets-embed-worker-rocm --command beet embed --device rocm
+```
+
+The ROCm source build is currently blocked, as recorded below. No working GPU
+worker or GPU benchmark has been verified on this host yet.
+
+`device: cpu` always uses the original worker. `auto` discovers the ROCm worker
+on `PATH` and selects it only after a subprocess probe passes. The probe has a
+30-second deadline, requires HIP-backed Torch, executes matrix multiplication,
+convolution, and a Torch elementwise kernel on the GPU, synchronizes, and
+compares finite results against CPU with `rtol=1e-4`, `atol=1e-4`.
+Missing executables, crashes, timeouts, and
+incorrect results fall back to CPU with a reason. Explicit `device: rocm` (or
+`--device rocm`) instead fails clearly; `gpu` remains a compatibility alias for
+automatic selection with fallback. Direct worker commands also probe before
+GPU inference. Selection happens after beets connections close and before the
+vector store opens; changing devices does not change model IDs or invalidate
+existing vectors. Inference failures retain completed families for resume.
+
+The worker uses nixpkgs Torch 2.13.0 built from source with only Torch's GPU
+target list set to `gpuTargets = [ "gfx1101" ]`. This pin pairs Torch with
+AOTriton 0.11.1b, whose fused-attention API fails to compile against Torch 2.13.
+Torch's `cmake/External/aotriton.cmake` requests AOTriton 0.12b. The ROCm
+Torch override disables both optional fused paths with
+`USE_FLASH_ATTENTION=0` and `USE_MEM_EFF_ATTENTION=0`, preserving ordinary
+GPU attention. The source guards exclude `mha_all_aot.hip` from the build
+and all AOTriton includes/calls from the generic `attention.hip`,
+`attention_backward.hip` and `sdp_utils.cpp` translation units. ROCm libraries retain their original
+hashes, and torchaudio, torchcodec and other Torch consumers share the same
+ROCm Torch. Torchcodec's upstream tests are disabled in this variant to avoid
+a test-only torchvision GPU build; its import check remains enabled, and the
+worker smoke covers actual audio/text inference. No global ROCm target setting,
+MIGraphX, system configuration change, or binary-cache publication is involved.
+Native gfx1101 is the intended target; no `HSA_OVERRIDE_GFX_VERSION` is set.
+
+Before a source build, inspect its complete build/fetch list:
+
+```sh
+nix build .#beets-embed-worker-rocm --dry-run
+agent-run-long --label embed-rocm-build --timeout 12h -- \
+  nix build .#beets-embed-worker-rocm --no-link --print-out-paths \
+  --print-build-logs --max-jobs 1 --cores 4 \
+  --option substituters https://cache.nixos.org
+nix run .#beets-embed-worker-rocm -- probe-rocm
+nix run .#beets-embed-worker-rocm -- smoke --device rocm
+```
+
+On `link`, start compilation only between 09:00 and 21:00 America/New_York and
+shorten the timeout to stop by 00:45, leaving the 01:00–08:59 xtractor backfill
+its CPU window. Preflight on October 5, 2026 confirmed unchanged `clr`,
+`rocblas`, `miopen`, and `hipblaslt` outputs on cache.nixos.org. Torch was the
+only large compilation; other builds were small Python packages, torchcodec,
+and environment helpers. The initial fetch list was 3.3 GiB download /
+11.3 GiB unpacked. The first eight-core attempt failed on the AOTriton API
+mismatch after 77.1 minutes, with 15.3 GiB peak sampled aggregate builder RSS.
+The restart uses four cores and the Torch-local fused-attention workaround.
+Its dry-run list contains Torch and 13 small dependent packages/environment
+helpers, with no ROCm library builds or further downloads.
+
+**Provisional, pre-swap validation:** `link` has a confirmed failing CPU with
+machine checks and crashed at 11:28 on October 5. The four-core restart and
+all results from this run must be revalidated after the CPU replacement.
+Passing GPU/CPU comparisons establish consistency for this run, not trust in
+the build hardware. Preserve the exact Torch and AMCLAP output paths recorded
+with the measurements so those outputs can be deleted and rebuilt after the
+swap. Crashes, NaNs, mismatches or unexpected test failures during this run
+or non-deterministic failures are potentially hardware-caused. Repeatable
+compiler errors must instead be diagnosed from the source and build logs.
+
+The four-core restart exited with status 1 after **6,385.925 seconds
+(106.4 minutes)**, with **8.91 GiB peak sampled aggregate builder RSS**
+(one-second samples of all `nixbld` processes). It reached step 2,968/3,311;
+the compiler reported undeclared `cookie` in `aotriton_adapter.h` and missing
+`attn_options::deterministic` while compiling `attention.hip` and
+`attention_backward.hip`. Both attempts failed deterministically because
+Torch expects AOTriton 0.12b but the pin supplies 0.11.1b. The initial
+`USE_FLASH_ATTENTION=0` workaround omitted the memory-efficient attention
+path; disabling `USE_MEM_EFF_ATTENTION` addresses that remaining path.
+The earlier attribution to possible CPU failure was incorrect.
+The log is `/tmp/opencode/agent-run-long.embed-rocm-restart.436PqtHHrn/output.log`.
+No ROCm worker or closure was produced, so GPU median/p95, throughput, VRAM,
+full-library projection and CPU/GPU vector comparison remain unmeasured.
+The copied DB and exact 100-track manifest remain at
+`/tmp/beets-embed-rocm-benchmark-tg54mx6t/`, with temporary `benchmark.py` and
+`compare.py` measurement harnesses for a later run; inference never
+opened the live beets database.
+
+Exact planned outputs for this attempt are below. All were absent after the
+failure, so there are no resulting Torch/AMCLAP binaries from this attempt to
+delete. Retain this record when rebuilding after the CPU swap:
+
+```text
+Torch out:    /nix/store/8d6b1yhl90wlpagvc23lakpkf43v3c6d-python3.13-torch-2.13.0
+Torch lib:    /nix/store/ay5jnmkdspnjkwskz6waxdvz2glavpmw-python3.13-torch-2.13.0-lib
+Torch dev:    /nix/store/iccg94j1w12jr5cf59jblyly7b518q7m-python3.13-torch-2.13.0-dev
+Torch cxxdev: /nix/store/1fzs19z6ga17slnqkiksyi0aphw44n71-python3.13-torch-2.13.0-cxxdev
+Torch dist:   /nix/store/ydxxrs30zvfk07s9jkvavr1a9q4ri7nv-python3.13-torch-2.13.0-dist
+AMCLAP out:   /nix/store/pmlvf4q1vcs4rmm08vsig2gdpxxl86c5-python3.13-amclap-0.1.0
+AMCLAP dist:  /nix/store/1i5jaypj2r6rgngbs5b6crkfpsqxiydl-python3.13-amclap-0.1.0-dist
+Worker:       /nix/store/wsvdp1hvw6p57pp8aaji0lnbj3a7hq4b-beets-embed-worker-rocm
+```
+
+Provisional pre-swap checks passed: all 25 plugin unit tests,
+`nix flake check --print-build-logs`, and the default package build through
+`agent-run-long`. The default closure contains no ROCm worker or checked ROCm
+core libraries. These checks do not establish GPU correctness.
 
 FFmpeg decodes a track once to mono 48 kHz floating-point audio. A polyphase
 resampler produces 16/24 kHz streams in 30-second blocks with filter halos.
@@ -127,7 +230,10 @@ Unit tests use synthetic vectors and fake inference. They cover float16/head
 round trips, incremental skip, changed fingerprints/checkpoints, partial
 termination/resume, ranking, album weights/coverage, actual beets lock release,
 bounded flex queries, resampling seams, and a deterministic frontend fixture
-generated with Essentia 2.1b6.dev1438. The separate smoke command runs all real
+generated with Essentia 2.1b6.dev1438. Device tests mock worker discovery and
+probes, covering CPU bypass, ROCm selection, timeout/crash/malformed-response
+fallback, explicit ROCm errors, and direct worker device mapping without a GPU.
+The separate smoke command runs all real
 models on a three-second tone, then a text query; it works with an empty model
 cache. The supported packaged target is x86_64-linux.
 
@@ -142,7 +248,17 @@ threads and batch size eight, all 100 tracks completed without failures in
 **9.50 seconds/track**. The 12-thread xtractor backfill and other CPU work were
 running concurrently, so this is a measurement under contention, not an idle
 CPU estimate. A linear projection for 93,600 similar tracks is **10.3 days**
-under the same conditions. No GPU runtime was built or benchmarked.
+under the same conditions. This baseline used no GPU runtime.
+
+The sample was selected from the copied database with
+`SELECT id,path,length FROM items WHERE length BETWEEN 60 AND 600 ORDER BY (id * 7919) % 100000`,
+keeping the first 100 existing files, resolving relative paths against the
+configured music directory, then processing in ascending ID order. The saved
+sample at `/tmp/beets-embed-benchmark-v51vn3z5/sample.json` has SHA-256
+`31e53cbebd274a118c44a980817a2aba6f2f85c94b2023570949d8af359c8849`;
+the ROCm comparison reuses those exact IDs rather than sampling a changing
+library again. Always use `cp` to create a temporary beets database and a fresh
+temporary vector store; never point benchmark commands at the live database.
 
 The 100-track store contained 200 vectors and 916,000 bytes of vector/head
 payload: **9,160 bytes/track**. The checkpointed SQLite file measured 1,294,336
