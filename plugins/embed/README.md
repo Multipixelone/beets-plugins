@@ -74,8 +74,8 @@ audio projection, text projection and fine-tuned text tensor. An upstream
 partial-load fallback would otherwise risk silently using base MPNet weights.
 
 The default package retains the CPU worker. The optional x86_64-linux package
-`beets-embed-worker-rocm` is intended to accelerate AMCLAP on `link`'s RX 7800 XT (`gfx1101`),
-while EffNet and its heads still use CPU ONNX Runtime. Add this package separately
+`beets-embed-worker-rocm` accelerates AMCLAP on `link`'s RX 7800 XT
+(`gfx1101`), while EffNet and its heads still use CPU ONNX Runtime. Add this package separately
 to the host's declarative package list to put its executable on `PATH`; it is
 not a dependency of the default beets package. For a temporary invocation:
 
@@ -83,8 +83,8 @@ not a dependency of the default beets package. For a temporary invocation:
 nix shell .#default .#beets-embed-worker-rocm --command beet embed --device rocm
 ```
 
-The ROCm source build is currently blocked, as recorded below. No working GPU
-worker or GPU benchmark has been verified on this host yet.
+The source build, native GPU probe, real-model smoke and 100-track comparison
+passed on October 5, 2026. All results below are **provisional, pre-CPU-swap**.
 
 `device: cpu` always uses the original worker. `auto` discovers the ROCm worker
 on `PATH` and selects it only after a subprocess probe passes. The probe has a
@@ -107,19 +107,21 @@ Torch override disables both optional fused paths with
 `USE_FLASH_ATTENTION=0` and `USE_MEM_EFF_ATTENTION=0`, preserving ordinary
 GPU attention. The source guards exclude `mha_all_aot.hip` from the build
 and all AOTriton includes/calls from the generic `attention.hip`,
-`attention_backward.hip` and `sdp_utils.cpp` translation units. ROCm libraries retain their original
-hashes, and torchaudio, torchcodec and other Torch consumers share the same
+`attention_backward.hip` and `sdp_utils.cpp` translation units. ROCm libraries
+retain their original hashes, and torchaudio, torchcodec and other Torch consumers share the same
 ROCm Torch. Torchcodec's upstream tests are disabled in this variant to avoid
 a test-only torchvision GPU build; its import check remains enabled, and the
 worker smoke covers actual audio/text inference. No global ROCm target setting,
 MIGraphX, system configuration change, or binary-cache publication is involved.
-Native gfx1101 is the intended target; no `HSA_OVERRIDE_GFX_VERSION` is set.
+Native gfx1101 was verified at runtime; no `HSA_OVERRIDE_GFX_VERSION` was
+needed. Torch can emit an expected warning that memory-efficient attention
+was not compiled, then use ordinary GPU attention.
 
 Before a source build, inspect its complete build/fetch list:
 
 ```sh
 nix build .#beets-embed-worker-rocm --dry-run
-agent-run-long --label embed-rocm-build --timeout 12h -- \
+agent-run-long --label embed-rocm-build --timeout 3h -- \
   nix build .#beets-embed-worker-rocm --no-link --print-out-paths \
   --print-build-logs --max-jobs 1 --cores 4 \
   --option substituters https://cache.nixos.org
@@ -128,14 +130,15 @@ nix run .#beets-embed-worker-rocm -- smoke --device rocm
 ```
 
 On `link`, start compilation only between 09:00 and 21:00 America/New_York and
-shorten the timeout to stop by 00:45, leaving the 01:00–08:59 xtractor backfill
+keep the timeout ending by 00:45, leaving the 01:00–08:59 xtractor backfill
 its CPU window. Preflight on October 5, 2026 confirmed unchanged `clr`,
 `rocblas`, `miopen`, and `hipblaslt` outputs on cache.nixos.org. Torch was the
 only large compilation; other builds were small Python packages, torchcodec,
 and environment helpers. The initial fetch list was 3.3 GiB download /
 11.3 GiB unpacked. The first eight-core attempt failed on the AOTriton API
 mismatch after 77.1 minutes, with 15.3 GiB peak sampled aggregate builder RSS.
-The restart uses four cores and the Torch-local fused-attention workaround.
+The successful rebuild used four cores and the Torch-local fused-attention
+workaround.
 Its dry-run list contains Torch and 13 small dependent packages/environment
 helpers, with no ROCm library builds or further downloads.
 
@@ -145,11 +148,11 @@ all results from this run must be revalidated after the CPU replacement.
 Passing GPU/CPU comparisons establish consistency for this run, not trust in
 the build hardware. Preserve the exact Torch and AMCLAP output paths recorded
 with the measurements so those outputs can be deleted and rebuilt after the
-swap. Crashes, NaNs, mismatches or unexpected test failures during this run
-or non-deterministic failures are potentially hardware-caused. Repeatable
+swap. Crashes, NaNs, vector mismatches, and non-deterministic failures during
+this run are potentially hardware-caused. Repeatable
 compiler errors must instead be diagnosed from the source and build logs.
 
-The four-core restart exited with status 1 after **6,385.925 seconds
+The first four-core restart exited with status 1 after **6,385.925 seconds
 (106.4 minutes)**, with **8.91 GiB peak sampled aggregate builder RSS**
 (one-second samples of all `nixbld` processes). It reached step 2,968/3,311;
 the compiler reported undeclared `cookie` in `aotriton_adapter.h` and missing
@@ -158,34 +161,46 @@ the compiler reported undeclared `cookie` in `aotriton_adapter.h` and missing
 Torch expects AOTriton 0.12b but the pin supplies 0.11.1b. The initial
 `USE_FLASH_ATTENTION=0` workaround omitted the memory-efficient attention
 path; disabling `USE_MEM_EFF_ATTENTION` addresses that remaining path.
-The earlier attribution to possible CPU failure was incorrect.
-The log is `/tmp/opencode/agent-run-long.embed-rocm-restart.436PqtHHrn/output.log`.
-No ROCm worker or closure was produced, so GPU median/p95, throughput, VRAM,
-full-library projection and CPU/GPU vector comparison remain unmeasured.
-The copied DB and exact 100-track manifest remain at
-`/tmp/beets-embed-rocm-benchmark-tg54mx6t/`, with temporary `benchmark.py` and
-`compare.py` measurement harnesses for a later run; inference never
-opened the live beets database.
+The earlier attribution to possible CPU failure was incorrect. That failure's
+log is `/tmp/opencode/agent-run-long.embed-rocm-restart.436PqtHHrn/output.log`.
 
-Exact planned outputs for this attempt are below. All were absent after the
-failure, so there are no resulting Torch/AMCLAP binaries from this attempt to
-delete. Retain this record when rebuilding after the CPU swap:
+With both flags disabled, the four-core build succeeded in **7,767.246 seconds
+(2 h 9 min 27 s)**, starting at 17:24 America/New_York and finishing at 19:33,
+well before the 00:45 deadline. Peak sampled aggregate builder RSS was
+**10.33 GiB**, including torchaudio's tests; the metric sums all `nixbld`
+process RSS once per second, so shared pages can be counted more than once.
+Both previously failing attention translation units compiled successfully.
+Torchaudio reported 2,247 passed, 2,301 skipped, 270 deselected and one expected
+failure; GPU access is validated separately outside the Nix sandbox. The
+worker runtime closure is **18,377,677,144 bytes (17.1 GiB)** and contains one
+ROCm Torch, shared by torchaudio, torchcodec and AMCLAP. The successful log is
+`/tmp/opencode/agent-run-long.embed-rocm-both-attention.iJixU0rr3X/output.log`.
+No build outputs were published to a binary cache.
+
+Exact realized outputs from this **provisional, pre-CPU-swap** build follow.
+Retain these paths so the Torch and AMCLAP outputs and their dependent worker
+can be discarded and rebuilt after the CPU replacement:
 
 ```text
-Torch out:    /nix/store/8d6b1yhl90wlpagvc23lakpkf43v3c6d-python3.13-torch-2.13.0
-Torch lib:    /nix/store/ay5jnmkdspnjkwskz6waxdvz2glavpmw-python3.13-torch-2.13.0-lib
-Torch dev:    /nix/store/iccg94j1w12jr5cf59jblyly7b518q7m-python3.13-torch-2.13.0-dev
-Torch cxxdev: /nix/store/1fzs19z6ga17slnqkiksyi0aphw44n71-python3.13-torch-2.13.0-cxxdev
-Torch dist:   /nix/store/ydxxrs30zvfk07s9jkvavr1a9q4ri7nv-python3.13-torch-2.13.0-dist
-AMCLAP out:   /nix/store/pmlvf4q1vcs4rmm08vsig2gdpxxl86c5-python3.13-amclap-0.1.0
-AMCLAP dist:  /nix/store/1i5jaypj2r6rgngbs5b6crkfpsqxiydl-python3.13-amclap-0.1.0-dist
-Worker:       /nix/store/wsvdp1hvw6p57pp8aaji0lnbj3a7hq4b-beets-embed-worker-rocm
+Torch out:    /nix/store/zvwnyi7rm8s4da3j8gvy6rb6m3hh974f-python3.13-torch-2.13.0
+Torch lib:    /nix/store/fvksf8134gsiigng994yl4b64s92awva-python3.13-torch-2.13.0-lib
+Torch dev:    /nix/store/xz482a5r9iam574a7vri1ag86ag2h4g2-python3.13-torch-2.13.0-dev
+Torch cxxdev: /nix/store/gbci3vvaws211brdjmmdvbvxc4y8v5b5-python3.13-torch-2.13.0-cxxdev
+Torch dist:   /nix/store/n13dlqmw1rgh4ccc5z09bj7p1mhs29xr-python3.13-torch-2.13.0-dist
+AMCLAP out:   /nix/store/z0wrm3pwv4g7yj232cqpwnn71r4qlx6s-python3.13-amclap-0.1.0
+AMCLAP dist:  /nix/store/d8vbkqp1wvvkrq6q1zpf9kfyhxbz1a3n-python3.13-amclap-0.1.0-dist
+Worker:       /nix/store/sk6yp0wn39nkkp5nqxlifd8gdq7gszd4-beets-embed-worker-rocm
 ```
 
 Provisional pre-swap checks passed: all 25 plugin unit tests,
 `nix flake check --print-build-logs`, and the default package build through
 `agent-run-long`. The default closure contains no ROCm worker or checked ROCm
-core libraries. These checks do not establish GPU correctness.
+core libraries. The bounded native probe completed in five seconds on
+`AMD Radeon RX 7800 XT`, HIP `7.2.53211`, with CPU/GPU results within its
+`1e-4` tolerances. An actual CPU-worker `smoke --device auto`, with the optional
+worker on `PATH`, handed off to ROCm and completed real EffNet, AMCLAP audio
+and text inference with finite outputs in ten seconds. GPU properties reported
+native `gfx1101` and 17,163,091,968 bytes of VRAM.
 
 FFmpeg decodes a track once to mono 48 kHz floating-point audio. A polyphase
 resampler produces 16/24 kHz streams in 30-second blocks with filter halos.
@@ -259,6 +274,36 @@ sample at `/tmp/beets-embed-benchmark-v51vn3z5/sample.json` has SHA-256
 the ROCm comparison reuses those exact IDs rather than sampling a changing
 library again. Always use `cp` to create a temporary beets database and a fresh
 temporary vector store; never point benchmark commands at the live database.
+
+**Provisional, pre-CPU-swap ROCm benchmark:** the optional worker processed
+those exact 100 tracks with two CPU threads and batch size eight, using a fresh
+temporary vector store and only the copied database's saved manifest. All 100
+completed, with zero failures and no skipped tracks, covering the same 20,495
+EffNet patches and 2,085 AMCLAP windows. Worker processing took **88.601 seconds**;
+total wall time, including subprocess probe and model startup, was **92.101
+seconds**, or **0.921 seconds/track** on average. Successive track-completion
+intervals measured **0.724 seconds median / 1.577 seconds p95**; the first
+interval included startup and took 8.402 seconds. Preparation overlaps
+inference, so these intervals describe pipeline throughput rather than isolated
+AMCLAP kernel latency. Throughput was **3,909 tracks/hour**, projecting to
+**23.95 hours for 93,600 similar tracks** using total wall time. This run had
+desktop CPU activity but no xtractor backfill; the CPU baseline's backfill
+contention means the approximately 10.4-fold wall-time improvement also
+includes differing background load.
+
+Whole-card VRAM, sampled every 0.2 seconds, peaked at **2,340,970,496 bytes
+(2.18 GiB)** including a **969,437,184-byte (0.90 GiB)** desktop baseline.
+Torch's peak tensor allocation was **869,698,048 bytes (0.81 GiB)** and peak
+reserved memory **956,301,312 bytes (0.89 GiB)**. All 200 stored vectors had
+matching fingerprints, model identities, dimensions and window counts and
+finite means/stds. Minimum CPU/GPU AMCLAP cosine was **0.9999999990649152**,
+above the required 0.999; EffNet means/stds and all heads were identical.
+The copied database, manifest, measurement harnesses and `metrics.json` /
+`comparison.json` remain under `/tmp/beets-embed-rocm-benchmark-tg54mx6t/`.
+Runtime caches were isolated there via `XDG_CACHE_HOME`,
+`MIOPEN_CUSTOM_CACHE_DIR` and `MIOPEN_USER_DB_PATH`, and are also provisional.
+Inference and comparison never opened the live beets database. Rebuild and
+repeat this validation after the CPU swap before relying on these artifacts.
 
 The 100-track store contained 200 vectors and 916,000 bytes of vector/head
 payload: **9,160 bytes/track**. The checkpointed SQLite file measured 1,294,336
