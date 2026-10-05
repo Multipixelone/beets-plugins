@@ -1,0 +1,111 @@
+{
+  "preprocessing": "v1-effnet-musicnn-repeat-amclap-10s-normalized",
+  "families": {
+    "style": [
+      "effnet",
+      "moodtheme",
+      "instrument",
+      "approachability",
+      "engagement"
+    ],
+    "text": [
+      "amclap",
+      "omar",
+      "mpnet"
+    ]
+  },
+  "assets": {
+    "effnet.onnx": {
+      "url": "https://essentia.upf.edu/models/feature-extractors/discogs-effnet/discogs-effnet-bsdynamic-1.onnx",
+      "hash": "sha256-ooCCWzNHl89neTnbjNV2LAOSrt0MpkFdvBzQg/BF5Dw="
+    },
+    "effnet.json": {
+      "url": "https://essentia.upf.edu/models/feature-extractors/discogs-effnet/discogs-effnet-bsdynamic-1.json",
+      "hash": "sha256-ouhbLnNy1fjg81vdaurhE58QEIfRg9Cy+2Cw6g8BoP8="
+    },
+    "moodtheme.onnx": {
+      "url": "https://essentia.upf.edu/models/classification-heads/mtg_jamendo_moodtheme/mtg_jamendo_moodtheme-discogs-effnet-1.onnx",
+      "hash": "sha256-fWJwrKpfS7pLEVoNaEmsoF7WvRU9y22dpParn5nvEP8="
+    },
+    "moodtheme.json": {
+      "url": "https://essentia.upf.edu/models/classification-heads/mtg_jamendo_moodtheme/mtg_jamendo_moodtheme-discogs-effnet-1.json",
+      "hash": "sha256-1izZAmPk1hP6f8znqDHjOUUDlHlK9jaF+W4GXBqJarA="
+    },
+    "instrument.onnx": {
+      "url": "https://essentia.upf.edu/models/classification-heads/mtg_jamendo_instrument/mtg_jamendo_instrument-discogs-effnet-1.onnx",
+      "hash": "sha256-muLZ52PWa9ju1lTRrDqhceZTnLig4R89zVPfFCiYCAI="
+    },
+    "instrument.json": {
+      "url": "https://essentia.upf.edu/models/classification-heads/mtg_jamendo_instrument/mtg_jamendo_instrument-discogs-effnet-1.json",
+      "hash": "sha256-fQIgTGRRtWFeKWjsY2S7rjuRXIhuYI8F8A06ONxRd8Q="
+    },
+    "approachability.onnx": {
+      "url": "https://essentia.upf.edu/models/classification-heads/approachability/approachability_regression-discogs-effnet-1.onnx",
+      "hash": "sha256-94OxfumUOU8w8n0FzNP7hF5YnRB4AuVeC5zx6gQeyJQ="
+    },
+    "approachability.json": {
+      "url": "https://essentia.upf.edu/models/classification-heads/approachability/approachability_regression-discogs-effnet-1.json",
+      "hash": "sha256-OcAz5K9tT1Q75CC5LhfIqj/v/nCojK8rFS2RcxMgtz8="
+    },
+    "engagement.onnx": {
+      "url": "https://essentia.upf.edu/models/classification-heads/engagement/engagement_regression-discogs-effnet-1.onnx",
+      "hash": "sha256-lVGmwWLJgDrvXOTk0pouT66Ztb/cldrp3Y/lM14PtWc="
+    },
+    "engagement.json": {
+      "url": "https://essentia.upf.edu/models/classification-heads/engagement/engagement_regression-discogs-effnet-1.json",
+      "hash": "sha256-bcb5OlwCP3S8tLo4KXv5pP2eEG0t0fkTuIDth/z72Vg="
+    },
+    "amclap.ckpt": {
+      "url": "https://huggingface.co/mtg-upf/allmusiccaps_te_trained_sigreg/resolve/5a71a39a603718993181504c76d56d733bc8e8c4/model.ckpt",
+      "hash": "sha256-Vgm8WDTZQww4Ol2nMVja0sbr5IO6G99a0+cx7oVE5ow="
+    },
+    "amclap.gin": {
+      "url": "https://huggingface.co/mtg-upf/allmusiccaps_te_trained_sigreg/resolve/5a71a39a603718993181504c76d56d733bc8e8c4/config.gin",
+      "hash": "sha256-O9PXOCkguTcutsAYgRxIFCriOObG7f9dB+2bmQIsLV4="
+    },
+    "omar.gin": {
+      "url": "https://huggingface.co/mtg-upf/clap_omarrq_mp_small_music/resolve/f01bbe5d4a30f02bc4bdb9145c54e204176f29a6/config.gin",
+      "hash": "sha256-wfwLrw8c0Wwd5a2g8IjrCrmdmdogVaL0LyMCOkMWVbw="
+    },
+    "mpnet/1_Pooling/config.json": {
+      "url": "https://huggingface.co/sentence-transformers/all-mpnet-base-v2/resolve/e8c3b32edf5434bc2275fc9bab85f82640a19130/1_Pooling/config.json",
+      "hash": "sha256-o3+DraI+eIe+a4j0mYkn2+rAA4rzAVU8fNVGFBO/GlY="
+    },
+    "mpnet/config.json": {
+      "url": "https://huggingface.co/sentence-transformers/all-mpnet-base-v2/resolve/e8c3b32edf5434bc2275fc9bab85f82640a19130/config.json",
+      "hash": "sha256-1Go+BN7YK7oiUoQkSAaX05Tu2monSE4Ixbsr31kGz6A="
+    },
+    "mpnet/config_sentence_transformers.json": {
+      "url": "https://huggingface.co/sentence-transformers/all-mpnet-base-v2/resolve/e8c3b32edf5434bc2275fc9bab85f82640a19130/config_sentence_transformers.json",
+      "hash": "sha256-Bhyp05Zh1sbW3luif3mhzVdw6iR/jUZBKmikmNxayfM="
+    },
+    "mpnet/model.safetensors": {
+      "url": "https://huggingface.co/sentence-transformers/all-mpnet-base-v2/resolve/e8c3b32edf5434bc2275fc9bab85f82640a19130/model.safetensors",
+      "hash": "sha256-eMAZe2FZ2SZY4xm8HXLkxzqaA90DgV5w5VXF7wVhVlg="
+    },
+    "mpnet/modules.json": {
+      "url": "https://huggingface.co/sentence-transformers/all-mpnet-base-v2/resolve/e8c3b32edf5434bc2275fc9bab85f82640a19130/modules.json",
+      "hash": "sha256-hOQMjgBsmx1sEi4Cy6mwJFgSC1+wyHt0bEHgIHz2Qs8="
+    },
+    "mpnet/sentence_bert_config.json": {
+      "url": "https://huggingface.co/sentence-transformers/all-mpnet-base-v2/resolve/e8c3b32edf5434bc2275fc9bab85f82640a19130/sentence_bert_config.json",
+      "hash": "sha256-yr+s3tknIJGgb/WVpG7wJ6dt30rJ530PzxHGBXSPFmc="
+    },
+    "mpnet/special_tokens_map.json": {
+      "url": "https://huggingface.co/sentence-transformers/all-mpnet-base-v2/resolve/e8c3b32edf5434bc2275fc9bab85f82640a19130/special_tokens_map.json",
+      "hash": "sha256-nvQOnBYFEb8/Rs63HxRx2voelHPVEgu4FsNrLvp1+Lo="
+    },
+    "mpnet/tokenizer.json": {
+      "url": "https://huggingface.co/sentence-transformers/all-mpnet-base-v2/resolve/e8c3b32edf5434bc2275fc9bab85f82640a19130/tokenizer.json",
+      "hash": "sha256-uL4sMLpd1yOm1e4m0BPaED1UCNkt3LI3R2Ivnkjx2EI="
+    },
+    "mpnet/tokenizer_config.json": {
+      "url": "https://huggingface.co/sentence-transformers/all-mpnet-base-v2/resolve/e8c3b32edf5434bc2275fc9bab85f82640a19130/tokenizer_config.json",
+      "hash": "sha256-Z/L/fiI1GOcphpuzpw8Mr4No/lSTg/wRz+LftC//wmg="
+    },
+    "mpnet/vocab.txt": {
+      "url": "https://huggingface.co/sentence-transformers/all-mpnet-base-v2/resolve/e8c3b32edf5434bc2275fc9bab85f82640a19130/vocab.txt",
+      "hash": "sha256-29kMuU4iR71NTMrsv2FtIpDmZpHX1eW7gfBjwtBkmto="
+    }
+  }
+}

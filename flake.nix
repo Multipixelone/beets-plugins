@@ -77,6 +77,9 @@
         userrating = pkgs.callPackage ./plugins/userrating { inherit beets pythonPackages version; };
         plexsync = pkgs.callPackage ./plugins/plexsync { inherit beets-plexsync beets pythonPackages; };
         harmony = pkgs.callPackage ./plugins/harmony { inherit beets pythonPackages; };
+        embed-models = pkgs.callPackage ./plugins/embed/models.nix { };
+        embed-worker = pkgs.callPackage ./plugins/embed/runtime.nix { models = embed-models; };
+        embed = pkgs.callPackage ./plugins/embed { inherit beets pythonPackages; worker = embed-worker; };
 
         # beets & plugins
         beets-plugins = (beets.override {
@@ -113,6 +116,10 @@
             harmony = {
               enable = true;
               propagatedBuildInputs = [ harmony ];
+            };
+            embed = {
+              enable = system == "x86_64-linux";
+              propagatedBuildInputs = pkgs.lib.optionals (system == "x86_64-linux") [ embed ];
             };
             # filetote = {
             #   enable = true;
@@ -166,8 +173,11 @@
           userrating = userrating;
           plexsync = plexsync;
           harmony = harmony;
+          inherit embed-models;
 
           default = beets-plugins;
+        } // pkgs.lib.optionalAttrs (system == "x86_64-linux") {
+          inherit embed embed-worker;
         };
         devShells.default = env;
       }
