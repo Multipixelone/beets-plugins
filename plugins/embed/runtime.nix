@@ -1,8 +1,22 @@
 # Keep AMCLAP's checkpoint-compatible text stack separate from beets' Python.
-{ pkgs, lib, fetchurl, fetchzip, models }:
+{ pkgs, lib, fetchurl, fetchzip, models, rocmSupport ? false }:
 let
   python = pkgs.python313.override {
-    packageOverrides = self: super: {
+    packageOverrides = self: super: (lib.optionalAttrs rocmSupport {
+      # Override torch alone: retain the cached, unmodified ROCm libraries.
+      # Use the original scope to avoid torchWithRocm's self.torch recursion.
+      torch = (pkgs.python313Packages.torchWithRocm.override {
+        gpuTargets = [ "gfx1101" ];
+      }).overridePythonAttrs (old: {
+        # This pin's Torch 2.13 expects a newer AOTriton API than its 0.11.1b.
+        # Disable optional fused attention in Torch, without rebuilding ROCm.
+        # AMCLAP can use ordinary GPU attention instead.
+        env = old.env // { USE_FLASH_ATTENTION = "0"; };
+      });
+      # Codec's upstream tests alone pull in a separate torchvision GPU build.
+      # Keep its import check; the worker smoke exercises our audio/text path.
+      torchcodec = super.torchcodec.overridePythonAttrs { doCheck = false; };
+    }) // {
       huggingface-hub = self.buildPythonPackage {
         pname = "huggingface_hub";
         version = "0.36.2";
@@ -95,12 +109,13 @@ let
   };
   runtime = python.withPackages (ps: with ps; [ beets-embed-core amclap onnxruntime numpy scipy ]);
 in
-pkgs.writeShellScriptBin "beets-embed-worker" ''
+pkgs.writeShellScriptBin (if rocmSupport then "beets-embed-worker-rocm" else "beets-embed-worker") ''
   unset PYTHONPATH PYTHONHOME
   export PYTHONNOUSERSITE=1
   export HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 TOKENIZERS_PARALLELISM=false
   export OMP_NUM_THREADS=2 OPENBLAS_NUM_THREADS=2
   export BEETS_EMBED_MODELS=${models}
   export BEETS_EMBED_FFMPEG=${pkgs.ffmpeg}/bin/ffmpeg
+  ${lib.optionalString rocmSupport "export BEETS_EMBED_BACKEND=rocm"}
   exec ${runtime}/bin/python -s -m beets_embed.worker "$@"
 ''

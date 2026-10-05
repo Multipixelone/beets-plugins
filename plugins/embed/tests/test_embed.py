@@ -1,9 +1,11 @@
 import json
 import os
 import sqlite3
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import numpy as np
@@ -14,6 +16,116 @@ from beets_embed.inference import Moments, strict_checkpoint
 from beets_embed.retrieval import album_vectors, rank, similar
 from beets_embed.store import Store, count_pending, fingerprint, model_ids
 from beets_embed.worker import process
+from beets_embed.devices import PROBE_TIMEOUT, probe_worker, select_worker
+
+
+class DeviceTests(unittest.TestCase):
+    def test_cpu_does_not_discover_or_probe(self):
+        with patch("beets_embed.devices.shutil.which") as discover, \
+             patch("beets_embed.devices.probe_worker") as probe:
+            self.assertEqual(select_worker("cpu", "/cpu"), ("/cpu", "cpu"))
+            discover.assert_not_called()
+            probe.assert_not_called()
+
+    def test_missing_variant_and_legacy_gpu_fall_back(self):
+        with patch("beets_embed.devices.shutil.which", return_value=None):
+            for device in ("auto", "gpu"):
+                self.assertEqual(select_worker(device, "/cpu"), ("/cpu", "cpu"))
+            with self.assertRaisesRegex(ValueError, "not installed"):
+                select_worker("rocm", "/cpu")
+
+    def test_installed_variant_requires_successful_probe(self):
+        with patch("beets_embed.devices.shutil.which", return_value="/rocm"), \
+             patch("beets_embed.devices.probe_worker", return_value={"ok": True}) as probe:
+            for device in ("auto", "rocm", "gpu"):
+                self.assertEqual(select_worker(device, "/cpu"), ("/rocm", "rocm"))
+            probe.assert_called_with(["/rocm"])
+        with patch("beets_embed.devices.shutil.which", return_value="/rocm"), \
+             patch("beets_embed.devices.probe_worker", side_effect=ValueError("kernel mismatch")):
+            self.assertEqual(select_worker("auto", "/cpu"), ("/cpu", "cpu"))
+            with self.assertRaisesRegex(ValueError, "kernel mismatch"):
+                select_worker("rocm", "/cpu")
+
+    def test_probe_is_bounded_and_validates_response(self):
+        success = SimpleNamespace(returncode=0, stdout='{"backend":"rocm","ok":true}', stderr="")
+        with patch("beets_embed.devices.subprocess.run", return_value=success) as run:
+            self.assertTrue(probe_worker(["/rocm"])["ok"])
+            self.assertEqual(run.call_args.args[0], ["/rocm", "probe-rocm"])
+            self.assertEqual(run.call_args.kwargs["timeout"], PROBE_TIMEOUT)
+        for output in ("garbage", "[]", '{"backend":"cpu","ok":true}',
+                       '{"backend":"rocm","ok":false}'):
+            with self.subTest(output=output), patch("beets_embed.devices.subprocess.run",
+                    return_value=SimpleNamespace(returncode=0, stdout=output, stderr="")):
+                with self.assertRaises(ValueError):
+                    probe_worker(["/rocm"])
+
+    def test_probe_timeout_crash_and_launch_failure(self):
+        for error in (subprocess.TimeoutExpired("probe", PROBE_TIMEOUT), OSError("missing")):
+            with self.subTest(error=error), patch("beets_embed.devices.subprocess.run", side_effect=error):
+                with self.assertRaises(ValueError):
+                    probe_worker(["/rocm"])
+        with patch("beets_embed.devices.subprocess.run",
+                   return_value=SimpleNamespace(returncode=-11, stdout="", stderr="GPU fault")):
+            with self.assertRaisesRegex(ValueError, "status -11"):
+                probe_worker(["/rocm"])
+
+    def test_unknown_config_is_rejected(self):
+        with self.assertRaisesRegex(ValueError, "Unknown embedding device"):
+            select_worker("typo", "/cpu")
+
+    def test_direct_rocm_worker_probe_failure_policy(self):
+        from beets_embed.worker import main
+        class StopBeforeInference(Exception):
+            pass
+        with patch.dict(os.environ, {"BEETS_EMBED_BACKEND": "rocm"}), \
+             patch("beets_embed.worker.probe_worker", side_effect=ValueError("GPU fault")), \
+             patch("beets_embed.inference.Models", side_effect=StopBeforeInference) as models:
+            with patch("sys.argv", ["worker", "smoke", "--assets", "/assets", "--device", "rocm"]):
+                with self.assertRaisesRegex(ValueError, "GPU fault"):
+                    main()
+                models.assert_not_called()
+            with patch("sys.argv", ["worker", "smoke", "--assets", "/assets", "--device", "auto"]):
+                with self.assertRaises(StopBeforeInference):
+                    main()
+                self.assertEqual(models.call_args.args[2], "cpu")
+
+    def test_direct_rocm_worker_maps_device_and_cpu_bypasses_probe(self):
+        from beets_embed.worker import main
+        class StopBeforeInference(Exception):
+            pass
+        with patch.dict(os.environ, {"BEETS_EMBED_BACKEND": "rocm"}), \
+             patch("beets_embed.worker.probe_worker", return_value={"ok": True}) as probe, \
+             patch("beets_embed.inference.Models", side_effect=StopBeforeInference) as models:
+            for requested, expected in (("cpu", "cpu"), ("rocm", "cuda:0")):
+                probe.reset_mock()
+                with patch("sys.argv", ["worker", "smoke", "--assets", "/assets", "--device", requested]):
+                    with self.assertRaises(StopBeforeInference):
+                        main()
+                self.assertEqual(models.call_args.args[2], expected)
+                if requested == "cpu":
+                    probe.assert_not_called()
+                else:
+                    probe.assert_called_once()
+
+    def test_verified_worker_handoff_does_not_repeat_probe(self):
+        from beets_embed.worker import main
+        class StopBeforeInference(Exception):
+            pass
+        with patch.dict(os.environ, {"BEETS_EMBED_BACKEND": "cpu"}), \
+             patch("sys.argv", ["worker", "smoke", "--assets", "/assets"]), \
+             patch("beets_embed.worker.select_worker", return_value=("/rocm", "rocm")), \
+             patch("beets_embed.worker.os.execv", side_effect=StopBeforeInference) as launch:
+            with self.assertRaises(StopBeforeInference):
+                main()
+            self.assertIn("--probe-passed", launch.call_args.args[1])
+        with patch.dict(os.environ, {"BEETS_EMBED_BACKEND": "rocm"}), \
+             patch("sys.argv", ["worker", "smoke", "--assets", "/assets", "--device", "rocm", "--probe-passed"]), \
+             patch("beets_embed.worker.probe_worker") as probe, \
+             patch("beets_embed.inference.Models", side_effect=StopBeforeInference) as models:
+            with self.assertRaises(StopBeforeInference):
+                main()
+            probe.assert_not_called()
+            self.assertEqual(models.call_args.args[2], "cuda:0")
 
 
 class FakePrepared:
@@ -266,7 +378,11 @@ class BeetsTests(unittest.TestCase):
                     other.execute("UPDATE items SET title='Updated' WHERE artist='A'")
                 self.assertFalse(lib._connections)
                 return 0
-            with patch("beetsplug.embed.run_worker", worker):
+            def select(device, cpu):
+                self.assertFalse(lib._connections)
+                return cpu, "cpu"
+            with patch("beetsplug.embed.run_worker", worker), \
+                 patch("beetsplug.embed.select_worker", select):
                 cmd.func(lib, opts, args)
 
 

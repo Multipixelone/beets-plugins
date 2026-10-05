@@ -10,6 +10,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from .store import Store, fingerprint, model_ids
+from .devices import DEVICES, probe_rocm, probe_worker, select_worker
 
 
 def process(tracks, store, models, engine, prepare, batch_size=8, stopping=lambda: False):
@@ -85,34 +86,48 @@ def process(tracks, store, models, engine, prepare, batch_size=8, stopping=lambd
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("mode", choices=["embed", "search", "similar", "smoke"])
+    parser.add_argument("mode", choices=["embed", "search", "similar", "smoke", "probe-rocm"])
     parser.add_argument("--manifest")
     parser.add_argument("--store")
     parser.add_argument("--assets", default=os.environ.get("BEETS_EMBED_MODELS"))
     parser.add_argument("--ffmpeg", default=os.environ.get("BEETS_EMBED_FFMPEG", "ffmpeg"))
     parser.add_argument("--threads", type=int, default=2)
     parser.add_argument("--batch-size", type=int, default=8)
-    parser.add_argument("--device", choices=["auto", "cpu", "gpu"], default="auto")
+    parser.add_argument("--device", choices=DEVICES, default="auto")
+    parser.add_argument("--probe-passed", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--top-k", type=int, default=20)
     parser.add_argument("--text")
     parser.add_argument("--seeds", default="")
     parser.add_argument("--albums", action="store_true")
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args()
+    if args.mode == "probe-rocm":
+        print(json.dumps(probe_rocm()))
+        return 0
     if not args.assets:
         parser.error("The packaged model assets are required")
     if not 1 <= args.threads <= 16 or not 1 <= args.batch_size <= 128 or args.top_k < 1:
         parser.error("Invalid processing bounds")
-    # This package uses cached CPU Torch. A GPU request falls back explicitly;
-    # it must never trigger an uncached ROCm build or device-specific spoofing.
     device = "cpu"
-    print("Embedding device: cpu (cached Nix runtime)", file=sys.stderr)
-    if args.device == "gpu":
-        print("GPU runtime unavailable in this package; falling back to CPU", file=sys.stderr)
+    if os.environ.get("BEETS_EMBED_BACKEND") == "rocm" and args.device != "cpu":
+        try:
+            if not args.probe_passed:
+                probe_worker([sys.executable, "-s", "-m", "beets_embed.worker"])
+            device = "rocm"
+        except ValueError as exc:
+            if args.device == "rocm":
+                raise
+            print(f"Embedding device: cpu ({exc})", file=sys.stderr)
+    elif args.device != "cpu":
+        candidate, device = select_worker(args.device, None)
+        if candidate:
+            os.execv(candidate, [candidate, *sys.argv[1:], "--device", "rocm", "--probe-passed"])
+    print(f"Embedding device: {device}", file=sys.stderr)
     from .inference import Models
     from .audio import PreparedAudio
     from .retrieval import available, album_vectors, rank, similar
-    engine = Models(args.assets, args.threads, device, text_only=args.mode in ("search", "similar"))
+    engine = Models(args.assets, args.threads, "cuda:0" if device == "rocm" else "cpu",
+                    text_only=args.mode in ("search", "similar"))
     if args.mode == "smoke":
         import numpy as np
         import tempfile
@@ -155,6 +170,10 @@ def main():
                              args.batch_size, lambda: stopped)
         counts.update(seconds=round(time.monotonic() - started, 3), device=device,
                       interrupted=stopped)
+        if device == "rocm":
+            import torch
+            counts.update(gpu_peak_allocated_bytes=torch.cuda.max_memory_allocated(),
+                          gpu_peak_reserved_bytes=torch.cuda.max_memory_reserved())
         print(json.dumps(counts, sort_keys=True))
         return 143 if stopped else (1 if counts["failed"] else 0)
     with open(args.manifest) as rows:

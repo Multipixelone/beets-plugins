@@ -79,6 +79,10 @@
         harmony = pkgs.callPackage ./plugins/harmony { inherit beets pythonPackages; };
         embed-models = pkgs.callPackage ./plugins/embed/models.nix { };
         embed-worker = pkgs.callPackage ./plugins/embed/runtime.nix { models = embed-models; };
+        beets-embed-worker-rocm = pkgs.callPackage ./plugins/embed/runtime.nix {
+          models = embed-models;
+          rocmSupport = true;
+        };
         embed = pkgs.callPackage ./plugins/embed { inherit beets pythonPackages; worker = embed-worker; };
 
         # beets & plugins
@@ -177,7 +181,7 @@
 
           default = beets-plugins;
         } // pkgs.lib.optionalAttrs (system == "x86_64-linux") {
-          inherit embed embed-worker;
+          inherit embed embed-worker beets-embed-worker-rocm;
         };
         devShells.default = env;
       }

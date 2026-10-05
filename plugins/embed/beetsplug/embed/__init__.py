@@ -13,6 +13,7 @@ from beets.library import Item, parse_query_parts
 from beets.plugins import BeetsPlugin
 
 from beets_embed.store import count_pending, model_ids
+from beets_embed.devices import DEVICES, select_worker
 
 
 # Substituted by Nix. The inference environment is never added to beets' PYTHONPATH.
@@ -89,7 +90,7 @@ class EmbedPlugin(BeetsPlugin):
             cmd.parser.add_option("--store", help="external vector store path")
             cmd.parser.add_option("--json", action="store_true", default=False)
             if cmd != similar:
-                cmd.parser.add_option("--device", type="choice", choices=["auto", "cpu", "gpu"])
+                cmd.parser.add_option("--device", type="choice", choices=list(DEVICES))
             if cmd != embed:
                 cmd.parser.add_option("--top-k", type="int", default=20)
         embed.func = lambda lib, opts, args: self.run(lib, opts, args, "embed")
@@ -128,10 +129,16 @@ class EmbedPlugin(BeetsPlugin):
                     counts = count_pending((json.loads(row) for row in rows), store_path, model_ids())
                 ui.print_(json.dumps(counts, sort_keys=True))
                 return
-            command = [WORKER, mode, "--manifest", str(manifest), "--store", store_path,
+            try:
+                worker, device = select_worker(
+                    (opts.device if mode != "similar" else None) or self.config["device"].as_str(), WORKER)
+            except ValueError as exc:
+                raise ui.UserError(str(exc)) from exc
+            command = [worker, mode, "--manifest", str(manifest), "--store", store_path,
                        "--threads", str(threads), "--batch-size", str(batch)]
-            if mode != "similar":
-                command.extend(["--device", opts.device or self.config["device"].as_str()])
+            command.extend(["--device", device])
+            if device == "rocm":
+                command.append("--probe-passed")
             if mode == "search":
                 command.extend(["--text", " ".join(args)])
                 if opts.albums:
