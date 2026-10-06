@@ -4,6 +4,7 @@ import { validateExport, groups, pointSizes, artworkSizes, seedLayout, layoutSpa
 import { CoverLoader, decodeCover, coverPolicy, drawnCoverPixels, constrainedCovers, coverPriority, mipTier, decodeOverview } from './covers.mjs';
 import { decodeColumn, selectionState, soundSections, groupLabels, placeLabels } from './sound.mjs';
 import { atlasLayout } from './atlas.mjs';
+import { DRAG_ALPHA, dragAlpha } from './physics.mjs';
 import { textVectors, phraseScores, topMatches, PhraseSearch } from './search.mjs';
 
 const $ = id => document.getElementById(id);
@@ -11,6 +12,7 @@ const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matc
 let graph, worker, data, clusters = [], edges = [], selected, paused = false;
 let coverLoader, coverTimer, atlasTimer, visibleCovers = [], atlasEntries = [], coverActive = false;
 let dragging = false, zooming = false, graphReady = false;
+let simulationAlpha = 1;
 let coverLimits, coverDpr = 1, overviewController, coverTiers = new Map();
 let labelTimer, labelGroups = [], labelDefinitions = [], trackedKey, hovered;
 let groupNames = [], groupIds = new Map(), lensOptions = new Map();
@@ -578,12 +580,22 @@ async function load(exported, name) {
       onPointMouseOut: () => hover(undefined), onPointClick: index => {
         initialFitPending = false; showInfo(index); $('search-results').hidden = true;
       },
-      onDragStart: () => { initialFitPending = false; dragging = true; hover(undefined); if (!paused) graph.start(0.25); },
-      onDragEnd: () => { dragging = false; scheduleCovers(); scheduleLabels(); if (!paused) graph.start(0.2); },
+      onDragStart: () => {
+        initialFitPending = false; dragging = true; hover(undefined);
+        if (!paused) graph.start(simulationAlpha = dragAlpha(simulationAlpha));
+      },
+      onDragEnd: () => {
+        dragging = false; scheduleCovers(); scheduleLabels();
+        if (!paused) graph.start(simulationAlpha = dragAlpha(simulationAlpha, true));
+      },
       onZoomStart: event => { if (event?.sourceEvent) initialFitPending = false; zooming = true; hover(undefined); },
       onZoom: scheduleLabels,
       onZoomEnd: () => { zooming = false; scheduleCovers(); scheduleLabels(); },
-      onSimulationTick: () => { scheduleCovers(); scheduleLabels(); },
+      onSimulationTick: alpha => {
+        simulationAlpha = alpha;
+        if (dragging && !paused && alpha < DRAG_ALPHA) graph.start(simulationAlpha = DRAG_ALPHA);
+        scheduleCovers(); scheduleLabels();
+      },
       onSimulationEnd: () => { fitInitialView(true); scheduleCovers(); scheduleLabels(); } };
     for (const [key, input] of forceInputs) config[key] = key === 'simulationFriction' ? 1 - Number(input.value) : Number(input.value);
     graph = new Graph($('graph'), config);

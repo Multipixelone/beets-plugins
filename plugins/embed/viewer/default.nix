@@ -6,7 +6,7 @@ buildNpmPackage {
     root = ./.;
     fileset = lib.fileset.unions [
       ./package.json ./package-lock.json ./build.mjs ./app.mjs ./worker.mjs
-      ./logic.mjs ./sound.mjs ./covers.mjs ./atlas.mjs ./cosmos-atlas-patch.mjs ./search.mjs ./index.html ./style.css ./server.py ./text_query.py ./tests
+      ./logic.mjs ./sound.mjs ./covers.mjs ./atlas.mjs ./cosmos-atlas-patch.mjs ./physics.mjs ./search.mjs ./index.html ./style.css ./server.py ./text_query.py ./tests
     ];
   };
   npmDepsHash = "sha256-rMjW7mYkrkOusOpbdTTwvwA5GET9/mECayN03DPMteQ=";

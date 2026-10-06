@@ -310,7 +310,7 @@ export function layoutParameters(albums, { spaceSize = 4096, margin = spaceSize 
   const repulsionScale = Math.min(1, 400 / Math.max(1, albums.length)) * distanceScale ** 2;
   return { geometryScale, distanceScale, repulsionScale, collisionAreaLimit,
     collisionArea: area + 4 * padding * diameterSum + 4 * albums.length * padding ** 2,
-    forces: { simulationRepulsion: 40 * repulsionScale, simulationLinkSpring: 0.01,
+    forces: { simulationRepulsion: 40 * repulsionScale, simulationLinkSpring: 0.05,
       simulationLinkDistance: 150 * distanceScale, simulationCollisionPadding: padding,
       simulationGravity: 0.008, simulationCluster: 0.001, simulationFriction: 0.5 } };
 }
