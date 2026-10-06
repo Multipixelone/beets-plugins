@@ -8,7 +8,7 @@ version = "0.1.0"
 description = "Offline music embeddings and retrieval for beets"
 requires-python = ">=3.13"
 license = "AGPL-3.0-or-later"
-dependencies = ["beets", "numpy"]
+dependencies = ["beets", "numpy", "Pillow"]
 
 [tool.setuptools.packages.find]
 include = ["beetsplug.embed*", "beets_embed*"]

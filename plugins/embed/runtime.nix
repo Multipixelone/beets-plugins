@@ -105,7 +105,7 @@ let
         };
         build-system = [ self.setuptools ];
         pythonRemoveDeps = [ "beets" ];
-        dependencies = [ self.numpy ];
+        dependencies = [ self.numpy self.pillow ];
         pythonImportsCheck = [ "beets_embed.store" ];
         doCheck = false;
       };

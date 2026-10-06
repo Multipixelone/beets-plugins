@@ -1,8 +1,60 @@
 import { Graph, defaultConfigValues } from '@cosmos.gl/graph';
-import { validateExport, groups, pointSizes, searchMatches } from './logic.mjs';
+import { validateExport, groups, pointSizes, searchMatches, showCovers, coverCandidates } from './logic.mjs';
+
+import { CoverLoader, decodeCover } from './covers.mjs';
 
 const $ = id => document.getElementById(id);
 let graph, worker, data, clusters = [], edges = [], selected, paused = false;
+let coverLoader, coverTimer, atlasTimer, visibleCovers = [], atlasEntries = [], coverActive = false;
+let dragging = false, zooming = false, graphReady = false;
+const coverURL = name => new URL(`covers/${name}`, location.href).href;
+function scheduleCovers() {
+  if (!coverTimer) coverTimer = setTimeout(() => { coverTimer = undefined; refreshCovers(); }, 500);
+}
+function scheduleAtlas() {
+  if (!atlasTimer) atlasTimer = setTimeout(() => { atlasTimer = undefined; updateAtlas(); }, 250);
+}
+function refreshCovers() {
+  if (!graphReady || !coverLoader || dragging || zooming) return;
+  coverActive = showCovers($('render-mode').value, graph.getZoomLevel(), data.albums.length, Number($('cover-zoom').value));
+  if (!coverActive) {
+    visibleCovers = []; coverLoader.setWanted([]); updateCoverSizes(); graph.render();
+    $('cover-status').textContent = 'Colored dots'; return;
+  }
+  // Native viewport query at most twice a second, never on every animation frame.
+  const { width, height } = $('graph').getBoundingClientRect();
+  const visible = graph.findPointsInRect([[0, 0], [width, height]]);
+  const priority = [selected, ...($('search').value.trim() ? searchMatches(data.albums, $('search').value) : [])];
+  visibleCovers = coverCandidates(data.albums, visible, priority);
+  coverLoader.setWanted(visibleCovers.map(i => coverURL(data.albums[i].cover)));
+  scheduleAtlas();
+}
+function updateCoverSizes() {
+  if (!graphReady) return;
+  const sizes = pointSizes(data.albums, $('size').value);
+  const imageSizes = Float32Array.from(sizes);
+  const shapes = new Float32Array(sizes.length);
+  const indices = new Float32Array(sizes.length).fill(-1);
+  const atlas = new Map(atlasEntries.map(([url], i) => [url, i]));
+  if (coverActive) for (const index of visibleCovers) {
+    const image = atlas.get(coverURL(data.albums[index].cover));
+    if (image !== undefined) { indices[index] = image; shapes[index] = 1; sizes[index] += 4; }
+  }
+  graph.setPointImageIndices(indices); graph.setPointImageSizes(imageSizes);
+  graph.setPointShapes(shapes); graph.setPointSizes(sizes);
+}
+function updateAtlas() {
+  if (!graphReady || !coverLoader) return;
+  if (dragging || zooming) { scheduleAtlas(); return; }
+  const entries = [...coverLoader.images.entries()].sort(([a], [b]) => a.localeCompare(b));
+  // setImageData repacks the whole texture. Never upload an unchanged atlas.
+  if (entries.length !== atlasEntries.length || entries.some(([url, image], i) =>
+    url !== atlasEntries[i]?.[0] || image !== atlasEntries[i]?.[1])) {
+    graph.setImageData(entries.map(([, image]) => image)); atlasEntries = entries;
+  }
+  updateCoverSizes(); graph.render();
+  if (coverActive) $('cover-status').textContent = `${visibleCovers.filter(i => coverLoader.images.has(coverURL(data.albums[i].cover))).length} covers in view · ${coverLoader.failed.size} unavailable`;
+}
 let generation = 0, revision = 0, edgeTimer;
 const forceSpecs = [
   ['Repulsion', 'simulationRepulsion', 0, 5, 0.05],
@@ -43,7 +95,7 @@ function detailText(album) {
     `${album.summed_plays.toLocaleString()} plays · ${album.mean_plays.toLocaleString(undefined, { maximumFractionDigits: 1 })} mean plays`;
 }
 function showInfo(index) {
-  selected = index;
+  selected = index; scheduleCovers();
   $('details').hidden = index === undefined;
   $('info').replaceChildren();
   if (index === undefined) return;
@@ -98,14 +150,19 @@ function updateSearch() {
   graph.setConfigPartial({ highlightedPointIndices: search ? matches : undefined,
     highlightedLinkIndices: search ? edges.flatMap((e, i) => set.has(e.source) && set.has(e.target) ? [i] : []) : undefined });
   $('matches').textContent = search ? `${matches.length} matching albums` : '';
-  graph.render();
+  graph.render(); scheduleCovers();
 }
 async function load(exported, name) {
   try {
     validateExport(exported);
     generation++; revision = 0; clearTimeout(edgeTimer);
+    coverLoader?.destroy(); clearTimeout(coverTimer); clearTimeout(atlasTimer);
+    coverTimer = atlasTimer = undefined; graphReady = false; dragging = zooming = false;
+    atlasEntries = []; visibleCovers = [];
     worker?.terminate(); worker = undefined; graph?.destroy(); graph = undefined;
-    data = exported; edges = []; clusters = []; selected = undefined;
+    data = exported;
+    if (data.schema_version === 1) data.albums.forEach(album => { album.cover = null; });
+    edges = []; clusters = []; selected = undefined;
     $('details').hidden = true; $('tooltip').hidden = true;
     $('search').value = ''; $('matches').textContent = ''; $('legend').replaceChildren();
     const skipped = data.summary?.skipped_albums ?? 0;
@@ -122,7 +179,11 @@ async function load(exported, name) {
       onMouseMove: (index, position, event) => hover(index, event),
       onPointMouseOver: (index, position, event) => hover(index, event?.sourceEvent ?? event),
       onPointMouseOut: () => hover(undefined), onPointClick: index => showInfo(index),
-      onDragEnd: () => { if (!paused) graph.start(0.7); } };
+      onDragStart: () => { dragging = true; coverLoader?.setWanted([]); },
+      onDragEnd: () => { dragging = false; scheduleCovers(); if (!paused) graph.start(0.7); },
+      onZoomStart: () => { zooming = true; coverLoader?.setWanted([]); },
+      onZoomEnd: () => { zooming = false; scheduleCovers(); },
+      onSimulationTick: scheduleCovers, onSimulationEnd: scheduleCovers };
     for (const [key, input] of forceInputs) config[key] = key === 'simulationFriction' ? 1 - Number(input.value) : Number(input.value);
     graph = new Graph($('graph'), config);
     const currentGeneration = generation;
@@ -135,7 +196,9 @@ async function load(exported, name) {
       positions[i * 2 + 1] = 2048 + Math.sin(angle) * radius;
     });
     graph.setPointPositions(positions);
-    graph.setPointSizes(pointSizes(data.albums, $('size').value));
+    graphReady = true;
+    coverLoader = new CoverLoader(decodeCover, scheduleAtlas);
+    updateCoverSizes(); scheduleCovers();
     graph.render(); if (paused) graph.pause(); else graph.start();
     worker = new Worker(new URL('./worker.js', import.meta.url), { type: 'module' });
     worker.onerror = event => status(`Graph worker failed: ${event.message}`, true);
@@ -168,7 +231,12 @@ for (const id of ['use-k', 'k', 'use-threshold', 'threshold']) {
     edgeTimer = setTimeout(() => worker.postMessage({ type: 'edges', options: options(), generation, revision }), 100);
   });
 }
-$('size').addEventListener('change', () => { if (graph) { graph.setPointSizes(pointSizes(data.albums, $('size').value)); graph.render(); } });
+$('size').addEventListener('change', () => { if (graph) { updateCoverSizes(); graph.render(); } });
+$('render-mode').addEventListener('change', refreshCovers);
+$('cover-zoom').addEventListener('input', () => {
+  $('cover-zoom-value').value = Number($('cover-zoom').value).toFixed(2); refreshCovers();
+});
+window.addEventListener('resize', scheduleCovers);
 $('group').addEventListener('change', () => { if (graph) { updateGroups(); reheat(); } });
 $('search').addEventListener('input', updateSearch);
 $('fit').addEventListener('click', () => graph?.fitView(250, 0.1, !paused));

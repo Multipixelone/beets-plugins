@@ -36,17 +36,19 @@ probabilities.
 ## Album similarity graph
 
 ```sh
-beet embed-graph-export -o albums.json
+beet embed-graph-export -o albums.json --covers-dir covers
 beet embed-graph-export artist:"Nick Drake" -o drake.json
 beet embed-graph-export --model text --store /path/to/vectors.sqlite3 -o albums.json
-nix run .#beets-album-graph -- --data "$PWD/albums.json"
+nix run .#beets-album-graph -- --data "$PWD/albums.json" --covers "$PWD/covers"
 ```
 
 The exporter also prints the packaged viewer command. Open its localhost URL
 (default port 8765; override with `--port`). The viewer accepts a file picker
-or a `?data=` URL as well. It runs offline with bundled cosmos.gl 3.4.2; no
-album covers are loaded. For frontend development, run `npm ci` and
-`npm run build` in `plugins/embed/viewer`, then `python server.py --data /path/to/albums.json`.
+or a `?data=` URL as well. It runs offline with bundled cosmos.gl 3.4.2.
+Cover URLs use `/covers/<filename>` on the viewer's server, including when JSON
+is loaded from the file picker or a different URL. For frontend development,
+run `npm ci` and `npm run build` in `plugins/embed/viewer`, then
+`python server.py --data /path/to/albums.json --covers /path/to/covers`.
 
 Track queries select whole albums. Every track contributes to track count and
 play statistics, using `lastfm_play_count`, then legacy `play_count`, then zero.
@@ -56,6 +58,46 @@ shown in album details. `style` (Discogs-EffNet) is the default embedding family
 `text` selects AMCLAP. The exporter never modifies items, albums, tags, or the
 embedding store; ordinary beets startup behavior still applies. Output cannot
 overwrite either database or its SQLite sidecars, including aliases.
+
+`--covers-dir DIR` enables a dedicated incremental thumbnail cache. Pillow fits
+full artwork into 128×128 JPEGs with neutral padding; quality 82 JPEG keeps
+encoding inexpensive and works in browsers without extra codecs. Original
+artwork is opened only for reading. Names hash the resolved source path, file
+identity, size, nanosecond modification time, and thumbnail recipe; unchanged
+sources skip decoding. Thumbnail and manifest writes are atomic. After publishing
+the JSON, the exporter prunes only previously recorded cache files no longer
+used by the export, leaving unrelated files alone. Use one cache directory per
+export/query and serialize exports to that cache with the usual import lock.
+Do not delete its `.album-graph-covers.json` ownership manifest.
+
+Missing, unreadable or corrupt art produces `cover: null`, with counts in the
+summary; thumbnail failures do not fail the export. An invalid or unwritable
+cache directory is a configuration error. Exports use schema v2 and include a
+relative `cover` filename or null on every album; omitting `--covers-dir` disables
+covers. The viewer also accepts v1 exports and shows colored dots for them.
+`--covers DIR` serves only allowed hashed JPEG names, rejects symlinks and
+traversal, and sets immutable cache headers. It never exposes original art paths.
+
+Covers is the default rendering mode. Dots disables cover loading; Auto uses dots
+below the adjustable zoom threshold (initially 1) or above 1,000 albums. Missing
+and not-yet-loaded covers remain dots. Native GPU images retain a colored group
+border and all picking/dragging behavior. Visible covers load lazily with at most
+four concurrent requests/decodes and 256 resident images; off-screen images are
+evicted first. Atlas uploads are batched and deferred during drag/zoom gestures.
+
+For systemd deployment, pass `--covers-dir /var/lib/beets-album-graph/covers` to
+the export and `--covers /var/lib/beets-album-graph/covers` to the server. The
+exporter needs read/traverse access to artwork directories as well as its usual
+library and embedding-store access. Finn's stored art paths are relative to the
+music root `/volume1/Media/Music`; resolved artwork there needs read access.
+The cover directory needs exporter write access and server read/traverse access.
+New cache directories use mode 0750 and thumbnails/manifest use 0640; share the
+`album-graph` group as in the existing services. JSON permissions remain managed
+by the existing publication wrapper. Keep this cache persistent across daily
+runs, even if JSON is exported into a staging directory. The 99-album smoke
+sample produced 0.51 MiB of JPEGs (0.73 MiB allocated for the cache). Scaling
+that sample to all 6,268 artworks suggests about 32 MiB of JPEGs, or roughly
+46 MiB allocated; actual size depends on artwork complexity and shared sources.
 
 Tune kNN, cosine threshold, physics, node size, and color/grouping without
 exporting again. With both edge rules enabled, the threshold filters each

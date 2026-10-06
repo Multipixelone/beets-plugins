@@ -1,8 +1,8 @@
 // DOM-free data and graph logic, shared by the browser worker and Node tests.
 export function validateExport(data) {
-  if (!data || data.schema_version !== 1 || typeof data.model_id !== 'string' ||
+  if (!data || ![1, 2].includes(data.schema_version) || typeof data.model_id !== 'string' ||
       typeof data.exported_at !== 'string' || !Array.isArray(data.albums)) {
-    throw new Error('Expected an album graph export with schema_version 1.');
+    throw new Error('Expected an album graph export with schema_version 1 or 2.');
   }
   const ids = new Set();
   let dimension;
@@ -11,6 +11,10 @@ export function validateExport(data) {
       throw new Error('Album IDs must be unique positive integers.');
     }
     ids.add(album.id);
+    if (data.schema_version === 2 && album.cover !== null &&
+        (typeof album.cover !== 'string' || !/^cover-[0-9a-f]{64}\.jpg$/.test(album.cover))) {
+      throw new Error('Invalid cover filename.');
+    }
     for (const key of ['album', 'albumartist', 'genre']) {
       if (typeof album[key] !== 'string') throw new Error(`Invalid album ${key}.`);
     }
@@ -122,4 +126,22 @@ export function searchMatches(albums, search) {
   const needle = search.trim().toLocaleLowerCase();
   return albums.flatMap((a, i) =>
     `${a.album}\n${a.albumartist}`.toLocaleLowerCase().includes(needle) ? [i] : []);
+}
+
+// Auto alone applies the zoom/count cutoffs. Forced covers still use a bounded atlas.
+export function showCovers(mode, zoom, count, threshold = 1) {
+  return mode === 'covers' || (mode === 'auto' && zoom >= threshold && count <= 1000);
+}
+
+export function coverCandidates(albums, visible, priority = [], capacity = 256) {
+  const onScreen = new Set(visible);
+  const seen = new Set();
+  const result = [];
+  for (const index of [...priority, ...visible]) {
+    if (result.length >= capacity) break;
+    if (onScreen.has(index) && albums[index]?.cover && !seen.has(index)) {
+      seen.add(index); result.push(index);
+    }
+  }
+  return result;
 }

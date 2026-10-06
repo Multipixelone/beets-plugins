@@ -7,6 +7,8 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+from PIL import Image
+
 import numpy as np
 from beets.library import Album, Item, Library
 from beetsplug.embed import EmbedPlugin
@@ -46,7 +48,10 @@ class GraphExportTests(unittest.TestCase):
 
     def test_pooling_plays_and_missing_vectors(self):
         result = self.export()
-        self.assertEqual(result['summary'], dict(selected_albums=2, exported_albums=1, skipped_albums=1))
+        self.assertEqual({k: result['summary'][k] for k in ('selected_albums', 'exported_albums', 'skipped_albums')},
+                         dict(selected_albums=2, exported_albums=1, skipped_albums=1))
+        self.assertIsNone(result['albums'][0]['cover'])
+        self.assertFalse(result['summary']['covers_enabled'])
         album = result['albums'][0]
         self.assertEqual(album['id'], self.first.id)
         self.assertEqual(album['album'], 'First')
@@ -58,18 +63,19 @@ class GraphExportTests(unittest.TestCase):
         self.assertAlmostEqual(album['mean_plays'], 16 / 3)
         np.testing.assert_array_equal(album['vector'], [.5, .5])
         self.assertEqual(result['model_id'], 'style:v1')
-        self.assertEqual(result['schema_version'], 1)
+        self.assertEqual(result['schema_version'], 2)
         self.assertIn('+00:00', result['exported_at'])
         self.assertEqual(json.loads(self.output.read_text()), result)
 
     def test_query_selects_whole_album_without_writes_or_inference(self):
         standalone = Item(path=b'/unused.wav', artist='Finn', album='Single')
         self.lib.add(standalone)
-        before = list(self.lib._connection().iterdump())
         store_hash = hashlib.sha256(self.store_path.read_bytes()).hexdigest()
         command = next(cmd for cmd in EmbedPlugin().commands() if cmd.name == 'embed-graph-export')
+        self.set_art()
         opts, args = command.parser.parse_args(['-o', str(self.output), '--store', str(self.store_path),
-                                               f'id:{self.items[0].id}'])
+                                               '--covers-dir', str(self.root / 'covers'), f'id:{self.items[0].id}'])
+        before = list(self.lib._connection().iterdump())
         with patch('beetsplug.embed.model_ids', return_value={'style': 'style:v1', 'text': 'text:v1'}), \
              patch.object(Item, 'store', side_effect=AssertionError('item write')), \
              patch.object(Album, 'store', side_effect=AssertionError('album write')), \
@@ -82,6 +88,7 @@ class GraphExportTests(unittest.TestCase):
         self.assertEqual(result['summary']['selected_albums'], 1)
         self.assertEqual(result['albums'][0]['track_count'], 3)
         self.assertEqual(result['albums'][0]['summed_plays'], 16)
+        self.assertEqual(result['summary']['covers_generated'], 1)
         self.assertEqual(before, list(self.lib._connection().iterdump()))
         self.assertEqual(store_hash, hashlib.sha256(self.store_path.read_bytes()).hexdigest())
         opts, args = command.parser.parse_args(['-o', str(self.output), '--store', str(self.store_path),
@@ -136,6 +143,114 @@ class GraphExportTests(unittest.TestCase):
                 self.export()
         self.assertEqual(self.output.read_text(), 'keep me')
         self.assertEqual(list(self.root.glob('.album-graph-*')), [])
+
+
+    def set_art(self, path=None):
+        path = path or self.root / 'art.png'
+        Image.new('RGBA', (300, 150), (200, 40, 20, 255)).save(path)
+        self.first.artpath = os.fsencode(path)
+        self.first.store()
+        return path
+
+    def export_covers(self, selected=None):
+        return export_albums(self.lib, selected if selected is not None else {self.first.id},
+                             self.store_path, 'style:v1', self.output, self.root / 'covers')
+
+    def test_thumbnails_preserve_art_and_reuse_then_prune_changed_and_removed(self):
+        source = self.set_art()
+        original = source.read_bytes()
+        result = self.export_covers()
+        name = result['albums'][0]['cover']
+        self.assertRegex(name, r'^cover-[0-9a-f]{64}\.jpg$')
+        thumbnail = self.root / 'covers' / name
+        with Image.open(thumbnail) as image:
+            self.assertEqual(image.size, (128, 128))
+            self.assertEqual(image.format, 'JPEG')
+            self.assertLess(max(image.getpixel((64, 8))), 40)  # Padding rather than cropping.
+            self.assertGreater(image.getpixel((64, 64))[0], 180)
+        self.assertEqual(thumbnail.stat().st_mode & 0o777, 0o640)
+        stamp = thumbnail.stat().st_mtime_ns
+        with patch('beets_embed.covers.Image.open', side_effect=AssertionError('decoded unchanged art')):
+            repeated = self.export_covers()
+        self.assertEqual(repeated['summary']['covers_reused'], 1)
+        self.assertEqual(thumbnail.stat().st_mtime_ns, stamp)
+        self.assertEqual(source.read_bytes(), original)
+        unrelated = self.root / 'covers' / ('cover-' + 'f' * 64 + '.jpg')
+        unrelated.write_bytes(b'not owned by exporter')
+        Image.new('RGB', (130, 200), (30, 100, 200)).save(source)
+        changed = self.export_covers()
+        self.assertNotEqual(changed['albums'][0]['cover'], name)
+        self.assertEqual(changed['summary']['covers_generated'], 1)
+        self.assertEqual(changed['summary']['covers_pruned'], 1)
+        self.assertFalse(thumbnail.exists())
+        self.assertTrue(unrelated.exists())
+        removed = self.export_covers(set())
+        self.assertEqual(removed['summary']['covers_pruned'], 1)
+        self.assertEqual(list((self.root / 'covers').glob('cover-*.jpg')), [unrelated])
+        self.assertEqual(json.loads(self.output.read_text()), removed)
+        self.assertFalse(list((self.root / 'covers').glob('.cover-*')))
+
+    def test_missing_unreadable_and_corrupt_art_do_not_fail_export(self):
+        self.assertEqual(self.export_covers()['summary']['covers_missing'], 1)
+        source = self.set_art()
+        source.write_bytes(b'corrupt image')
+        result = self.export_covers()
+        self.assertIsNone(result['albums'][0]['cover'])
+        self.assertEqual(result['summary']['covers_missing'], 1)
+        source.unlink()
+        self.assertIsNone(self.export_covers()['albums'][0]['cover'])
+        source = self.set_art()
+        original_open = Path.open
+        def unreadable(path, *args, **kwargs):
+            if path == source:
+                raise PermissionError('no read permission')
+            return original_open(path, *args, **kwargs)
+        with patch.object(Path, 'open', unreadable):
+            self.assertIsNone(self.export_covers()['albums'][0]['cover'])
+
+    def test_shared_art_and_atomic_failure_preserve_previous_export(self):
+        source = self.set_art()
+        with Store(self.store_path) as store:
+            store.put(self.items[3].id, fingerprint(self.items[3].path), 'style:v1', [1, 1], [0, 0])
+        self.missing.artpath = os.fsencode(source)
+        self.missing.store()
+        result = self.export_covers({self.first.id, self.missing.id})
+        self.assertEqual(result['albums'][0]['cover'], result['albums'][1]['cover'])
+        self.assertEqual(result['summary']['covers_generated'], 1)
+        self.assertEqual(result['summary']['covers_reused'], 1)
+        before = self.output.read_bytes()
+        old_cover = self.root / 'covers' / result['albums'][0]['cover']
+        Image.new('RGB', (200, 200), 'blue').save(source)
+        with patch('beets_embed.graph_export.write_export', side_effect=OSError('cannot publish')):
+            with self.assertRaises(OSError):
+                self.export_covers()
+        self.assertEqual(self.output.read_bytes(), before)
+        self.assertTrue(old_cover.exists())
+        self.assertEqual(list((self.root / 'covers').glob('cover-*.jpg')), [old_cover])
+        with patch('beets_embed.covers.atomic_write', side_effect=OSError('cannot encode/write')):
+            failed = self.export_covers()
+        self.assertIsNone(failed['albums'][0]['cover'])
+        self.assertEqual(failed['summary']['covers_missing'], 1)
+
+    def test_art_and_manifest_aliases_are_protected(self):
+        source = self.set_art()
+        before = source.read_bytes()
+        with self.assertRaises(ValueError):
+            self.export_to(source)
+        covers = self.root / 'covers'
+        covers.mkdir()
+        (covers / '.album-graph-covers.json').symlink_to(source)
+        with self.assertRaises(ValueError):
+            self.export_covers()
+        self.assertEqual(source.read_bytes(), before)
+        (covers / '.album-graph-covers.json').unlink()
+        result = self.export_covers()
+        cover = covers / result['albums'][0]['cover']
+        cover.unlink()
+        os.link(source, cover)
+        self.assertIsNone(self.export_covers()['albums'][0]['cover'])
+        self.assertEqual(source.read_bytes(), before)
+        self.assertTrue(cover.exists())
 
 
 if __name__ == '__main__':

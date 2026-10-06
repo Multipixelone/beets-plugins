@@ -9,7 +9,7 @@ pythonPackages.buildPythonPackage {
   };
   build-system = [ pythonPackages.setuptools ];
   pythonRemoveDeps = [ "beets" ];
-  dependencies = [ pythonPackages.numpy ];
+  dependencies = [ pythonPackages.numpy pythonPackages.pillow ];
   postPatch = ''
     substituteInPlace beetsplug/embed/__init__.py \
       --replace-fail '@embed-worker@' '${worker}/bin/beets-embed-worker' \

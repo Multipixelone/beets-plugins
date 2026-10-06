@@ -1,6 +1,7 @@
 """Read current album embeddings and statistics without modifying either database."""
 
 import json
+import logging
 import math
 import os
 import tempfile
@@ -9,18 +10,27 @@ from pathlib import Path
 
 import numpy as np
 
+from .covers import CoverCache, source_path
 from .retrieval import album_vectors
 from .store import Store
 
 
 def protect_output(output, *inputs):
     target = Path(output).expanduser().absolute()
+    resolved_target = target.resolve()
     for source in inputs:
         source = Path(source).expanduser().absolute()
         for protected in (source, *(Path(str(source) + suffix) for suffix in ("-wal", "-shm", "-journal"))):
-            if target.resolve() == protected.resolve() or (
-                    target.exists() and protected.exists() and os.path.samefile(target, protected)):
-                raise ValueError("Output must not overwrite an input database or SQLite sidecar")
+            try:
+                resolved_source = protected.resolve()
+            except OSError:
+                resolved_source = protected.absolute()
+            try:
+                same_file = target.exists() and protected.exists() and os.path.samefile(target, protected)
+            except OSError:
+                same_file = False
+            if resolved_target == resolved_source or same_file:
+                raise ValueError("Output must not overwrite an input database, artwork, or SQLite sidecar")
     return target
 
 
@@ -35,11 +45,12 @@ def plays(item):
     return count if math.isfinite(count) and count >= 0 else 0
 
 
-def export_albums(lib, selected_ids, store_path, model, output):
+def export_albums(lib, selected_ids, store_path, model, output, covers_dir=None):
     """Queries choose albums; pooling and play statistics always use whole albums."""
     target = protect_output(output, lib.path, store_path)
     selected_ids = set(selected_ids) - {None, 0}
     albums = []
+    artwork = []
     dimension = None
     with Store(store_path, readonly=True) as store:
         # Only hydrate albums which could have vectors. An almost empty store
@@ -80,17 +91,48 @@ def export_albums(lib, selected_ids, store_path, model, output):
                  if item.get("genre") or item.get("genres")), "")
             if isinstance(genre, (list, tuple)):
                 genre = "; ".join(genre)
+            artwork.append(source_path(album.artpath, lib.directory))
             albums.append({"id": album_id, "album": album.album,
                            "albumartist": album.albumartist, "genre": genre,
                            "year": album.year, "track_count": len(items),
                            "embedded_tracks": info["embedded_tracks"],
                            "summed_plays": summed, "mean_plays": summed / len(items),
-                           "vector": vector.tolist()})
-    result = {"schema_version": 1, "model_id": model,
+                           "vector": vector.tolist(), "cover": None})
+    # A JSON output cannot overwrite original artwork either.
+    protect_output(target, *(path for path in artwork if path is not None))
+    cache = CoverCache(covers_dir, artwork, [lib.path, store_path, target,
+                       *(str(path) + suffix for path in (lib.path, store_path)
+                         for suffix in ("-wal", "-shm", "-journal"))]) if covers_dir else None
+    result = {"schema_version": 2, "model_id": model,
               "exported_at": datetime.now(timezone.utc).isoformat(),
               "summary": {"selected_albums": len(selected_ids), "exported_albums": len(albums),
-                          "skipped_albums": len(selected_ids) - len(albums)},
+                          "skipped_albums": len(selected_ids) - len(albums),
+                          "covers_enabled": bool(cache), "covers_available": 0, "covers_missing": 0,
+                          "covers_generated": 0, "covers_reused": 0, "covers_pruned": 0},
               "albums": albums}
+    try:
+        if cache:
+            for album, source in zip(albums, artwork):
+                album["cover"] = cache.cover(source)
+            result["summary"].update(cache.stats)
+        write_export(result, target, lib.path, store_path, artwork)
+    except BaseException:
+        if cache:
+            cache.abort()
+        raise
+    if cache:
+        try:
+            cache.finish()
+        except (OSError, ValueError) as exc:
+            # Cache maintenance must not invalidate a published export.
+            logging.getLogger(__name__).warning("Cannot finish cover cache maintenance: %s", exc)
+        if cache.stats["covers_pruned"]:
+            result["summary"]["covers_pruned"] = cache.stats["covers_pruned"]
+            write_export(result, target, lib.path, store_path, artwork)
+    return result
+
+
+def write_export(result, target, lib_path, store_path, artwork):
     temporary = None
     try:
         with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=target.parent,
@@ -98,10 +140,8 @@ def export_albums(lib, selected_ids, store_path, model, output):
             temporary = Path(out.name)
             json.dump(result, out, ensure_ascii=False, allow_nan=False, separators=(",", ":"))
             out.write("\n")
-        # Recheck after collection, including aliases created while exporting.
-        protect_output(target, lib.path, store_path)
+        protect_output(target, lib_path, store_path, *(path for path in artwork if path is not None))
         os.replace(temporary, target)
     finally:
         if temporary is not None:
             temporary.unlink(missing_ok=True)
-    return result

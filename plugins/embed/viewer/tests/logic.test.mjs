@@ -51,3 +51,11 @@ test('size metrics, missing metadata grouping and search', () => {
   assert.deepEqual(searchMatches(albums, 'album 2'), [1]);
   assert.deepEqual(searchMatches(albums, 'missing'), []);
 });
+
+test('v2 accepts null and hashed covers; v1 works without covers', () => {
+  const make = cover => ({ ...exported([album(1, [1], { cover })]), schema_version: 2 });
+  for (const cover of [null, `cover-${'a'.repeat(64)}.jpg`]) assert.doesNotThrow(() => validateExport(make(cover)));
+  for (const cover of [undefined, '../art.jpg', 'https://example.com/art.jpg', 'cover-abc.jpg', 3]) {
+    assert.throws(() => validateExport(make(cover)));
+  }
+});

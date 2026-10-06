@@ -17,6 +17,9 @@
     <p class="muted">Both enabled: threshold filters kNN. Links are undirected; degree can exceed k.</p>
   </fieldset>
   <fieldset><legend>Physics</legend><div id="forces"></div></fieldset>
+  <label>Render nodes<select id="render-mode"><option value="covers">Covers</option><option value="dots">Dots</option><option value="auto">Auto</option></select></label>
+  <label>Auto: minimum zoom <output id="cover-zoom-value">1.00</output><input id="cover-zoom" type="range" min="0.1" max="5" step="0.1" value="1"></label>
+  <p id="cover-status" class="muted">Covers load as they enter the view. Auto uses dots above 1,000 albums.</p>
   <label>Node size<select id="size"><option value="summed_plays">Summed plays</option><option value="mean_plays">Mean plays</option><option value="track_count">Track count</option><option value="uniform">Uniform</option></select></label>
   <label>Color and group<select id="group"><option value="cluster">Automatic sound community</option><option value="genre">Genre</option><option value="albumartist">Album artist</option><option value="year">Year</option><option value="decade">Decade</option></select></label>
   <div class="buttons"><button id="fit">Fit view</button><button id="pause">Pause</button></div>
@@ -25,7 +28,7 @@
   <a class="muted" href="THIRD_PARTY_LICENSES.txt">Open-source licenses</a>
 </aside>
 <main><div id="graph" aria-label="Interactive album similarity graph"></div>
-  <div id="empty">Every dot is an album.<br>Load an export to explore.</div>
+  <div id="empty">Every node is an album.<br>Load an export to explore.</div>
   <section id="details" hidden aria-label="Selected album"><button id="clear" aria-label="Close album details">×</button><div id="info"></div></section>
   <div id="tooltip" hidden></div>
 </main>
