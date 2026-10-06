@@ -1,9 +1,11 @@
 """Serve packaged graph assets and one explicitly selected JSON file on localhost."""
 
 import argparse
+import hashlib
 import os
 import re
 import stat
+import threading
 from functools import partial
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -20,20 +22,49 @@ class Handler(SimpleHTTPRequestHandler):
         self.covers = covers
         super().__init__(*args, **kwargs)
 
+    def revalidated_file(self, target, content_type):
+        """Hash and serve the same inode, even while exports are atomically replaced."""
+        file = None
+        try:
+            file = target.open('rb')
+            info = os.fstat(file.fileno())
+            if not stat.S_ISREG(info.st_mode):
+                file.close()
+                raise OSError('Not a regular file')
+            identity = (info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns, info.st_ctime_ns)
+            # One entry per permitted path; no unbounded request-key cache.
+            with self.server.etag_lock:
+                cached = self.server.etags.get(str(target))
+                if cached and cached[0] == identity:
+                    etag = cached[1]
+                else:
+                    etag = '"' + hashlib.file_digest(file, 'sha256').hexdigest() + '"'
+                    self.server.etags[str(target)] = (identity, etag)
+            file.seek(0)
+        except OSError:
+            if file is not None:
+                file.close()
+            self.send_error(404, 'File is unavailable')
+            return None
+        requested = self.headers.get('If-None-Match', '')
+        matches = any(tag.strip().removeprefix('W/') in (etag, '*') for tag in requested.split(','))
+        self.send_response(304 if matches else 200)
+        self.send_header('Cache-Control', 'no-cache')
+        self.send_header('ETag', etag)
+        self.send_header('X-Content-Type-Options', 'nosniff')
+        if not matches:
+            self.send_header('Content-Type', content_type)
+            self.send_header('Content-Length', str(info.st_size))
+        self.end_headers()
+        if matches:
+            file.close()
+            return None
+        return file
+
     def send_head(self):
         path = urlsplit(self.path).path
         if path == "/data.json" and self.data is not None:
-            try:
-                file = self.data.open("rb")
-            except OSError:
-                self.send_error(404, "Export is unavailable")
-                return None
-            self.send_response(200)
-            self.send_header("Content-Type", "application/json")
-            self.send_header("Content-Length", str(self.data.stat().st_size))
-            self.send_header("Cache-Control", "no-store")
-            self.end_headers()
-            return file
+            return self.revalidated_file(self.data, 'application/json')
         if self.covers is not None and COVER_PATH.fullmatch(path):
             try:
                 # O_NOFOLLOW also protects against symlink swaps between checking and opening.
@@ -56,7 +87,15 @@ class Handler(SimpleHTTPRequestHandler):
         if path not in ASSETS:
             self.send_error(404)
             return None
-        return super().send_head()
+        target = Path(self.directory) / ('index.html' if path == '/' else path[1:])
+        return self.revalidated_file(target, self.guess_type(str(target)))
+
+
+class Server(ThreadingHTTPServer):
+    def __init__(self, *args, **kwargs):
+        self.etags = {}
+        self.etag_lock = threading.Lock()
+        super().__init__(*args, **kwargs)
 
 
 def main():
@@ -79,7 +118,7 @@ def main():
     if not (args.assets / "index.html").is_file():
         parser.error("viewer assets are missing; run npm ci and npm run build first")
     handler = partial(Handler, directory=str(args.assets.resolve()), data=args.data, covers=args.covers)
-    with ThreadingHTTPServer(("127.0.0.1", args.port), handler) as server:
+    with Server(("127.0.0.1", args.port), handler) as server:
         suffix = "/?data=data.json" if args.data else "/"
         print(f"Album graph: http://127.0.0.1:{args.port}{suffix}", flush=True)
         try:

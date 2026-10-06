@@ -121,10 +121,13 @@ class Models:
         self.amclap = module.eval().to(self.device)
 
     def text(self, text):
+        return self.text_batch([text])[0]
+
+    def text_batch(self, texts):
         self.load_text()
         import torch
         with torch.inference_mode():
-            return unit(self.amclap.forward_text([text]).cpu().numpy()[0])
+            return unit(self.amclap.forward_text(texts).cpu().numpy())
 
     def style(self, prepared, batch_size):
         moments = Moments()

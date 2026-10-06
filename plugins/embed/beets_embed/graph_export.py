@@ -4,6 +4,7 @@ import json
 import logging
 import math
 import os
+import subprocess
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
@@ -12,7 +13,10 @@ import numpy as np
 
 from .covers import CoverCache, source_path
 from .retrieval import album_vectors
-from .store import Store
+from .store import Store, model_ids
+from .sounds import (ESSENTIA_FIELDS, LabelColumns, add_main_labels, aggregate_essentia,
+                     compact_sound, pool_heads, quantize_vector)
+from .descriptors import add_descriptors, phrase_embeddings, vocabulary
 
 
 def protect_output(output, *inputs):
@@ -45,12 +49,15 @@ def plays(item):
     return count if math.isfinite(count) and count >= 0 else 0
 
 
-def export_albums(lib, selected_ids, store_path, model, output, covers_dir=None):
+def export_albums(lib, selected_ids, store_path, model, output, covers_dir=None,
+                  descriptors_file=None, cache_dir=None, worker=None):
     """Queries choose albums; pooling and play statistics always use whole albums."""
     target = protect_output(output, lib.path, store_path)
     selected_ids = set(selected_ids) - {None, 0}
     albums = []
     artwork = []
+    heads, text_vectors = [], []
+    models = model_ids()
     dimension = None
     with Store(store_path, readonly=True) as store:
         # Only hydrate albums which could have vectors. An almost empty store
@@ -84,6 +91,15 @@ def export_albums(lib, selected_ids, store_path, model, output, covers_dir=None)
                 raise ValueError("Album vectors have inconsistent dimensions")
             dimension = vector.size
             summed = sum(plays(item) for item in items)
+            # Layout can be style or text; sound heads always use the current
+            # style identity, and CLAP always uses the current text identity.
+            heads.append(pool_heads(store, tracks, models['style']))
+            text = list(album_vectors(store, tracks, models['text']))
+            text_vector = np.asarray(text[0][1], dtype='f4') if text else None
+            if text_vector is not None and (text_vector.shape != (512,) or
+                    not np.isfinite(text_vector).all() or not np.any(text_vector)):
+                text_vector = None
+            text_vectors.append(text_vector)
             # Current beets uses a multi-value genres field; older libraries
             # and plugins may still expose genre as a flexible attribute.
             genre = album.get("genre") or album.get("genres") or next(
@@ -97,18 +113,42 @@ def export_albums(lib, selected_ids, store_path, model, output, covers_dir=None)
                            "year": album.year, "track_count": len(items),
                            "embedded_tracks": info["embedded_tracks"],
                            "summed_plays": summed, "mean_plays": summed / len(items),
-                           "vector": vector.tolist(), "cover": None})
+                           "vector": quantize_vector(vector), "cover": None,
+                           "text_embedded_tracks": text[0][0]['embedded_tracks'] if text_vector is not None else 0,
+                           "essentia": aggregate_essentia(items)})
     # A JSON output cannot overwrite original artwork either.
     protect_output(target, *(path for path in artwork if path is not None))
     cache = CoverCache(covers_dir, artwork, [lib.path, store_path, target,
                        *(str(path) + suffix for path in (lib.path, store_path)
                          for suffix in ("-wal", "-shm", "-journal"))]) if covers_dir else None
-    result = {"schema_version": 2, "model_id": model,
+    columns = LabelColumns(len(albums))
+    add_main_labels(albums, heads, columns)
+    descriptor_summary = {'descriptor_cache': 'unused', 'descriptor_albums': 0}
+    if any(vector is not None for vector in text_vectors):
+        rows, digest = vocabulary(descriptors_file)
+        try:
+            embeddings, cache_status = phrase_embeddings(
+                rows, digest, models['text'], cache_dir or target.parent / '.album-graph-cache', worker,
+                [lib.path, store_path, target, *(path for path in artwork if path is not None),
+                 *([descriptors_file] if descriptors_file else [])])
+            add_descriptors(albums, text_vectors, rows, embeddings, columns)
+            descriptor_summary.update(descriptor_cache=cache_status,
+                                      descriptor_albums=sum(vector is not None for vector in text_vectors))
+        except (OSError, ValueError, subprocess.SubprocessError) as exc:
+            logging.getLogger(__name__).warning('Skipping CLAP descriptors: %s', exc)
+            descriptor_summary['descriptor_cache'] = 'unavailable'
+    labels = columns.export()
+    compact_sound(albums, labels)
+    result = {"schema_version": 3, "model_id": model, "text_model_id": models['text'],
+              "vector_encoding": "int8-base64", "vector_dimension": dimension or 0,
+              "sound_encoding": "catalog-pairs-v1", "essentia_fields": list(ESSENTIA_FIELDS),
+              "labels": labels,
               "exported_at": datetime.now(timezone.utc).isoformat(),
               "summary": {"selected_albums": len(selected_ids), "exported_albums": len(albums),
                           "skipped_albums": len(selected_ids) - len(albums),
                           "covers_enabled": bool(cache), "covers_available": 0, "covers_missing": 0,
-                          "covers_generated": 0, "covers_reused": 0, "covers_pruned": 0},
+                          "covers_generated": 0, "covers_reused": 0, "covers_pruned": 0,
+                          **descriptor_summary},
               "albums": albums}
     try:
         if cache:

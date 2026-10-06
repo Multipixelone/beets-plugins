@@ -3,12 +3,23 @@
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Album similarity graph</title><link rel="stylesheet" href="style.css"></head>
 <body>
+<button id="controls-toggle" aria-controls="controls" aria-expanded="false">Controls</button>
 <aside id="controls">
   <h1>Album graph</h1><p class="muted">Explore the sound of your library.</p>
   <label class="file">Load album export<input id="file" type="file" accept=".json,application/json"></label>
   <p id="source" class="muted">Choose an exported JSON file.</p>
   <label>Find album or artist<input id="search" type="search" placeholder="Search your library" disabled></label>
   <p id="matches" class="muted"></p>
+  <fieldset id="sound-controls" disabled><legend>Sound lens and filters</legend>
+    <label>Find a label<input id="lens" type="search" list="sound-labels" placeholder="Style, mood, texture…"><datalist id="sound-labels"></datalist></label>
+    <button id="clear-lens">Clear lens</button>
+    <label>Danceable: minimum <output id="dance-min-value">0.00</output><input id="dance-min" type="range" min="0" max="1" step="0.01" value="0"></label>
+    <label>Danceable: maximum <output id="dance-max-value">1.00</output><input id="dance-max" type="range" min="0" max="1" step="0.01" value="1"></label>
+    <label>Vocals<select id="vocal"><option value="any">Any</option><option value="voice">Vocal</option><option value="instrumental">Instrumental</option></select></label>
+    <label class="check"><input id="include-unknown" type="checkbox"> Include unknown filter values</label>
+    <p class="muted">Danceable is the Essentia classifier probability. Non-matches are dimmed.</p>
+  </fieldset>
+  <label class="check"><input id="show-labels" type="checkbox" checked> Show group sound labels</label>
   <fieldset><legend>Similarity edges</legend>
     <label class="check"><input id="use-k" type="checkbox" checked> k nearest neighbors</label>
     <label>Neighbors <output id="k-value">8</output><input id="k" type="range" min="0" max="100" step="1" value="8"></label>
@@ -21,13 +32,14 @@
   <label>Auto: minimum zoom <output id="cover-zoom-value">1.00</output><input id="cover-zoom" type="range" min="0.1" max="5" step="0.1" value="1"></label>
   <p id="cover-status" class="muted">Covers load as they enter the view. Auto uses dots above 1,000 albums.</p>
   <label>Node size<select id="size"><option value="summed_plays">Summed plays</option><option value="mean_plays">Mean plays</option><option value="track_count">Track count</option><option value="uniform">Uniform</option></select></label>
-  <label>Color and group<select id="group"><option value="cluster">Automatic sound community</option><option value="genre">Genre</option><option value="albumartist">Album artist</option><option value="year">Year</option><option value="decade">Decade</option></select></label>
+  <label>Color and group<select id="group"><option value="cluster">Automatic sound community</option><option value="genre">Genre</option><option value="albumartist">Album artist</option><option value="year">Year</option><option value="decade">Decade</option><option value="style">Top style</option><option value="mood">Top mood</option><option value="flavor">Top flavor word</option></select></label>
   <div class="buttons"><button id="fit">Fit view</button><button id="pause">Pause</button></div>
   <p id="status" role="status" aria-live="polite">Waiting for data.</p>
   <div id="legend" aria-label="Group legend"></div>
   <a class="muted" href="THIRD_PARTY_LICENSES.txt">Open-source licenses</a>
 </aside>
 <main><div id="graph" aria-label="Interactive album similarity graph"></div>
+  <div id="map-labels" aria-hidden="true"></div>
   <div id="empty">Every node is an album.<br>Load an export to explore.</div>
   <section id="details" hidden aria-label="Selected album"><button id="clear" aria-label="Close album details">×</button><div id="info"></div></section>
   <div id="tooltip" hidden></div>

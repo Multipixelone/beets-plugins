@@ -15,4 +15,4 @@ include = ["beetsplug.embed*", "beets_embed*"]
 namespaces = true
 
 [tool.setuptools.package-data]
-"beets_embed" = ["models.json"]
+"beets_embed" = ["models.json", "descriptors.json"]

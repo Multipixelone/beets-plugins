@@ -1,12 +1,55 @@
 import { Graph, defaultConfigValues } from '@cosmos.gl/graph';
-import { validateExport, groups, pointSizes, searchMatches, showCovers, coverCandidates } from './logic.mjs';
+import { validateExport, groups, pointSizes, showCovers, coverCandidates } from './logic.mjs';
 
 import { CoverLoader, decodeCover } from './covers.mjs';
+import { decodeColumn, selectionState, soundSections, groupLabels, placeLabels } from './sound.mjs';
 
 const $ = id => document.getElementById(id);
 let graph, worker, data, clusters = [], edges = [], selected, paused = false;
 let coverLoader, coverTimer, atlasTimer, visibleCovers = [], atlasEntries = [], coverActive = false;
 let dragging = false, zooming = false, graphReady = false;
+let labelTimer, labelGroups = [], labelDefinitions = [], trackedKey, hovered;
+let groupNames = [], groupIds = new Map(), lensOptions = new Map();
+let selection = { active: false, states: [], matches: [] }, lensScores, currentLens;
+function scheduleLabels() {
+  if (!labelTimer) labelTimer = setTimeout(() => { labelTimer = undefined; refreshLabels(); }, 250);
+}
+function refreshLabels() {
+  $('map-labels').replaceChildren();
+  if (!graphReady || !$('show-labels').checked || dragging) return;
+  const positions = graph.getTrackedPointPositionsMap();
+  const candidates = [];
+  for (const group of labelGroups) {
+    if (selection.active && !group.indices.some(i => selection.states[i]?.match)) continue;
+    const points = group.tracked.map(i => positions.get(i)).filter(Boolean);
+    if (!points.length) continue;
+    const center = points.reduce((sum, point) => [sum[0] + point[0] / points.length, sum[1] + point[1] / points.length], [0, 0]);
+    const [x, y] = graph.spaceToScreenPosition(center);
+    candidates.push({ ...group, x, y });
+  }
+  const { width, height } = $('graph').getBoundingClientRect();
+  for (const label of placeLabels(candidates, width, height, graph.getZoomLevel())) {
+    const element = document.createElement('span'); element.className = 'map-label'; element.textContent = label.text;
+    element.style.left = `${label.x}px`; element.style.top = `${label.y}px`; $('map-labels').append(element);
+  }
+}
+function updateColors() {
+  if (!graphReady) return;
+  graph.setPointColors(Float32Array.from(groupNames.flatMap((name, i) => {
+    const rgba = color(groupIds.get(name));
+    rgba[3] = selection.states[i]?.match === false ? 1 : selection.states[i]?.opacity ?? 1;
+    return rgba;
+  })));
+}
+function updateLabelTracking() {
+  if (!graphReady) return;
+  labelGroups = labelDefinitions.filter(group => !selection.active || group.indices.some(i => selection.states[i]?.match))
+    .slice(0, 96).map(group => ({ ...group,
+      tracked: group.indices.filter(i => !selection.active || selection.states[i]?.match).slice(0, 4) }));
+  const indices = labelGroups.flatMap(group => group.tracked), key = indices.join(',');
+  if (key !== trackedKey) { trackedKey = key; graph.trackPointPositionsByIndices(indices); }
+  scheduleLabels();
+}
 const coverURL = name => new URL(`covers/${name}`, location.href).href;
 function scheduleCovers() {
   if (!coverTimer) coverTimer = setTimeout(() => { coverTimer = undefined; refreshCovers(); }, 500);
@@ -24,7 +67,7 @@ function refreshCovers() {
   // Native viewport query at most twice a second, never on every animation frame.
   const { width, height } = $('graph').getBoundingClientRect();
   const visible = graph.findPointsInRect([[0, 0], [width, height]]);
-  const priority = [selected, ...($('search').value.trim() ? searchMatches(data.albums, $('search').value) : [])];
+  const priority = [selected, ...(selection.active ? selection.matches : [])];
   visibleCovers = coverCandidates(data.albums, visible, priority);
   coverLoader.setWanted(visibleCovers.map(i => coverURL(data.albums[i].cover)));
   scheduleAtlas();
@@ -32,6 +75,7 @@ function refreshCovers() {
 function updateCoverSizes() {
   if (!graphReady) return;
   const sizes = pointSizes(data.albums, $('size').value);
+  sizes.forEach((size, i) => { sizes[i] = size * (selection.states[i]?.size ?? 1); });
   const imageSizes = Float32Array.from(sizes);
   const shapes = new Float32Array(sizes.length);
   const indices = new Float32Array(sizes.length).fill(-1);
@@ -104,16 +148,38 @@ function showInfo(index) {
   const info = document.createElement('p'); info.style.whiteSpace = 'pre-line';
   info.textContent = detailText(album).split('\n').slice(1).join('\n');
   $('info').append(title, info);
+  appendSounds($('info'), album);
   graph.setConfigPartial({ outlinedPointIndices: [index] }); graph.render();
 }
 function hover(index, event) {
   $('tooltip').hidden = index === undefined;
   if (index === undefined) return;
-  $('tooltip').textContent = detailText(data.albums[index]);
-  $('tooltip').style.whiteSpace = 'pre-line';
+  if (hovered !== index) {
+    hovered = index; $('tooltip').replaceChildren();
+    const summary = document.createElement('div'); summary.style.whiteSpace = 'pre-line';
+    summary.textContent = detailText(data.albums[index]); $('tooltip').append(summary);
+    appendSounds($('tooltip'), data.albums[index]);
+  }
   if (event?.clientX !== undefined) {
     $('tooltip').style.left = `${Math.max(8, Math.min(window.innerWidth - 330, event.clientX + 14))}px`;
-    $('tooltip').style.top = `${Math.max(8, Math.min(window.innerHeight - 160, event.clientY + 14))}px`;
+    $('tooltip').style.top = `${Math.max(8, Math.min(window.innerHeight - $('tooltip').offsetHeight - 8, event.clientY + 14))}px`;
+  }
+}
+function appendSounds(container, album) {
+  for (const section of soundSections(album)) {
+    const title = document.createElement('h3');
+    title.textContent = section.title + (section.coverage ? ` · ${section.coverage}` : ''); container.append(title);
+    for (const row of section.rows) {
+      const element = document.createElement('div'); element.className = 'score-row';
+      const label = document.createElement('span'); label.textContent = row.label;
+      const score = document.createElement('span'); score.className = 'muted';
+      score.textContent = `${typeof row.value === 'number' ? row.value.toFixed(2) : row.value}${row.suffix || ''}${row.coverage ? ` (${row.coverage})` : ''}`;
+      element.append(label, score);
+      if (row.bar !== null) {
+        const bar = document.createElement('progress'); bar.max = 1; bar.value = row.bar; element.append(bar);
+      }
+      container.append(element);
+    }
   }
 }
 function color(index) {
@@ -129,8 +195,12 @@ function updateGroups() {
   const names = groups(data.albums, $('group').value, clusters);
   const unique = [...new Set(names)].sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
   const ids = new Map(unique.map((name, i) => [name, i]));
+  groupNames = names; groupIds = ids;
   graph.setPointClusters(names.map(name => ids.get(name)));
-  graph.setPointColors(Float32Array.from(names.flatMap(name => color(ids.get(name)))));
+  updateColors();
+  labelDefinitions = groupLabels(data.albums, names);
+  // Bounded GPU readback, refreshed by cosmos alongside point rendering.
+  updateLabelTracking();
   $('legend').replaceChildren();
   const counts = new Map();
   for (const name of names) counts.set(name, (counts.get(name) || 0) + 1);
@@ -145,11 +215,17 @@ function updateGroups() {
 function updateSearch() {
   if (!graph || !data) return;
   const search = $('search').value.trim();
-  const matches = searchMatches(data.albums, search);
+  const lens = lensOptions.get($('lens').value);
+  if (currentLens !== lens) { currentLens = lens; lensScores = lens ? decodeColumn(lens, data.albums.length) : undefined; }
+  selection = selectionState(data.albums, { search, lens, scores: lensScores,
+    danceMin: Number($('dance-min').value), danceMax: Number($('dance-max').value),
+    vocal: $('vocal').value, includeUnknown: $('include-unknown').checked });
+  const matches = selection.matches;
   const set = new Set(matches);
-  graph.setConfigPartial({ highlightedPointIndices: search ? matches : undefined,
-    highlightedLinkIndices: search ? edges.flatMap((e, i) => set.has(e.source) && set.has(e.target) ? [i] : []) : undefined });
-  $('matches').textContent = search ? `${matches.length} matching albums` : '';
+  graph.setConfigPartial({ highlightedPointIndices: selection.active ? matches : undefined,
+    highlightedLinkIndices: selection.active ? edges.flatMap((e, i) => set.has(e.source) && set.has(e.target) ? [i] : []) : undefined });
+  $('matches').textContent = selection.active ? `${matches.length} matching albums` : '';
+  updateColors(); updateCoverSizes(); updateLabelTracking();
   graph.render(); scheduleCovers();
 }
 async function load(exported, name) {
@@ -158,9 +234,23 @@ async function load(exported, name) {
     generation++; revision = 0; clearTimeout(edgeTimer);
     coverLoader?.destroy(); clearTimeout(coverTimer); clearTimeout(atlasTimer);
     coverTimer = atlasTimer = undefined; graphReady = false; dragging = zooming = false;
+    clearTimeout(labelTimer); labelTimer = undefined; labelGroups = []; labelDefinitions = []; groupNames = [];
+    trackedKey = hovered = undefined;
+    $('map-labels').replaceChildren(); selection = { active: false, states: [], matches: [] };
+    currentLens = lensScores = undefined; lensOptions = new Map(); $('lens').value = '';
+    $('dance-min').value = 0; $('dance-max').value = 1; $('vocal').value = 'any'; $('include-unknown').checked = false;
+    $('dance-min-value').value = '0.00'; $('dance-max-value').value = '1.00';
     atlasEntries = []; visibleCovers = [];
     worker?.terminate(); worker = undefined; graph?.destroy(); graph = undefined;
     data = exported;
+    $('sound-labels').replaceChildren();
+    for (const column of data.labels || []) {
+      const name = `${column.label} [${column.source}]`; lensOptions.set(name, column);
+      const option = document.createElement('option'); option.value = name; $('sound-labels').append(option);
+    }
+    $('sound-controls').disabled = data.schema_version < 3;
+    for (const option of $('group').options) if (['style', 'mood', 'flavor'].includes(option.value)) option.disabled = data.schema_version < 3;
+    if (data.schema_version < 3 && ['style', 'mood', 'flavor'].includes($('group').value)) $('group').value = 'cluster';
     if (data.schema_version === 1) data.albums.forEach(album => { album.cover = null; });
     edges = []; clusters = []; selected = undefined;
     $('details').hidden = true; $('tooltip').hidden = true;
@@ -175,15 +265,17 @@ async function load(exported, name) {
     $('empty').hidden = !!data.albums.length;
     if (!data.albums.length) { $('empty').textContent = 'No albums with current embeddings in this export.'; status('Empty export loaded.'); return; }
     const config = { backgroundColor: '#10151c', enableDrag: true, fitViewOnInit: true,
-      transitionDuration: 0, rescalePositions: false, linkOpacity: 0.35,
+      transitionDuration: 0, rescalePositions: false, linkOpacity: 0.35, pointGreyoutOpacity: 0.12,
       onMouseMove: (index, position, event) => hover(index, event),
       onPointMouseOver: (index, position, event) => hover(index, event?.sourceEvent ?? event),
       onPointMouseOut: () => hover(undefined), onPointClick: index => showInfo(index),
       onDragStart: () => { dragging = true; coverLoader?.setWanted([]); },
-      onDragEnd: () => { dragging = false; scheduleCovers(); if (!paused) graph.start(0.7); },
+      onDragEnd: () => { dragging = false; scheduleCovers(); scheduleLabels(); if (!paused) graph.start(0.7); },
       onZoomStart: () => { zooming = true; coverLoader?.setWanted([]); },
-      onZoomEnd: () => { zooming = false; scheduleCovers(); },
-      onSimulationTick: scheduleCovers, onSimulationEnd: scheduleCovers };
+      onZoom: scheduleLabels,
+      onZoomEnd: () => { zooming = false; scheduleCovers(); scheduleLabels(); },
+      onSimulationTick: () => { scheduleCovers(); scheduleLabels(); },
+      onSimulationEnd: () => { scheduleCovers(); scheduleLabels(); } };
     for (const [key, input] of forceInputs) config[key] = key === 'simulationFriction' ? 1 - Number(input.value) : Number(input.value);
     graph = new Graph($('graph'), config);
     const currentGeneration = generation;
@@ -236,9 +328,21 @@ $('render-mode').addEventListener('change', refreshCovers);
 $('cover-zoom').addEventListener('input', () => {
   $('cover-zoom-value').value = Number($('cover-zoom').value).toFixed(2); refreshCovers();
 });
-window.addEventListener('resize', scheduleCovers);
+window.addEventListener('resize', () => { scheduleCovers(); scheduleLabels(); });
 $('group').addEventListener('change', () => { if (graph) { updateGroups(); reheat(); } });
 $('search').addEventListener('input', updateSearch);
+for (const id of ['lens', 'vocal', 'include-unknown']) $(id).addEventListener('input', updateSearch);
+for (const id of ['dance-min', 'dance-max']) $(id).addEventListener('input', () => {
+  if (Number($('dance-min').value) > Number($('dance-max').value)) $(id === 'dance-min' ? 'dance-max' : 'dance-min').value = $(id).value;
+  $('dance-min-value').value = Number($('dance-min').value).toFixed(2);
+  $('dance-max-value').value = Number($('dance-max').value).toFixed(2); updateSearch();
+});
+$('clear-lens').addEventListener('click', () => { $('lens').value = ''; updateSearch(); });
+$('show-labels').addEventListener('change', scheduleLabels);
+$('controls-toggle').addEventListener('click', () => {
+  const open = document.body.classList.toggle('controls-open'); $('controls-toggle').setAttribute('aria-expanded', String(open));
+  setTimeout(() => { scheduleCovers(); scheduleLabels(); }, 50);
+});
 $('fit').addEventListener('click', () => graph?.fitView(250, 0.1, !paused));
 $('pause').addEventListener('click', () => {
   paused = !paused; $('pause').textContent = paused ? 'Resume' : 'Pause';

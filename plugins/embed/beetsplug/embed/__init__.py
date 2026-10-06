@@ -104,6 +104,8 @@ class EmbedPlugin(BeetsPlugin):
         graph.parser.add_option("--store", help="external vector store path")
         graph.parser.add_option("--model", type="choice", choices=["style", "text"], default="style")
         graph.parser.add_option("--covers-dir", help="incremental thumbnail cache directory")
+        graph.parser.add_option("--descriptors", help="JSON vocabulary override for CLAP descriptors")
+        graph.parser.add_option("--cache-dir", help="persistent CPU phrase embedding cache directory")
         graph.func = self.export_graph
         return [embed, search, similar, graph]
 
@@ -114,7 +116,8 @@ class EmbedPlugin(BeetsPlugin):
         store = opts.store or self.config["store"].as_str()
         try:
             selected = {track["album_id"] for track in snapshot(lib, args) if track["album_id"]}
-            result = export_albums(lib, selected, store, model_ids()[opts.model], opts.output, opts.covers_dir)
+            result = export_albums(lib, selected, store, model_ids()[opts.model], opts.output,
+                                   opts.covers_dir, opts.descriptors, opts.cache_dir, WORKER)
         except (OSError, ValueError, sqlite3.Error) as exc:
             raise ui.UserError(f"Cannot export album graph: {exc}") from exc
         ui.print_(json.dumps(result["summary"], sort_keys=True))

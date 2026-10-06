@@ -133,6 +133,33 @@ class Store:
             (item_id, content, model)).fetchone()
         return None if row is None else np.frombuffer(row[0], dtype="<f2").astype("f4")
 
+    def heads(self, item_id, content, model):
+        """Read classifier outputs only; reject incomplete or nonfinite blobs."""
+        import numpy as np
+        if not hasattr(self, "_head_layouts"):
+            self._head_layouts = {}
+        if model not in self._head_layouts:
+            row = self.db.execute("SELECT heads FROM models WHERE model=?", (model,)).fetchone()
+            self._head_layouts[model] = json.loads(row[0]) if row else {}
+        layout = self._head_layouts[model]
+        if not isinstance(layout, dict) or any(
+                not isinstance(name, str) or not isinstance(labels, list) or
+                any(not isinstance(label, str) for label in labels) for name, labels in layout.items()):
+            return {}
+        row = self.db.execute(
+            "SELECT heads FROM vectors WHERE item_id=? AND fingerprint=? AND model=?",
+            (item_id, content, model)).fetchone()
+        if row is None or not layout or len(row[0]) != 4 * sum(map(len, layout.values())):
+            return {}
+        scores = np.frombuffer(row[0], dtype="<f4")
+        if not np.isfinite(scores).all():
+            return {}
+        heads, offset = {}, 0
+        for name, labels in layout.items():
+            heads[name] = {"labels": labels, "scores": scores[offset:offset + len(labels)]}
+            offset += len(labels)
+        return heads
+
 
 def count_pending(tracks, path, models):
     counts = {"selected": 0, "complete": 0, "pending": 0, "unreadable": 0}

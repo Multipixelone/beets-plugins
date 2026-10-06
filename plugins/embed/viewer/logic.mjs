@@ -1,8 +1,19 @@
 // DOM-free data and graph logic, shared by the browser worker and Node tests.
+import { decodeColumn, expandSounds, soundGroup } from './sound.mjs';
+
+export function decodeLayoutVector(value) {
+  if (Array.isArray(value)) return value;
+  if (typeof value !== 'string') throw new Error('Invalid layout vector.');
+  const bytes = atob(value);
+  return Float32Array.from(bytes, byte => {
+    const number = byte.charCodeAt(0);
+    return (number > 127 ? number - 256 : number) / 127;
+  });
+}
 export function validateExport(data) {
-  if (!data || ![1, 2].includes(data.schema_version) || typeof data.model_id !== 'string' ||
+  if (!data || ![1, 2, 3].includes(data.schema_version) || typeof data.model_id !== 'string' ||
       typeof data.exported_at !== 'string' || !Array.isArray(data.albums)) {
-    throw new Error('Expected an album graph export with schema_version 1 or 2.');
+    throw new Error('Expected an album graph export with schema_version 1, 2 or 3.');
   }
   const ids = new Set();
   let dimension;
@@ -11,7 +22,7 @@ export function validateExport(data) {
       throw new Error('Album IDs must be unique positive integers.');
     }
     ids.add(album.id);
-    if (data.schema_version === 2 && album.cover !== null &&
+    if (data.schema_version >= 2 && album.cover !== null &&
         (typeof album.cover !== 'string' || !/^cover-[0-9a-f]{64}\.jpg$/.test(album.cover))) {
       throw new Error('Invalid cover filename.');
     }
@@ -25,12 +36,30 @@ export function validateExport(data) {
     for (const key of ['summed_plays', 'mean_plays']) {
       if (!Number.isFinite(album[key]) || album[key] < 0) throw new Error(`Invalid ${key}.`);
     }
-    if (!Array.isArray(album.vector) || !album.vector.length ||
-        album.vector.some(x => !Number.isFinite(x)) || !album.vector.some(x => x !== 0)) {
+    if (typeof album.vector === 'string' && (data.schema_version !== 3 || data.vector_encoding !== 'int8-base64')) {
+      throw new Error('Unknown layout vector encoding.');
+    }
+    const vector = decodeLayoutVector(album.vector);
+    if (!vector.length || vector.some(x => !Number.isFinite(x)) || !vector.some(x => x !== 0)) {
       throw new Error('Vectors must be nonzero finite numeric arrays.');
     }
-    dimension ??= album.vector.length;
-    if (album.vector.length !== dimension) throw new Error('Inconsistent vector dimensions.');
+    dimension ??= vector.length;
+    if (vector.length !== dimension || (typeof album.vector === 'string' && data.vector_dimension !== dimension)) {
+      throw new Error('Inconsistent vector dimensions.');
+    }
+  }
+  if (data.schema_version === 3) {
+    if (!Array.isArray(data.labels) || data.labels.length > 2048) throw new Error('Invalid label catalog.');
+    const labels = new Set();
+    for (const column of data.labels) {
+      if (typeof column.id !== 'string' || labels.has(column.id) || typeof column.label !== 'string' ||
+          typeof column.source !== 'string' || !['probability', 'category', 'relative', 'zscore'].includes(column.kind) ||
+          typeof column.scores !== 'string' || column.scores.length > Math.ceil(data.albums.length / 3) * 4) {
+        throw new Error('Invalid sound label.');
+      }
+      labels.add(column.id); decodeColumn(column, data.albums.length);
+    }
+    expandSounds(data);
   }
   return data;
 }
@@ -38,9 +67,10 @@ export function validateExport(data) {
 export function similarityCache(albums) {
   const n = albums.length;
   const normalized = albums.map(a => {
-    const norm = Math.hypot(...a.vector);
+    const vector = decodeLayoutVector(a.vector);
+    const norm = Math.hypot(...vector);
     if (!Number.isFinite(norm) || norm === 0) throw new Error('Invalid vector norm.');
-    return Float32Array.from(a.vector, x => x / norm);
+    return Float32Array.from(vector, x => x / norm);
   });
   const scores = new Float32Array(n * n);
   for (let i = 0; i < n; i++) {
@@ -108,6 +138,8 @@ export function communities(albums, edges) {
 
 export function groups(albums, mode, clusters) {
   return albums.map((a, i) => {
+    const sound = soundGroup(a, mode);
+    if (sound !== undefined) return sound;
     if (mode === 'cluster') return `Cluster ${(clusters[i] ?? i) + 1}`;
     if (mode === 'year') return a.year ? String(a.year) : 'Unknown';
     if (mode === 'decade') return a.year ? `${Math.floor(a.year / 10) * 10}s` : 'Unknown';

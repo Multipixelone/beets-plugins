@@ -86,7 +86,7 @@ def process(tracks, store, models, engine, prepare, batch_size=8, stopping=lambd
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("mode", choices=["embed", "search", "similar", "smoke", "probe-rocm"])
+    parser.add_argument("mode", choices=["embed", "search", "similar", "smoke", "probe-rocm", "encode-text"])
     parser.add_argument("--manifest")
     parser.add_argument("--store")
     parser.add_argument("--assets", default=os.environ.get("BEETS_EMBED_MODELS"))
@@ -108,6 +108,21 @@ def main():
         parser.error("The packaged model assets are required")
     if not 1 <= args.threads <= 16 or not 1 <= args.batch_size <= 128 or args.top_k < 1:
         parser.error("Invalid processing bounds")
+    if args.mode == "encode-text":
+        # Deliberately precede all device selection, store and audio processing.
+        if args.device != "cpu" or not args.manifest:
+            parser.error("encode-text requires --device cpu and --manifest")
+        phrases = json.loads(Path(args.manifest).read_text())
+        if not isinstance(phrases, list) or not 1 <= len(phrases) <= 256 or any(
+                not isinstance(text, str) or not text.strip() or len(text) > 240 for text in phrases):
+            parser.error("Invalid text vocabulary")
+        from .inference import Models
+        engine = Models(args.assets, args.threads, "cpu", text_only=True)
+        vectors = []
+        for first in range(0, len(phrases), args.batch_size):
+            vectors.extend(engine.text_batch(phrases[first:first + args.batch_size]).tolist())
+        print(json.dumps(vectors, allow_nan=False))
+        return 0
     device = "cpu"
     if os.environ.get("BEETS_EMBED_BACKEND") == "rocm" and args.device != "cpu":
         try:

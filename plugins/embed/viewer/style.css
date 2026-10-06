@@ -10,3 +10,17 @@ button, .file { padding: 8px 12px; border: 1px solid #4c627a; background: #24334
 #details { position: absolute; bottom: 20px; right: 20px; padding: 18px; width: min(350px, 90%); background: #19212ced; border: 1px solid #4c627a; border-radius: 8px; } #details h2 { margin: 0 24px 8px 0; font-size: 20px; } #clear { float: right; padding: 0 8px; } #tooltip { position: fixed; pointer-events: none; max-width: 320px; background: #19212cf0; border: 1px solid #4c627a; border-radius: 5px; padding: 10px; z-index: 2; }
 #legend { max-height: 240px; overflow-y: auto; margin: 12px 0; font-size: 12px; } .legend-row { display: flex; align-items: center; gap: 8px; margin: 4px 0; } .swatch { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; } #status { color: #66d3c5; overflow-wrap: anywhere; } #status.error { color: #ffb4a8; }
 @media (max-width: 700px) { aside { width: 235px; padding: 14px; } #details { bottom: 10px; right: 10px; } }
+#details { max-height: 70dvh; overflow-y: auto; }
+#tooltip { max-height: 65dvh; overflow: hidden; white-space: normal !important; }
+#tooltip h3, #info h3 { margin: 12px 0 4px; font-size: 13px; color: #c2d1e3; }
+.score-row { display: grid; grid-template-columns: 1fr auto; gap: 2px 8px; margin: 4px 0; font-size: 12px; }
+.score-row progress { grid-column: 1 / -1; width: 100%; height: 4px; accent-color: #66d3c5; }
+#map-labels { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
+.map-label { position: absolute; transform: translate(-50%, -50%); padding: 3px 8px; border: 1px solid #687b8b; border-radius: 5px; background: #10151cde; font-size: 14px; white-space: nowrap; max-width: 280px; overflow: hidden; text-overflow: ellipsis; text-shadow: 0 1px 2px #000; }
+#controls-toggle { display: none; }
+@media (max-width: 700px) {
+  aside { position: absolute; left: 0; top: 48px; bottom: 0; width: min(310px, 88vw); z-index: 4; display: none; }
+  .controls-open aside { display: block; }
+  #controls-toggle { display: block; position: absolute; top: 8px; left: 8px; z-index: 5; }
+  #details { max-height: 60dvh; }
+}

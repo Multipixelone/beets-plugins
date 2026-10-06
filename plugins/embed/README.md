@@ -36,7 +36,7 @@ probabilities.
 ## Album similarity graph
 
 ```sh
-beet embed-graph-export -o albums.json --covers-dir covers
+beet embed-graph-export -o albums.json --covers-dir covers --cache-dir graph-cache
 beet embed-graph-export artist:"Nick Drake" -o drake.json
 beet embed-graph-export --model text --store /path/to/vectors.sqlite3 -o albums.json
 nix run .#beets-album-graph -- --data "$PWD/albums.json" --covers "$PWD/covers"
@@ -72,9 +72,9 @@ Do not delete its `.album-graph-covers.json` ownership manifest.
 
 Missing, unreadable or corrupt art produces `cover: null`, with counts in the
 summary; thumbnail failures do not fail the export. An invalid or unwritable
-cache directory is a configuration error. Exports use schema v2 and include a
+cache directory is a configuration error. Exports use schema v3 and include a
 relative `cover` filename or null on every album; omitting `--covers-dir` disables
-covers. The viewer also accepts v1 exports and shows colored dots for them.
+covers. The viewer also accepts v1/v2 exports; v1 shows colored dots.
 `--covers DIR` serves only allowed hashed JPEG names, rejects symlinks and
 traversal, and sets immutable cache headers. It never exposes original art paths.
 
@@ -110,6 +110,106 @@ grouping also controls cluster attraction; unknown metadata has an Unknown
 group. Friction is shown as damping (higher means quicker settling). Search
 highlights album/artist matches, hover or click shows album information, and
 dragged nodes settle back under physics. The viewer requires WebGL 2.
+
+### Sound labels, lens and filters
+
+Schema v3 adds `sound`, `essentia` and text-track coverage per album, plus a
+source-qualified `labels` catalog with packed score columns. Layout vectors use
+`vector_encoding: int8-base64` and a shared `vector_dimension`: signed bytes
+scaled per album to the full −127…127 range. The browser normalizes the decoded
+vectors before cosine scoring; magnitude is unused. This keeps live edge sliders
+while avoiding thousands of long JSON floats per album. Label/score pairs
+reference the shared catalog, and Essentia uses positional fields with shared
+`essentia_fields`; absent entries are null, observed entries carry value/count
+and optional categorical support. Track count supplies coverage denominators.
+The viewer expands this representation after loading, including in the worker. Existing v1/v2
+exports remain usable without sound controls. Info cards show Style, Mood,
+Instruments, Sounds like and Essentia only when available. The searchable sound
+lens emphasizes matching albums; clear it to restore normal sizing. Top style,
+mood and flavor are also grouping options. Community/group labels prefer main
+styles and add CLAP flavor words; they hide below zoom 1 and avoid collisions.
+On phones, the Controls button opens the sidebar over the full-width graph.
+
+Head scores already include audio-window averaging. Export averages them equally
+across current tracks, checking the same fingerprint/model keys as vectors.
+Discogs400, mood/theme and instrument outputs are independent sigmoid
+probabilities: no additional sigmoid, softmax or sum-to-one normalization is
+applied. The top five per group are exported with coverage. Approachability and
+engagement are linear regression values, preserved even outside 0–1; only their
+visual bars are bounded.
+
+Essentia fields use observed-value means for finite numbers and majority values
+for categories, with ties null and per-field coverage. Numeric strings from flex
+attributes are parsed; missing and invalid values stay null. The filter uses
+`danceable` (0–1 classifier probability). Raw rhythm `danceability` is a distinct
+measurement and can exceed 1. Vocal/instrumental filtering uses the observed
+`voice_instrumental` category. Unknown values are dimmed only while a filter is
+active, unless Include unknown is checked. Search, lens and filters intersect.
+No complementary voice/gender probabilities or category labels are inferred.
+
+CLAP descriptors use separately pooled current text-family album vectors. The
+shipped `beets_embed/descriptors.json` has 144 short phrases across six axes.
+Override it with `--descriptors FILE`: a JSON object whose keys are
+`genre/style flavor`, `instrumentation`, `production/texture`, `mood/energy`,
+`vocals` and `tempo-feel`, each holding a list of distinct nonempty strings.
+There may be 1–256 phrases in total, each at most 240 characters. For example,
+production phrases include gritty, lush, sample-heavy, lo-fi and glossy.
+
+Each phrase's cosine scores are population z-scored across exported albums with
+current text embeddings; constant columns become zero. These scores describe
+relative salience within this export, not probabilities or factual tags. Up to
+five labels above z = 0.5 are shown, with at most two per axis. The lens retains
+all trained classes and phrases, including labels outside the displayed top five.
+Score columns are base64 bytes in album order: zero means missing; 1–255 spans
+0–1 for probabilities/category support, or −4…4 for CLAP z-scores. Regression
+and raw rhythm lens columns use population z-scores while album values stay raw.
+
+`--cache-dir DIR` stores phrase embeddings separately from both databases;
+its default is `.album-graph-cache` beside the JSON. Cache keys include exact
+vocabulary content and text model identity. A miss runs the packaged CPU worker
+with two threads and batches of eight, bounded to 120 seconds. It uses the
+existing text-only model path, with no GPU probe, style inference or audio reads.
+A hit does not load Torch or the encoder. Missing/unloadable weights or an
+encoding timeout produces a warning and skips CLAP without losing main labels,
+Essentia or the graph. Cache entries are atomic float32 NPZ files (about 289 KiB
+for 144 phrases), mode 0640 in a 0750 directory. Serialize runs using the usual
+import lock.
+
+For the export unit, use a persistent writable directory such as
+`--cache-dir /var/lib/beets-album-graph/cache`, even when publishing JSON through
+a staging directory. Existing art/library/store read permissions still apply.
+Cold runs also read the CPU worker's Nix-store model link farm: `amclap.ckpt`,
+`amclap.gin`, `omar.gin` and `mpnet/` (weights/config, pooling and tokenizer files).
+These are pinned package dependencies, not files under HOME. HF_HOME,
+HF_HUB_CACHE, TORCH_HOME, XDG_CACHE_HOME and MPLCONFIGDIR are redirected beneath
+the selected cache directory;
+HF_HUB_OFFLINE and TRANSFORMERS_OFFLINE are set. No runtime downloads are needed.
+ProtectHome=read-only and ProtectSystem=strict work with the existing writable
+state directory and readable Nix store; no writable home access is required.
+
+The October 6 locked-launcher smoke used the real library and seeded store while
+an existing embedding backfill was running: 330 albums cold, 331 warm. With two
+CPU threads, the initial cold export took 26.7 s wall / 22.0 s CPU including
+thumbnail generation; warm took 10.5 s wall / 5.5 s CPU and reused the phrase
+cache. These are current partial-library measurements under contention, not a
+full-library runtime prediction. After compaction, a fixed 407-album warm run
+reused all 406 thumbnails and the phrase cache in 6.6 s wall / 6.5 s CPU, with
+a 1,604,739-byte JSON. The encoder has a hard 120 s ceiling.
+
+For the **same 100-album snapshot**, v2 with raw layout vectors was 2,614,230
+bytes; v3 before compaction was 3,122,437 bytes (508,207 bytes added by sounds).
+Final v3 is 461,972 bytes (0.44 MiB), including quantized vectors and sound data.
+Keeping shared catalog metadata fixed and scaling albums/score columns projects
+23.4 MB (22.3 MiB) at 6,400 albums; a conservative simple ×64 projection is
+29.6 MB (28.2 MiB). Real-sample maximum cosine error was 0.00273, with 799 of
+800 top-eight neighbor choices unchanged. The 330 thumbnails totaled 1.72 MiB;
+the phrase cache was 296,206 bytes. Coverage is shown because recognizable albums
+can still have only one embedded track.
+
+Viewer assets and `data.json` send `Cache-Control: no-cache` and strong SHA-256
+ETags, honoring If-None-Match with 304. This prevents heuristic caching of
+Nix-store assets with epoch timestamps. Hashed covers retain one-year immutable
+caching. The server keeps its localhost binding and explicit path allowlists.
 
 The style family is Discogs-EffNet v1 (1280 dimensions, 16 kHz), with Discogs-400
 styles, MTG-Jamendo mood/theme (56) and instrument (40), and approachability and

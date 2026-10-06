@@ -1,3 +1,4 @@
+import base64
 import hashlib
 import json
 import os
@@ -61,9 +62,11 @@ class GraphExportTests(unittest.TestCase):
         self.assertEqual(album['embedded_tracks'], 2)
         self.assertEqual(album['summed_plays'], 16)
         self.assertAlmostEqual(album['mean_plays'], 16 / 3)
-        np.testing.assert_array_equal(album['vector'], [.5, .5])
+        np.testing.assert_array_equal(np.frombuffer(base64.b64decode(album['vector']), dtype='i1'), [127, 127])
+        self.assertEqual(result['vector_encoding'], 'int8-base64')
+        self.assertEqual(result['vector_dimension'], 2)
         self.assertEqual(result['model_id'], 'style:v1')
-        self.assertEqual(result['schema_version'], 2)
+        self.assertEqual(result['schema_version'], 3)
         self.assertIn('+00:00', result['exported_at'])
         self.assertEqual(json.loads(self.output.read_text()), result)
 
@@ -97,6 +100,32 @@ class GraphExportTests(unittest.TestCase):
             command.func(self.lib, opts, args)
         self.assertEqual(json.loads(self.output.read_text())['albums'], [])
 
+    def test_v3_export_labels_and_encoder_failure_remain_readonly(self):
+        from beets_embed.store import model_ids
+        identities = model_ids()
+        self.items[0]['danceable'] = '.8'
+        self.items[0].store()
+        with Store(self.store_path) as store:
+            item = self.items[0]
+            store.put(item.id, fingerprint(item.path), identities['style'], [1, 0], [0, 0],
+                      {'discogs400': {'labels': ['Hip Hop---Boom Bap'], 'scores': [.7]}})
+            store.put(item.id, fingerprint(item.path), identities['text'], np.ones(512), np.zeros(512))
+        before = self.store_path.read_bytes()
+        with patch('beets_embed.descriptors.encode_phrases', side_effect=OSError('no encoder')), \
+             patch.object(Item, 'store', side_effect=AssertionError('item write')), \
+             patch.object(Album, 'store', side_effect=AssertionError('album write')):
+            with self.assertLogs('beets_embed.graph_export', level='WARNING'):
+                result = export_albums(self.lib, {self.first.id}, self.store_path,
+                                       identities['style'], self.output, cache_dir=self.root / 'cache')
+        self.assertEqual(result['summary']['descriptor_cache'], 'unavailable')
+        self.assertEqual(result['albums'][0]['sound']['style']['count'], 1)
+        reference = result['albums'][0]['sound']['style']['labels'][0][0]
+        self.assertEqual(result['labels'][reference]['label'], 'Hip Hop---Boom Bap')
+        field = result['essentia_fields'].index('danceable')
+        self.assertEqual(result['albums'][0]['essentia'][field], [.8, 1])
+        self.assertEqual(result['labels'][0]['source'], 'essentia')
+        self.assertEqual(self.store_path.read_bytes(), before)
+
     def test_zero_lastfm_does_not_fall_back_and_missing_plays(self):
         for item, expected in [({'lastfm_play_count': '0', 'play_count': '9'}, 0),
                                ({'lastfm_play_count': None, 'play_count': '9'}, 9),
@@ -108,7 +137,7 @@ class GraphExportTests(unittest.TestCase):
         Path(os.fsdecode(self.items[0].path)).write_bytes(b'changed audio')
         result = self.export()
         self.assertEqual(result['albums'][0]['embedded_tracks'], 1)
-        self.assertEqual(result['albums'][0]['vector'], [0, 1])
+        self.assertEqual(list(base64.b64decode(result['albums'][0]['vector'])), [0, 127])
         absent = self.root / 'absent.sqlite3'
         with self.assertRaises(sqlite3.OperationalError):
             export_albums(self.lib, {self.first.id}, absent, 'style:v1', self.output)
