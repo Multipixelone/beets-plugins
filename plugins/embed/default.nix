@@ -1,4 +1,4 @@
-{ lib, beets, pythonPackages, worker }:
+{ lib, beets, pythonPackages, worker, viewer }:
 pythonPackages.buildPythonPackage {
   pname = "beets-embed";
   version = "0.1.0";
@@ -9,9 +9,11 @@ pythonPackages.buildPythonPackage {
   };
   build-system = [ pythonPackages.setuptools ];
   pythonRemoveDeps = [ "beets" ];
+  dependencies = [ pythonPackages.numpy ];
   postPatch = ''
     substituteInPlace beetsplug/embed/__init__.py \
-      --replace-fail '@embed-worker@' '${worker}/bin/beets-embed-worker'
+      --replace-fail '@embed-worker@' '${worker}/bin/beets-embed-worker' \
+      --replace-fail '@album-graph-viewer@' '${viewer}/bin/beets-album-graph'
   '';
   nativeCheckInputs = [ beets pythonPackages.numpy pythonPackages.scipy ];
   pythonImportsCheck = [ "beetsplug.embed" ];

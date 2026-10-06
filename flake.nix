@@ -83,7 +83,12 @@
           models = embed-models;
           rocmSupport = true;
         };
-        embed = pkgs.callPackage ./plugins/embed { inherit beets pythonPackages; worker = embed-worker; };
+        beets-album-graph = pkgs.callPackage ./plugins/embed/viewer { };
+        embed = pkgs.callPackage ./plugins/embed {
+          inherit beets pythonPackages;
+          worker = embed-worker;
+          viewer = beets-album-graph;
+        };
 
         # beets & plugins
         beets-plugins = (beets.override {
@@ -178,6 +183,7 @@
           plexsync = plexsync;
           harmony = harmony;
           inherit embed-models;
+          inherit beets-album-graph;
 
           default = beets-plugins;
         } // pkgs.lib.optionalAttrs (system == "x86_64-linux") {

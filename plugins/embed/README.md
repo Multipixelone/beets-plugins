@@ -29,9 +29,45 @@ Each seed album has equal weight, after averaging its selected track vectors.
 Album output includes embedded/total track coverage: incomplete albums remain
 searchable. `--json` provides IDs, metadata, cosine scores, and coverage for
 assistant use. Exact cosine search runs in chunks of 512; an approximate index
-and a 2D map are deferred. Search uses means; stored standard deviations are
+is deferred. Search uses means; stored standard deviations are
 available for later analysis. Scores are similarities, not calibrated relevance
 probabilities.
+
+## Album similarity graph
+
+```sh
+beet embed-graph-export -o albums.json
+beet embed-graph-export artist:"Nick Drake" -o drake.json
+beet embed-graph-export --model text --store /path/to/vectors.sqlite3 -o albums.json
+nix run .#beets-album-graph -- --data "$PWD/albums.json"
+```
+
+The exporter also prints the packaged viewer command. Open its localhost URL
+(default port 8765; override with `--port`). The viewer accepts a file picker
+or a `?data=` URL as well. It runs offline with bundled cosmos.gl 3.4.2; no
+album covers are loaded. For frontend development, run `npm ci` and
+`npm run build` in `plugins/embed/viewer`, then `python server.py --data /path/to/albums.json`.
+
+Track queries select whole albums. Every track contributes to track count and
+play statistics, using `lastfm_play_count`, then legacy `play_count`, then zero.
+Vectors use the existing mean pooling over currently embedded tracks only.
+Albums with no current embeddings are skipped and counted; partial coverage is
+shown in album details. `style` (Discogs-EffNet) is the default embedding family;
+`text` selects AMCLAP. The exporter never modifies items, albums, tags, or the
+embedding store; ordinary beets startup behavior still applies. Output cannot
+overwrite either database or its SQLite sidecars, including aliases.
+
+Tune kNN, cosine threshold, physics, node size, and color/grouping without
+exporting again. With both edge rules enabled, the threshold filters each
+album's top-k neighbors; undirected node degree may exceed k. Threshold alone
+includes all qualifying pairs; disabling both rules removes links. Defaults
+are k=8, cosine threshold=0.7, summed-play sizing, and automatic sound
+communities. Automatic groups use deterministic weighted label propagation on
+the current edges, so they can change when edge controls change. The selected
+grouping also controls cluster attraction; unknown metadata has an Unknown
+group. Friction is shown as damping (higher means quicker settling). Search
+highlights album/artist matches, hover or click shows album information, and
+dragged nodes settle back under physics. The viewer requires WebGL 2.
 
 The style family is Discogs-EffNet v1 (1280 dimensions, 16 kHz), with Discogs-400
 styles, MTG-Jamendo mood/theme (56) and instrument (40), and approachability and

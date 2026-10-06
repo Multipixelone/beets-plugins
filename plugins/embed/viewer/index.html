@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Album similarity graph</title><link rel="stylesheet" href="style.css"></head>
+<body>
+<aside id="controls">
+  <h1>Album graph</h1><p class="muted">Explore the sound of your library.</p>
+  <label class="file">Load album export<input id="file" type="file" accept=".json,application/json"></label>
+  <p id="source" class="muted">Choose an exported JSON file.</p>
+  <label>Find album or artist<input id="search" type="search" placeholder="Search your library" disabled></label>
+  <p id="matches" class="muted"></p>
+  <fieldset><legend>Similarity edges</legend>
+    <label class="check"><input id="use-k" type="checkbox" checked> k nearest neighbors</label>
+    <label>Neighbors <output id="k-value">8</output><input id="k" type="range" min="0" max="100" step="1" value="8"></label>
+    <label class="check"><input id="use-threshold" type="checkbox" checked> Filter by cosine similarity</label>
+    <label>Threshold <output id="threshold-value">0.70</output><input id="threshold" type="range" min="-1" max="1" step="0.01" value="0.7"></label>
+    <p class="muted">Both enabled: threshold filters kNN. Links are undirected; degree can exceed k.</p>
+  </fieldset>
+  <fieldset><legend>Physics</legend><div id="forces"></div></fieldset>
+  <label>Node size<select id="size"><option value="summed_plays">Summed plays</option><option value="mean_plays">Mean plays</option><option value="track_count">Track count</option><option value="uniform">Uniform</option></select></label>
+  <label>Color and group<select id="group"><option value="cluster">Automatic sound community</option><option value="genre">Genre</option><option value="albumartist">Album artist</option><option value="year">Year</option><option value="decade">Decade</option></select></label>
+  <div class="buttons"><button id="fit">Fit view</button><button id="pause">Pause</button></div>
+  <p id="status" role="status" aria-live="polite">Waiting for data.</p>
+  <div id="legend" aria-label="Group legend"></div>
+  <a class="muted" href="THIRD_PARTY_LICENSES.txt">Open-source licenses</a>
+</aside>
+<main><div id="graph" aria-label="Interactive album similarity graph"></div>
+  <div id="empty">Every dot is an album.<br>Load an export to explore.</div>
+  <section id="details" hidden aria-label="Selected album"><button id="clear" aria-label="Close album details">×</button><div id="info"></div></section>
+  <div id="tooltip" hidden></div>
+</main>
+<script type="module" src="app.js"></script>
+</body></html>

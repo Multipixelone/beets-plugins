@@ -1,0 +1,13 @@
+{
+  "name": "beets-album-graph",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "license": "AGPL-3.0-or-later",
+  "scripts": {
+    "build": "node build.mjs",
+    "test": "node --test tests/*.test.mjs"
+  },
+  "dependencies": { "@cosmos.gl/graph": "3.4.2" },
+  "devDependencies": { "esbuild": "0.25.12" }
+}

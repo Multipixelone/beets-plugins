@@ -3,6 +3,8 @@
 import json
 import os
 import signal
+import shlex
+import sqlite3
 import subprocess
 import tempfile
 from pathlib import Path
@@ -18,6 +20,7 @@ from beets_embed.devices import DEVICES, select_worker
 
 # Substituted by Nix. The inference environment is never added to beets' PYTHONPATH.
 WORKER = "@embed-worker@"
+GRAPH_VIEWER = "@album-graph-viewer@"
 
 
 def snapshot(lib, query=()):
@@ -96,7 +99,27 @@ class EmbedPlugin(BeetsPlugin):
         embed.func = lambda lib, opts, args: self.run(lib, opts, args, "embed")
         search.func = lambda lib, opts, args: self.run(lib, opts, args, "search")
         similar.func = lambda lib, opts, args: self.run(lib, opts, args, "similar")
-        return [embed, search, similar]
+        graph = ui.Subcommand("embed-graph-export", help="export whole albums for the similarity graph")
+        graph.parser.add_option("-o", "--output", help="output JSON file (required)")
+        graph.parser.add_option("--store", help="external vector store path")
+        graph.parser.add_option("--model", type="choice", choices=["style", "text"], default="style")
+        graph.func = self.export_graph
+        return [embed, search, similar, graph]
+
+    def export_graph(self, lib, opts, args):
+        from beets_embed.graph_export import export_albums
+        if not opts.output:
+            raise ui.UserError("An output path is required: -o albums.json")
+        store = opts.store or self.config["store"].as_str()
+        try:
+            selected = {track["album_id"] for track in snapshot(lib, args) if track["album_id"]}
+            result = export_albums(lib, selected, store, model_ids()[opts.model], opts.output)
+        except (OSError, ValueError, sqlite3.Error) as exc:
+            raise ui.UserError(f"Cannot export album graph: {exc}") from exc
+        ui.print_(json.dumps(result["summary"], sort_keys=True))
+        viewer = "beets-album-graph" if GRAPH_VIEWER.startswith("@") else GRAPH_VIEWER
+        ui.print_(f"Open viewer: {shlex.quote(viewer)} --data "
+                  f"{shlex.quote(str(Path(opts.output).expanduser().absolute()))}")
 
     def run(self, lib, opts, args, mode):
         if mode != "embed" and not args:
