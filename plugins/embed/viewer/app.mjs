@@ -646,7 +646,10 @@ async function load(exported, name) {
     graph.setConfigPartial({ spaceSize });
     coverDpr = window.devicePixelRatio || 1;
     $('graph').style.visibility = 'hidden';
-    worker = new Worker(new URL('./worker.js', import.meta.url), { type: 'module' });
+    // Carry the build version through to the worker as well as the main script.
+    const workerURL = new URL('./worker.js', import.meta.url);
+    workerURL.search = new URL(import.meta.url).search;
+    worker = new Worker(workerURL, { type: 'module' });
     worker.onerror = event => status(`Graph worker failed: ${event.message}`, true);
     worker.onmessage = ({ data: response }) => {
       if (response.generation !== generation || response.revision !== revision) return;
