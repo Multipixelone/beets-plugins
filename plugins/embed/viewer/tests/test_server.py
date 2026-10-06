@@ -1,5 +1,6 @@
 import importlib.util
 import os
+import sys
 import tempfile
 import threading
 import unittest
@@ -9,6 +10,7 @@ from pathlib import Path
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
+sys.path.insert(0, str(Path(__file__).parents[1]))
 spec = importlib.util.spec_from_file_location('graph_server', Path(__file__).parents[1] / 'server.py')
 server_module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(server_module)

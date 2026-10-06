@@ -114,6 +114,7 @@ def export_albums(lib, selected_ids, store_path, model, output, covers_dir=None,
                            "embedded_tracks": info["embedded_tracks"],
                            "summed_plays": summed, "mean_plays": summed / len(items),
                            "vector": quantize_vector(vector), "cover": None, "cover_large": None,
+                           "text_vector": quantize_vector(text_vector) if text_vector is not None else None,
                            "text_embedded_tracks": text[0][0]['embedded_tracks'] if text_vector is not None else 0,
                            "essentia": aggregate_essentia(items)})
     # A JSON output cannot overwrite original artwork either.
@@ -140,6 +141,7 @@ def export_albums(lib, selected_ids, store_path, model, output, covers_dir=None,
     labels = columns.export()
     compact_sound(albums, labels)
     result = {"schema_version": 3, "model_id": model, "text_model_id": models['text'],
+              "text_vector_encoding": "int8-base64", "text_vector_dimension": 512,
               "vector_encoding": "int8-base64", "vector_dimension": dimension or 0,
               "sound_encoding": "catalog-pairs-v1", "essentia_fields": list(ESSENTIA_FIELDS),
               "labels": labels,

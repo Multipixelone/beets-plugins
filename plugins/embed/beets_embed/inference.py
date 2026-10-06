@@ -60,6 +60,7 @@ class Models:
         self.assets = Path(assets)
         self.threads = threads
         self.device = device
+        self.text_only = text_only
         self.effnet = None
         self.heads = {}
         self.amclap = None
@@ -118,6 +119,11 @@ class Models:
         del module.audio_encoder.model.linear
         checkpoint = torch.load(self.assets / "amclap.ckpt", map_location="cpu", weights_only=True)
         strict_checkpoint(module, checkpoint)
+        # Keep strict validation of the published checkpoint, but retain only
+        # text inference modules in a long-lived text-only worker.
+        del checkpoint
+        if self.text_only:
+            del module.audio_encoder, module.proj_a
         self.amclap = module.eval().to(self.device)
 
     def text(self, text):

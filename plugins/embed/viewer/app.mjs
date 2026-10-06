@@ -3,6 +3,7 @@ import { validateExport, groups, pointSizes, showCovers, coverCandidates } from 
 
 import { CoverLoader, decodeCover, coverPolicy, drawnCoverPixels, constrainedCovers } from './covers.mjs';
 import { decodeColumn, selectionState, soundSections, groupLabels, placeLabels } from './sound.mjs';
+import { textVectors, phraseScores, topMatches, PhraseSearch } from './search.mjs';
 
 const $ = id => document.getElementById(id);
 let graph, worker, data, clusters = [], edges = [], selected, paused = false;
@@ -12,6 +13,35 @@ let coverLimits, coverDpr = 1;
 let labelTimer, labelGroups = [], labelDefinitions = [], trackedKey, hovered;
 let groupNames = [], groupIds = new Map(), lensOptions = new Map();
 let selection = { active: false, states: [], matches: [] }, lensScores, currentLens;
+let queryVectors = [], phraseResult;
+const phraseSearch = new PhraseSearch({
+  request: async q => {
+    let response;
+    try {
+      response = await fetch('/api/embed-text', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ q }), signal: AbortSignal.timeout(125000) });
+    } catch (error) {
+      throw new Error(error.name === 'TimeoutError' ? 'Text search timed out. Try again.' :
+        'Text search endpoint unavailable. Serve this viewer with the updated album graph server.');
+    }
+    if ([404, 405, 501].includes(response.status)) throw new Error('Text search needs the updated album graph server.');
+    let result;
+    try { result = await response.json(); } catch { throw new Error('Text search endpoint returned an invalid response.'); }
+    if (!response.ok) throw new Error(result.error || `Text search failed (HTTP ${response.status}).`);
+    return result;
+  },
+  change: ({ status: message, result }) => {
+    phraseResult = undefined;
+    if (result && data) {
+      try {
+        if (result.model_id !== data.text_model_id) throw new Error('Text model differs from this export. Export again with the current package.');
+        phraseResult = phraseScores(queryVectors, result.vector);
+        message = 'Ranked by cosine; map emphasis is relative to this library.';
+      } catch (error) { message = error.message; }
+    }
+    $('phrase-status').textContent = message; updateSearch();
+  }
+});
 function scheduleLabels() {
   if (!labelTimer) labelTimer = setTimeout(() => { labelTimer = undefined; refreshLabels(); }, 250);
 }
@@ -267,6 +297,7 @@ function updateSearch() {
   const lens = lensOptions.get($('lens').value);
   if (currentLens !== lens) { currentLens = lens; lensScores = lens ? decodeColumn(lens, data.albums.length) : undefined; }
   selection = selectionState(data.albums, { search, lens, scores: lensScores,
+    phraseScores: phraseResult?.salience,
     danceMin: Number($('dance-min').value), danceMax: Number($('dance-max').value),
     vocal: $('vocal').value, includeUnknown: $('include-unknown').checked });
   const matches = selection.matches;
@@ -274,12 +305,24 @@ function updateSearch() {
   graph.setConfigPartial({ highlightedPointIndices: selection.active ? matches : undefined,
     highlightedLinkIndices: selection.active ? edges.flatMap((e, i) => set.has(e.source) && set.has(e.target) ? [i] : []) : undefined });
   $('matches').textContent = selection.active ? `${matches.length} matching albums` : '';
+  $('phrase-results').replaceChildren();
+  if (phraseResult) {
+    $('phrase-status').textContent = 'Ranked by cosine; map emphasis is relative to this library.';
+    for (const index of topMatches(data.albums, phraseResult.cosines, matches)) {
+      const album = data.albums[index], row = document.createElement('li'), button = document.createElement('button');
+      button.textContent = `${album.albumartist} — ${album.album} (${phraseResult.cosines[index].toFixed(3)})`;
+      button.addEventListener('click', () => { showInfo(index); graph.zoomToPointByIndex(index, 400, 3, true, !paused); });
+      row.append(button); $('phrase-results').append(row);
+    }
+    if (!$('phrase-results').children.length) $('phrase-status').textContent = 'No salient matches under the current filters.';
+  }
   updateColors(); updateCoverSizes(); updateLabelTracking();
   graph.render(); scheduleCovers();
 }
 async function load(exported, name) {
   try {
     validateExport(exported);
+    phraseSearch.set(''); $('phrase').value = ''; $('phrase-results').replaceChildren();
     generation++; revision = 0; clearTimeout(edgeTimer);
     coverLoader?.destroy(); clearTimeout(coverTimer); clearTimeout(atlasTimer);
     coverTimer = atlasTimer = undefined; coverLoader = coverLimits = undefined;
@@ -293,6 +336,9 @@ async function load(exported, name) {
     atlasEntries = []; visibleCovers = [];
     worker?.terminate(); worker = undefined; graph?.destroy(); graph = undefined;
     data = exported;
+    queryVectors = textVectors(data.albums);
+    $('phrase').disabled = !queryVectors.some(vector => vector !== null);
+    $('phrase-status').textContent = $('phrase').disabled ? 'This export has no CLAP audio vectors. Export again after embedding albums.' : '';
     $('sound-labels').replaceChildren();
     for (const column of data.labels || []) {
       const name = `${column.label} [${column.source}]`; lensOptions.set(name, column);
@@ -391,6 +437,8 @@ function watchDpr() {
 watchDpr();
 $('group').addEventListener('change', () => { if (graph) { updateGroups(); reheat(); } });
 $('search').addEventListener('input', updateSearch);
+$('phrase').addEventListener('input', () => phraseSearch.set($('phrase').value));
+$('clear-phrase').addEventListener('click', () => { $('phrase').value = ''; phraseSearch.set(''); });
 for (const id of ['lens', 'vocal', 'include-unknown']) $(id).addEventListener('input', updateSearch);
 for (const id of ['dance-min', 'dance-max']) $(id).addEventListener('input', () => {
   if (Number($('dance-min').value) > Number($('dance-max').value)) $(id === 'dance-min' ? 'dance-max' : 'dance-min').value = $(id).value;

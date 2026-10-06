@@ -274,6 +274,150 @@ ETags, honoring If-None-Match with 304. This prevents heuristic caching of
 Nix-store assets with epoch timestamps. Hashed covers retain one-year immutable
 caching. The server keeps its localhost binding and explicit path allowlists.
 
+### Free-text CLAP search
+
+The separate **Describe a sound** field accepts phrases such as “rainy night jazz
+piano” or “aggressive 90s boom bap”. After a 400 ms debounce, the viewer requests a
+text embedding from its own server and computes every covered album's cosine in
+the browser. The map uses the existing descriptor-lens convention: population
+z-score ≥ 0.5 lights up relatively salient albums. This is relative salience,
+not a probability. Constant score populations have no salient matches. The top
+10 matching albums show raw cosines; clicking selects and zooms to the album.
+Album/artist search, the descriptor lens and Essentia filters intersect with
+phrase matches. Missing CLAP vectors remain dimmed. Clearing the phrase restores
+rendering under the remaining controls. Superseded query responses are ignored.
+
+Schema v3 now additionally exports nullable `text_vector` values, with shared
+`text_vector_encoding: int8-base64` and `text_vector_dimension: 512`. These are
+CLAP **audio** embeddings pooled from the current text-comparable family used
+by descriptor scoring, independent of the selected layout family. Coverage uses
+`text_embedded_tracks`, and `text_model_id` identifies the embedding space. They
+remain available when descriptor encoding fails. The browser normalizes each
+decoded vector once. Earlier v1/v2/v3 exports still load; phrase search explains
+when an export has no compatible vectors. An old server, absent model files,
+timeout or model identity mismatch produces a clear message without losing the
+graph or other controls.
+
+The x86_64-linux viewer package includes the CPU worker path; it needs no separate
+HTTP service. Other platforms retain the viewer without a packaged query worker.
+`--text-worker PATH` overrides that path. The server lazily starts one persistent
+`serve-text --device cpu --threads 2` child on the first query. It skips ONNX/audio
+processing and GPU discovery, validates the complete pinned checkpoint, then
+releases the audio encoder/projection and checkpoint tensors. Only the text
+encoder/projection are retained for queries. Idle unloading terminates the child
+and releases its process memory after 600 seconds; use `--text-idle-seconds 0`
+to keep it loaded. Server shutdown also terminates/reaps the child.
+
+`POST /api/embed-text` accepts `{"q":"rainy night jazz piano"}` and returns
+`{"vector":[...],"model_id":"text:..."}`: 512 finite unit-length floats. It
+requires `application/json`, a body of at most 4 KiB, and a trimmed phrase of
+1–240 characters. Request-body reads have a 10-second deadline. There is one
+in-flight inference, no server queue, and at most two accepted queries in any
+one-second window. Busy/rate-limited requests return 429 with `Retry-After: 1`;
+unavailable workers/models return 503. A 120-second deadline includes cold
+loading; timeout returns 504 and kills the child, allowing the next query to
+reload. API responses use `Cache-Control: no-store`. The viewer allows one
+request in flight and retains only the latest pending phrase.
+
+The server still binds **127.0.0.1**, retains its asset allowlist and ETags, and
+adds no CORS headers. POST requires a localhost Host header (including its port),
+rejects cross-site Fetch Metadata, and checks supplied Origin against Host.
+No database or music-directory access is needed by the viewer query service.
+HF/Torch downloads remain disabled. `--cache-dir` defaults to `.album-graph-cache`
+beside the selected JSON, or in the working directory without `--data`; production
+should explicitly select the persistent path below. Query runtime caches live in
+its `query/` subdirectory, separate from the exporter's runtime caches because
+the services run as different users. HF_HOME, HF_HUB_CACHE, TORCH_HOME,
+XDG_CACHE_HOME and MPLCONFIGDIR point beneath this query subdirectory.
+
+#### Queued infra wiring (documentation only)
+
+1. Bump the infra `beets-plugins` input to this feature commit. Both the exporter
+   and `beets-album-graph.service` must use packages from that input. Re-export
+   the graph so `albums.json` includes audio vectors; restarting only the viewer
+   cannot add vectors to an older export.
+2. Add `--cache-dir /var/lib/beets-album-graph/cache` to **both** the locked export
+   launcher and viewer launcher. Retain the viewer's `--data`, `--covers` and
+   `--port 8765` flags. The packaged viewer supplies `--text-worker` automatically;
+   source/manual launchers must supply the packaged CPU worker's absolute path.
+3. Prepare `/var/lib/beets-album-graph/cache` with owner `tunnel`, group
+   `album-graph`, mode **2770**, allowing the exporter and viewer users to create
+   their separate runtime directories. Retain exporter write access to graph
+   state. Add `ReadWritePaths=/var/lib/beets-album-graph/cache` to the viewer unit,
+   overriding its current `ReadOnlyPaths=/var/lib/beets-album-graph` for this
+   subdirectory. JSON/covers remain read-only to the viewer. Keep
+   `ProtectHome=true`, `ProtectSystem=strict`, `PrivateTmp=true` and the existing
+   localhost address restriction; writable home access is unnecessary.
+4. Any Nix-store sandbox allowlist must expose the packaged CPU worker's runtime
+   closure and `${embed-models}` link farm **and its resolved symlink targets**:
+   `amclap.ckpt`, `amclap.gin`, `omar.gin`, and all `mpnet/` files (weights,
+   tokenizer/config, `modules.json`, pooling and normalization configs). Normal
+   NixOS services can already read these through `/nix/store`; no HOME model path
+   or runtime download is needed. Preserve current exporter library/store/music
+   read paths; do not add those paths to the viewer.
+5. Budget **3 GiB** for the viewer plus query child during loading (measured
+   below), and retain two CPU threads. Set `MemoryDenyWriteExecute=false` on the viewer
+   unit: a real query under kernel MDWE failed because Torch/oneDNN could not
+   create an inference primitive. The current `true` setting blocks queries.
+   Verify the complete systemd sandbox after rollout. No new listening
+   port or separate text service is required.
+6. If the existing private viewer proxy is used, forward **POST**
+   `/api/embed-text` to the same loopback backend, permit a 4 KiB body, set its
+   response timeout above 120 seconds (e.g. 130 seconds), and disable API caching.
+   Validate the browser's Origin against the private viewer's public origin at
+   the proxy, then rewrite Host and a supplied Origin to `127.0.0.1:8765` and
+   `http://127.0.0.1:8765` respectively. Preserve `Sec-Fetch-Site`; do not expose
+   this route through a new public listener or enable CORS. A plain localhost
+   viewer or SSH tunnel needs no proxy rewrite.
+
+#### CPU validation and size
+
+On October 6, a locked-launcher export of a fixed **407-album** snapshot completed
+in **5.61–5.67 seconds**, using copied databases and temporary output/cache paths;
+the copied inputs were unchanged. New vectors/metadata added **285,372 bytes**,
+projecting to **4,486,391 bytes (4.49 MB / 4.28 MiB)** at 6,400 covered albums.
+This counts field overhead and shared metadata; base64 vector bytes alone are
+4,377,600 bytes at that scale. Missing vectors add only null fields. Layout,
+covers and descriptor data are unchanged by this size comparison.
+
+Fresh-process first HTTP queries took **4.92–7.05 seconds**, including process
+startup and cold model loading; warm queries took **54.6–65.8 ms** with two CPU
+threads.
+“Cold” means a fresh process, with pinned files already in the local Nix store;
+it is not a measurement with OS filesystem caches flushed. One worker PID served
+all four requests. Its peak RSS was **1,933 MiB**, and warm steady RSS was
+**1,807 MiB**, including Torch/Python and their allocator retention. Idle process
+termination releases this footprint. Quantization changed the two phrases'
+cosines by at most **0.000917**; both top-five sets were unchanged versus original
+float vectors. The retained text path matched the prior packaged encoder within
+1e-6. A real text query under kernel `PR_SET_MDWE` failed with
+`RuntimeError: could not create a primitive`; this establishes the required
+`MemoryDenyWriteExecute=false` unit change. No systemd service was modified.
+The final packaged endpoint repeated both phrases (5.11 s cold, 54.6 ms warm)
+and verified that server termination left no encoder child behind.
+
+| Phrase | Rank | Artist — album | Cosine |
+| --- | ---: | --- | ---: |
+| rainy night jazz piano | 1 | Makoto Terashita Meets Harold Land — Topology | 0.694290 |
+| | 2 | Louie Zong — Jazz | 0.651841 |
+| | 3 | Chet Baker Trio — Someday My Prince Will Come | 0.567227 |
+| | 4 | Herb Ellis • Remo Palmier — Windflower | 0.548796 |
+| | 5 | Kan Gao, feat. Laura Shigihara — To the Moon: Original Soundtrack | 0.525699 |
+| aggressive 90s boom bap | 1 | A Tribe Called Quest — The Anthology | 0.402020 |
+| | 2 | Various Artists — Bound Together: ReBound | 0.327404 |
+| | 3 | Kanye West — My Beautiful Dark Twisted Fantasy | 0.316136 |
+| | 4 | Earl Sweatshirt — SICK! | 0.298787 |
+| | 5 | Childish Gambino — STN MTN | 0.282317 |
+
+These rankings reflect the fixed partially embedded library, rather than all
+6,400 albums. Validation used `agent-run-long` for **50 plugin Python tests,
+four HTTP/supervisor Python tests and 27 Node tests**, targeted
+`embed`, `embed-worker` and viewer package builds, the locked-launcher export,
+and real endpoint/equivalence/MDWE checks. Heavy dependencies were already
+cached; `nix flake check --no-build --print-build-logs` also passed on
+x86_64-linux. No Torch/ROCm or aggregate package compilation was run. Browser/WebGL
+interaction and the deployed systemd/proxy wiring remain rollout checks.
+
 The style family is Discogs-EffNet v1 (1280 dimensions, 16 kHz), with Discogs-400
 styles, MTG-Jamendo mood/theme (56) and instrument (40), and approachability and
 engagement regression heads. Valence/arousal is deferred: the published DEAM

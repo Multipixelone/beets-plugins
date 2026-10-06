@@ -10,6 +10,10 @@
   <p id="source" class="muted">Choose an exported JSON file.</p>
   <label>Find album or artist<input id="search" type="search" placeholder="Search your library" disabled></label>
   <p id="matches" class="muted"></p>
+  <label>Describe a sound<input id="phrase" type="search" maxlength="240" placeholder="Rainy night jazz piano…" disabled></label>
+  <button id="clear-phrase">Clear phrase</button>
+  <p id="phrase-status" class="muted" role="status" aria-live="polite"></p>
+  <ol id="phrase-results" aria-label="Top matching albums"></ol>
   <fieldset id="sound-controls" disabled><legend>Sound lens and filters</legend>
     <label>Find a label<input id="lens" type="search" list="sound-labels" placeholder="Style, mood, texture…"><datalist id="sound-labels"></datalist></label>
     <button id="clear-lens">Clear lens</button>

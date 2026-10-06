@@ -83,7 +83,9 @@
           models = embed-models;
           rocmSupport = true;
         };
-        beets-album-graph = pkgs.callPackage ./plugins/embed/viewer { };
+        beets-album-graph = pkgs.callPackage ./plugins/embed/viewer {
+          worker = if system == "x86_64-linux" then embed-worker else null;
+        };
         embed = pkgs.callPackage ./plugins/embed {
           inherit beets pythonPackages;
           worker = embed-worker;

@@ -50,9 +50,9 @@ export function soundGroup(album, mode) {
   return mode === 'style' && label.includes('---') ? `${shortLabel(label)} (${label.split('---')[0]})` : shortLabel(label);
 }
 export function selectionState(albums, { search = '', lens, scores, danceMin = 0, danceMax = 1,
-                                       vocal = 'any', includeUnknown = false } = {}) {
+                                       vocal = 'any', includeUnknown = false, phraseScores } = {}) {
   const needle = search.trim().toLocaleLowerCase();
-  const active = !!needle || !!lens || danceMin > 0 || danceMax < 1 || vocal !== 'any';
+  const active = !!needle || !!lens || !!phraseScores || danceMin > 0 || danceMax < 1 || vocal !== 'any';
   const states = albums.map((album, index) => {
     let match = `${album.album}\n${album.albumartist}`.toLocaleLowerCase().includes(needle);
     let strength = 1;
@@ -63,6 +63,11 @@ export function selectionState(albums, { search = '', lens, scores, danceMin = 0
       match &&= score != null && score >= floor;
       strength = score == null ? 0 : Math.max(0, Math.min(1, relative ? (score - 0.5) / 3.5 : score));
     }
+    if (phraseScores) {
+      const score = phraseScores[index];
+      match &&= score != null && score >= 0.5;
+      strength = Math.min(strength, score == null ? 0 : Math.max(0, Math.min(1, (score - 0.5) / 3.5)));
+    }
     if (danceMin > 0 || danceMax < 1) {
       const value = album.essentia?.danceable?.value;
       match &&= value == null ? includeUnknown : value >= danceMin && value <= danceMax;
@@ -72,7 +77,7 @@ export function selectionState(albums, { search = '', lens, scores, danceMin = 0
       match &&= value == null ? includeUnknown : value === vocal;
     }
     return { match, strength: match ? strength : 0, opacity: !active ? 1 : match ? 0.65 + 0.35 * strength : 0.12,
-             size: match && lens ? 1 + 0.75 * strength : 1 };
+             size: match && (lens || phraseScores) ? 1 + 0.75 * strength : 1 };
   });
   return { active, states, matches: states.flatMap((state, i) => state.match ? [i] : []) };
 }

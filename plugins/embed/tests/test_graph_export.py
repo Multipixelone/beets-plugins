@@ -52,6 +52,7 @@ class GraphExportTests(unittest.TestCase):
         self.assertEqual({k: result['summary'][k] for k in ('selected_albums', 'exported_albums', 'skipped_albums')},
                          dict(selected_albums=2, exported_albums=1, skipped_albums=1))
         self.assertIsNone(result['albums'][0]['cover'])
+        self.assertIsNone(result['albums'][0]['text_vector'])
         self.assertFalse(result['summary']['covers_enabled'])
         album = result['albums'][0]
         self.assertEqual(album['id'], self.first.id)
@@ -118,6 +119,10 @@ class GraphExportTests(unittest.TestCase):
                 result = export_albums(self.lib, {self.first.id}, self.store_path,
                                        identities['style'], self.output, cache_dir=self.root / 'cache')
         self.assertEqual(result['summary']['descriptor_cache'], 'unavailable')
+        self.assertEqual(result['text_vector_dimension'], 512)
+        self.assertEqual(result['text_vector_encoding'], 'int8-base64')
+        np.testing.assert_array_equal(np.frombuffer(base64.b64decode(result['albums'][0]['text_vector']), dtype='i1'),
+                                      np.full(512, 127))
         self.assertEqual(result['albums'][0]['sound']['style']['count'], 1)
         reference = result['albums'][0]['sound']['style']['labels'][0][0]
         self.assertEqual(result['labels'][reference]['label'], 'Hip Hop---Boom Bap')
@@ -131,6 +136,26 @@ class GraphExportTests(unittest.TestCase):
                                ({'lastfm_play_count': None, 'play_count': '9'}, 9),
                                ({}, 0), ({'play_count': 'nan'}, 0), ({'play_count': '-1'}, 0)]:
             self.assertEqual(plays(item), expected)
+
+    def test_text_vectors_pool_current_tracks_independently_of_layout(self):
+        from beets_embed.store import model_ids
+        model = model_ids()['text']
+        with Store(self.store_path) as store:
+            for i, item in enumerate(self.items[:2]):
+                vector = np.zeros(512, dtype='f4')
+                vector[i] = 1
+                store.put(item.id, fingerprint(item.path), model, vector, np.zeros(512))
+        with patch('beets_embed.graph_export.phrase_embeddings', side_effect=OSError('missing model')):
+            first = self.export()['albums'][0]
+            self.assertEqual(first['text_embedded_tracks'], 2)
+            decoded = np.frombuffer(base64.b64decode(first['text_vector']), dtype='i1')
+            np.testing.assert_array_equal(decoded[:2], [127, 127])
+            self.assertEqual(len(decoded), 512)
+            self.assertEqual(len(base64.b64decode(first['vector'])), 2)
+            Path(os.fsdecode(self.items[0].path)).write_bytes(b'changed audio')
+            second = self.export()['albums'][0]
+            self.assertEqual(second['text_embedded_tracks'], 1)
+            self.assertEqual(list(base64.b64decode(second['text_vector']))[:2], [0, 127])
 
     def test_fingerprint_model_and_missing_store(self):
         self.assertEqual(self.export(model='text:v1')['albums'], [])

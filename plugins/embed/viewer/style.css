@@ -25,3 +25,5 @@ button, .file { padding: 8px 12px; border: 1px solid #4c627a; background: #24334
   #controls-toggle { display: block; position: absolute; top: 8px; left: 8px; z-index: 5; }
   #details { max-height: 60dvh; }
 }
+#phrase-results { padding-left: 22px; font-size: 12px; }
+#phrase-results button { display: block; width: 100%; text-align: left; margin: 4px 0; padding: 6px; }
