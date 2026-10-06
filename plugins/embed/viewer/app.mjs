@@ -1,8 +1,9 @@
 import { Graph, defaultConfigValues } from '@cosmos.gl/graph';
 import { validateExport, groups, pointSizes, artworkSizes, seedLayout, layoutSpaceSize, layoutParameters, searchMatches, showCovers, coverCandidates } from './logic.mjs';
 
-import { CoverLoader, decodeCover, coverPolicy, drawnCoverPixels, constrainedCovers } from './covers.mjs';
+import { CoverLoader, decodeCover, coverPolicy, drawnCoverPixels, constrainedCovers, coverPriority, mipTier, decodeOverview } from './covers.mjs';
 import { decodeColumn, selectionState, soundSections, groupLabels, placeLabels } from './sound.mjs';
+import { atlasLayout } from './atlas.mjs';
 import { textVectors, phraseScores, topMatches, PhraseSearch } from './search.mjs';
 
 const $ = id => document.getElementById(id);
@@ -10,7 +11,7 @@ const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matc
 let graph, worker, data, clusters = [], edges = [], selected, paused = false;
 let coverLoader, coverTimer, atlasTimer, visibleCovers = [], atlasEntries = [], coverActive = false;
 let dragging = false, zooming = false, graphReady = false;
-let coverLimits, coverDpr = 1;
+let coverLimits, coverDpr = 1, overviewController, coverTiers = new Map();
 let labelTimer, labelGroups = [], labelDefinitions = [], trackedKey, hovered;
 let groupNames = [], groupIds = new Map(), lensOptions = new Map();
 let selection = { active: false, states: [], matches: [] }, lensScores, currentLens;
@@ -91,26 +92,43 @@ function albumImageSizes() {
   sizes.forEach((size, i) => { sizes[i] = size * (selection.states[i]?.size ?? 1) * geometryScale; });
   return sizes;
 }
-function configureCovers(candidates) {
+function configureCovers() {
   const dpr = window.devicePixelRatio || 1;
   if (coverDpr !== dpr) { coverDpr = dpr; graph.setConfigPartial({ pixelRatio: dpr }); }
   const gl = $('graph').querySelector('canvas').getContext('webgl2');
-  const sizes = albumImageSizes();
-  const pixels = Math.max(0, ...candidates.map(i => drawnCoverPixels(sizes[i], {
-    dpr, zoom: graph.getZoomLevel(), scaleOnZoom: true, maxPointPixels: gl.getParameter(gl.ALIASED_POINT_SIZE_RANGE)[1],
-  })));
-  const limits = coverPolicy(pixels, {
+  const limits = coverPolicy(32, {
+    count: data.albums.filter(album => album.cover).length,
     constrained: constrainedCovers({ width: window.innerWidth,
       coarsePointer: window.matchMedia('(pointer: coarse)').matches, deviceMemory: navigator.deviceMemory }),
     maxTextureSize: gl.getParameter(gl.MAX_TEXTURE_SIZE),
   });
-  if (!coverLoader || limits.spriteSize !== coverLimits.spriteSize || limits.capacity !== coverLimits.capacity ||
-      limits.concurrency !== coverLimits.concurrency) {
-    coverLoader?.destroy();
-    // Drop both browser and cosmos references to the previous resolution before decoding again.
-    atlasEntries = []; graph.setImageData([]);
-    coverLimits = limits; coverLoader = new CoverLoader(decodeCover, scheduleAtlas, limits);
+  if (!coverLoader) {
+    const baseRequests = [...new Map(data.albums.filter(album => album.cover).map(album => {
+      const key = coverURL(album.cover);
+      return [key, { key, baseURL: coverURL(album.cover_variants?.['32'] ?? album.cover) }];
+    })).values()];
+    const byId = new Map(data.albums.map(album => [album.id, album]));
+    const sheets = data.cover_atlases ?? [];
+    const deferredBase = sheets.flatMap(sheet => sheet.album_ids.map(id => coverURL(byId.get(id).cover)));
+    coverLimits = limits;
+    coverLoader = new CoverLoader(decodeCover, scheduleAtlas, { ...limits, baseRequests, deferredBase });
+    const loader = coverLoader, controller = new AbortController(); overviewController = controller;
+    // Release each decoded sheet before fetching the next; failed shards fall back to files.
+    void (async () => {
+      for (const sheet of sheets) {
+        try {
+          await decodeOverview(coverURL(sheet.file), sheet, controller.signal, limits.baseSize,
+            (id, image) => loader.setBase(coverURL(byId.get(id).cover), image));
+        } catch (error) {
+          if (!controller.signal.aborted) console.warn('Overview sheet unavailable; loading individual mips', error);
+        } finally {
+          loader.releaseDeferred(sheet.album_ids.map(id => coverURL(byId.get(id).cover)));
+        }
+        if (controller.signal.aborted) break;
+      }
+    })();
   }
+  return gl;
 }
 function scheduleCovers() {
   if (!coverTimer) coverTimer = setTimeout(() => { coverTimer = undefined; refreshCovers(); }, 500);
@@ -120,19 +138,31 @@ function scheduleAtlas() {
 }
 function refreshCovers() {
   if (!graphReady || dragging || zooming) return;
-  coverActive = showCovers($('render-mode').value, graph.getZoomLevel(), data.albums.length, Number($('cover-zoom').value));
+  coverActive = showCovers($('render-mode').value, graph.getZoomLevel(), data.albums.length, Number($('cover-zoom').value), coverActive);
   if (!coverActive) {
     visibleCovers = []; coverLoader?.setWanted([]); updateCoverSizes(); graph.render();
     $('cover-status').textContent = 'Colored dots'; return;
   }
-  // Native viewport query at most twice a second, never on every animation frame.
+  const gl = configureCovers();
+  // Native viewport query and position readback at most twice a second.
   const { width, height } = $('graph').getBoundingClientRect();
-  const visible = graph.findPointsInRect([[0, 0], [width, height]]);
-  const priority = [selected, ...(selection.active ? selection.matches : [])];
-  const candidates = coverCandidates(data.albums, visible, priority, 256);
-  configureCovers(candidates);
-  visibleCovers = candidates.slice(0, coverLoader.capacity);
-  coverLoader.setWanted(visibleCovers.map(i => coverURL(data.albums[i].cover)));
+  const visible = graph.findPointsInRect([[0, 0], [width, height]])
+    .filter(i => !selection.active || selection.states[i]?.match);
+  const sizes = albumImageSizes();
+  visibleCovers = coverPriority(data.albums, coverCandidates(data.albums, visible, [], Infinity),
+    graph.getPointPositions(), sizes, graph.screenToSpacePosition([width / 2, height / 2]), [selected, hovered]);
+  const requests = visibleCovers.map(i => {
+    const album = data.albums[i], key = coverURL(album.cover);
+    const pixels = drawnCoverPixels(sizes[i], { dpr: coverDpr, zoom: graph.getZoomLevel(),
+      scaleOnZoom: true, maxPointPixels: gl.getParameter(gl.ALIASED_POINT_SIZE_RANGE)[1] });
+    const tier = pixels <= coverLimits.baseSize ? coverLimits.baseSize : mipTier(pixels, coverTiers.get(key) ?? coverLimits.baseSize);
+    coverTiers.set(key, tier);
+    return { key, tier, baseURL: coverURL(album.cover_variants?.['32'] ?? album.cover),
+      url: coverURL(album.cover_variants?.[String(tier)] ?? album.cover) };
+  });
+  coverLoader.dropHidden(new Set(data.albums.flatMap((album, i) =>
+    album.cover && (!selection.active || selection.states[i]?.match) ? [coverURL(album.cover)] : [])));
+  coverLoader.setWanted(requests);
   scheduleAtlas();
 }
 function updateCoverSizes() {
@@ -170,18 +200,25 @@ function resizeArtwork() {
 function updateAtlas() {
   if (!graphReady || !coverLoader) return;
   if (dragging || zooming) { scheduleAtlas(); return; }
-  const entries = [...coverLoader.images.entries()].sort(([a], [b]) => a.localeCompare(b));
-  // setImageData repacks the whole texture. Never upload an unchanged atlas.
+  const keys = [...new Set(data.albums.flatMap((album, i) => album.cover &&
+    (!selection.active || selection.states[i]?.match) ? [coverURL(album.cover)] : []))];
+  const wanted = coverLoader.wanted.filter(request => keys.includes(request.key));
+  const entries = coverLoader.atlasEntries(keys, wanted, coverLimits.maxTextureSize);
+  // One atomic atlas replacement; the previous sprite remains until decode completes.
   const atlasChanged = entries.length !== atlasEntries.length || entries.some(([url, image], i) =>
     url !== atlasEntries[i]?.[0] || image !== atlasEntries[i]?.[1]);
   if (atlasChanged) {
     graph.setImageData(entries.map(([, image]) => image)); atlasEntries = entries;
   }
   const geometry = `${coverActive}:${$('size').value}:${$('art-size').value}:${selected}:${geometryScale}`;
-  if (atlasChanged || geometry !== coverGeometry) {
-    updateCoverSizes(); graph.render();
+  if (atlasChanged || geometry !== coverGeometry) { updateCoverSizes(); graph.render(); }
+  if (coverActive) {
+    const atlas = new Map(entries);
+    const shown = visibleCovers.filter(i => atlas.has(coverURL(data.albums[i].cover)));
+    const upgraded = shown.filter(i => atlas.get(coverURL(data.albums[i].cover)).width > coverLimits.baseSize);
+    const bytes = atlasLayout(entries.map(([, image]) => image), coverLimits.maxTextureSize)?.bytes ?? 0;
+    $('cover-status').textContent = `${shown.length} covers in view · ${upgraded.length} detailed · ${coverLoader.base.size} cached · ${(bytes / 1048576).toFixed(1)} MiB atlas · ${coverLoader.failed.size} unavailable`;
   }
-  if (coverActive) $('cover-status').textContent = `${visibleCovers.filter(i => coverLoader.images.has(coverURL(data.albums[i].cover))).length} covers in view · ${coverLoader.failed.size} unavailable`;
 }
 let generation = 0, revision = 0, edgeTimer;
 const forceSpecs = [
@@ -478,6 +515,7 @@ async function load(exported, name) {
     phraseSearch.set(''); $('phrase').value = ''; $('phrase-results').replaceChildren();
     generation++; revision = 0; clearTimeout(edgeTimer);
     initialFitPending = true;
+    overviewController?.abort(); coverTiers.clear();
     coverLoader?.destroy(); clearTimeout(coverTimer); clearTimeout(atlasTimer);
     coverTimer = atlasTimer = undefined; coverLoader = coverLimits = undefined;
     graphReady = false; dragging = zooming = false;
@@ -585,7 +623,7 @@ async function load(exported, name) {
         graph.setPointPositions(seeded.positions);
       }
       graphReady = true;
-      coverActive = showCovers($('render-mode').value, graph.getZoomLevel(), data.albums.length, Number($('cover-zoom').value));
+      coverActive = showCovers($('render-mode').value, graph.getZoomLevel(), data.albums.length, Number($('cover-zoom').value), coverActive);
       graph.setLinks(Float32Array.from(edges.flatMap(e => [e.source, e.target])));
       // Sound similarity determines layout even when covers use metadata colors.
       graph.setPointClusters(clusters);

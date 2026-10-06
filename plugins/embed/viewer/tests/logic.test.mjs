@@ -5,6 +5,18 @@ const album = (id, vector, extra = {}) => ({ id, vector, album: `Album ${id}`, a
   year: 2001, track_count: 3, embedded_tracks: 2, summed_plays: 16, mean_plays: 16 / 3, ...extra });
 const exported = albums => ({ schema_version: 1, model_id: 'style:v1', exported_at: '2026-10-05T00:00:00Z', albums });
 
+test('optional mip and overview metadata validates filenames, bounds and unique album mapping', () => {
+  const name = 'cover-' + 'a'.repeat(64) + '.jpg';
+  const data = exported([album(1, [1], { cover: name, cover_variants: { '32': name, '256': name } })]);
+  data.cover_atlases = [{ file: name, tile_size: 32, columns: 1, album_ids: [1] }];
+  assert.equal(validateExport(data), data);
+  for (const change of [d => { d.albums[0].cover_variants['32'] = '../art.jpg'; },
+    d => { d.cover_atlases[0].album_ids = [1, 1]; }, d => { d.cover_atlases[0].columns = 65; },
+    d => { d.cover_atlases[0].album_ids = [2]; }, d => { d.cover_atlases[0].tile_size = 256; }]) {
+    const bad = structuredClone(data); change(bad); assert.throws(() => validateExport(bad));
+  }
+});
+
 test('validation accepts empty and current exports and rejects malformed vectors and metadata', () => {
   assert.equal(validateExport(exported([])).albums.length, 0);
   assert.equal(validateExport(exported([album(1, [1, 0])])).albums.length, 1);

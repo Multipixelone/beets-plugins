@@ -42,6 +42,16 @@ export function validateExport(data) {
         (typeof album.cover_large !== 'string' || !/^cover-[0-9a-f]{64}\.jpg$/.test(album.cover_large))) {
       throw new Error('Invalid large cover filename.');
     }
+    if (album.cover_variants !== undefined) {
+      if (!album.cover_variants || typeof album.cover_variants !== 'object' || Array.isArray(album.cover_variants) ||
+          Object.entries(album.cover_variants).some(([size, name]) =>
+            !['32', '64', '128', '256', '512'].includes(size) ||
+            typeof name !== 'string' || !/^cover-[0-9a-f]{64}\.jpg$/.test(name)) ||
+          (album.cover_variants['256'] !== undefined && album.cover_variants['256'] !== album.cover) ||
+          (album.cover_variants['512'] !== undefined && album.cover_variants['512'] !== album.cover_large)) {
+        throw new Error('Invalid cover variants.');
+      }
+    }
     for (const key of ['album', 'albumartist', 'genre']) {
       if (typeof album[key] !== 'string') throw new Error(`Invalid album ${key}.`);
     }
@@ -62,6 +72,23 @@ export function validateExport(data) {
     dimension ??= vector.length;
     if (vector.length !== dimension || (typeof album.vector === 'string' && data.vector_dimension !== dimension)) {
       throw new Error('Inconsistent vector dimensions.');
+    }
+  }
+  if (data.cover_atlases !== undefined) {
+    if (!Array.isArray(data.cover_atlases)) throw new Error('Invalid cover atlas catalog.');
+    const byId = new Map(data.albums.map(album => [album.id, album]));
+    const packed = new Set();
+    for (const sheet of data.cover_atlases) {
+      if (!sheet || typeof sheet.file !== 'string' || !/^cover-[0-9a-f]{64}\.jpg$/.test(sheet.file) ||
+          sheet.tile_size !== 32 || !Number.isInteger(sheet.columns) || sheet.columns < 1 || sheet.columns > 64 ||
+          !Array.isArray(sheet.album_ids) || !sheet.album_ids.length ||
+          sheet.album_ids.length > sheet.columns * 64) throw new Error('Invalid cover atlas.');
+      for (const id of sheet.album_ids) {
+        if (packed.has(id) || !byId.get(id)?.cover || !byId.get(id)?.cover_variants?.['32']) {
+          throw new Error('Invalid cover atlas album mapping.');
+        }
+        packed.add(id);
+      }
     }
   }
   if (data.schema_version === 3) {
@@ -322,9 +349,9 @@ export function searchMatches(albums, search) {
     `${a.album}\n${a.albumartist}`.toLocaleLowerCase().includes(needle) ? [i] : []);
 }
 
-// Auto alone applies the zoom/count cutoffs. Forced covers still use a bounded atlas.
-export function showCovers(mode, zoom, count, threshold = 1) {
-  return mode === 'covers' || (mode === 'auto' && zoom >= threshold && count <= 1000);
+// Automatic mode has hysteresis; library size is handled by mip memory budgets.
+export function showCovers(mode, zoom, count, threshold = 1, previous = false) {
+  return mode === 'covers' || (mode === 'auto' && zoom >= threshold * (previous ? 0.8 : 1));
 }
 
 export function coverCandidates(albums, visible, priority = [], capacity = 256) {

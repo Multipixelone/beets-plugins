@@ -1,9 +1,11 @@
 import { build } from 'esbuild';
 import { mkdir, copyFile, readFile, writeFile, readdir } from 'node:fs/promises';
 import { join } from 'node:path';
+import { cosmosAtlasPlugin } from './cosmos-atlas-patch.mjs';
 await mkdir('dist', { recursive: true });
 await build({ entryPoints: { app: 'app.mjs', worker: 'worker.mjs' }, outdir: 'dist', bundle: true,
-  format: 'esm', platform: 'browser', target: 'es2022', minify: true, legalComments: 'eof' });
+  format: 'esm', platform: 'browser', target: 'es2022', minify: true, legalComments: 'eof',
+  plugins: [cosmosAtlasPlugin] });
 for (const name of ['index.html', 'style.css']) await copyFile(name, `dist/${name}`);
 const licenses = [];
 async function collect(directory) {

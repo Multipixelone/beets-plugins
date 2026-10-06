@@ -55,8 +55,8 @@
       <div id="forces"></div>
       <label>Show albums as<select id="render-mode"><option value="covers">Album covers</option><option value="dots">Colored dots</option><option value="auto">Automatic</option></select></label>
       <label>Auto: minimum zoom <output id="cover-zoom-value">1.00</output><input id="cover-zoom" type="range" min="0.1" max="5" step="0.1" value="1"></label>
-      <p class="muted">Automatic mode uses dots above 1,000 albums.</p>
-      <p id="cover-status" class="muted">Cover images load within the visible area.</p>
+      <p class="muted">Small covers stay cached; visible albums gain detail as you zoom in.</p>
+      <p id="cover-status" class="muted">Loading overview covers.</p>
     </div></details>
     <details class="control-section" open><summary>Color key <span id="group-count" class="count"></span></summary><p class="muted">The frame around each cover shows its group.</p><div id="legend" aria-label="Group legend"></div></details>
     <details class="control-section library-section"><summary>Your library</summary><div class="section-content">
