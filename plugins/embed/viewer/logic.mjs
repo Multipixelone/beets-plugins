@@ -16,15 +16,31 @@ export function validateExport(data) {
     throw new Error('Expected an album graph export with schema_version 1, 2 or 3.');
   }
   const ids = new Set();
+  const hasText = data.text_vector_encoding !== undefined;
+  if (hasText && (data.schema_version !== 3 || data.text_vector_encoding !== 'int8-base64' ||
+      data.text_vector_dimension !== 512 || typeof data.text_model_id !== 'string')) {
+    throw new Error('Invalid text vector metadata.');
+  }
   let dimension;
   for (const album of data.albums) {
     if (!album || !Number.isInteger(album.id) || album.id < 1 || ids.has(album.id)) {
       throw new Error('Album IDs must be unique positive integers.');
     }
     ids.add(album.id);
+    if (album.text_vector != null) {
+      if (!hasText || typeof album.text_vector !== 'string' || album.text_vector.length !== 684) {
+        throw new Error('Invalid text vector encoding.');
+      }
+      const text = decodeLayoutVector(album.text_vector);
+      if (text.length !== 512 || !text.some(x => x !== 0)) throw new Error('Invalid text vector.');
+    }
     if (data.schema_version >= 2 && album.cover !== null &&
         (typeof album.cover !== 'string' || !/^cover-[0-9a-f]{64}\.jpg$/.test(album.cover))) {
       throw new Error('Invalid cover filename.');
+    }
+    if (album.cover_large !== undefined && album.cover_large !== null &&
+        (typeof album.cover_large !== 'string' || !/^cover-[0-9a-f]{64}\.jpg$/.test(album.cover_large))) {
+      throw new Error('Invalid large cover filename.');
     }
     for (const key of ['album', 'albumartist', 'genre']) {
       if (typeof album[key] !== 'string') throw new Error(`Invalid album ${key}.`);

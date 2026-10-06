@@ -125,7 +125,8 @@ class EmbedPlugin(BeetsPlugin):
         covers = (f" --covers {shlex.quote(str(Path(opts.covers_dir).expanduser().absolute()))}"
                   if opts.covers_dir else "")
         ui.print_(f"Open viewer: {shlex.quote(viewer)} --data "
-                  f"{shlex.quote(str(Path(opts.output).expanduser().absolute()))}{covers}")
+                  f"{shlex.quote(str(Path(opts.output).expanduser().absolute()))}{covers}" +
+                  (f" --cache-dir {shlex.quote(str(Path(opts.cache_dir).expanduser().absolute()))}" if opts.cache_dir else ""))
 
     def run(self, lib, opts, args, mode):
         if mode != "embed" and not args:

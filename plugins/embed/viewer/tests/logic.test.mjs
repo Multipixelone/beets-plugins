@@ -121,3 +121,14 @@ test('v2 accepts null and hashed covers; v1 works without covers', () => {
     assert.throws(() => validateExport(make(cover)));
   }
 });
+
+
+test('optional large artwork keeps legacy exports compatible and rejects unsafe paths', () => {
+  const make = cover_large => ({ ...exported([album(1, [1], { cover: null, cover_large })]), schema_version: 2 });
+  for (const value of [undefined, null, `cover-${'a'.repeat(64)}.jpg`]) {
+    assert.doesNotThrow(() => validateExport(make(value)));
+  }
+  for (const value of ['../art.jpg', 'https://example.com/art.jpg', 'cover-abc.jpg', 3]) {
+    assert.throws(() => validateExport(make(value)), /large cover filename/);
+  }
+});

@@ -86,7 +86,7 @@ def process(tracks, store, models, engine, prepare, batch_size=8, stopping=lambd
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("mode", choices=["embed", "search", "similar", "smoke", "probe-rocm", "encode-text"])
+    parser.add_argument("mode", choices=["embed", "search", "similar", "smoke", "probe-rocm", "encode-text", "serve-text"])
     parser.add_argument("--manifest")
     parser.add_argument("--store")
     parser.add_argument("--assets", default=os.environ.get("BEETS_EMBED_MODELS"))
@@ -108,6 +108,24 @@ def main():
         parser.error("The packaged model assets are required")
     if not 1 <= args.threads <= 16 or not 1 <= args.batch_size <= 128 or args.top_k < 1:
         parser.error("Invalid processing bounds")
+    if args.mode == "serve-text":
+        if args.device != "cpu" or args.threads != 2:
+            parser.error("serve-text requires --device cpu --threads 2")
+        from .inference import Models
+        engine = Models(args.assets, 2, "cpu", text_only=True)
+        for line in iter(lambda: sys.stdin.readline(4097), ''):
+            if len(line) > 4096 or not line.endswith('\n'):
+                raise ValueError('Invalid text request size')
+            request = json.loads(line)
+            text = request.get('q') if isinstance(request, dict) else None
+            if not isinstance(text, str) or not text.strip() or len(text.strip()) > 240:
+                raise ValueError('Invalid text query')
+            vector = engine.text(text.strip())
+            if vector.shape != (512,):
+                raise ValueError('Invalid text embedding dimension')
+            print(json.dumps({'vector': vector.tolist(), 'model_id': model_ids()['text']},
+                             allow_nan=False), flush=True)
+        return 0
     if args.mode == "encode-text":
         # Deliberately precede all device selection, store and audio processing.
         if args.device != "cpu" or not args.manifest:

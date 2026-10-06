@@ -1,4 +1,4 @@
-{ lib, buildNpmPackage, python3, makeWrapper }:
+{ lib, buildNpmPackage, python3, makeWrapper, worker ? null }:
 buildNpmPackage {
   pname = "beets-album-graph";
   version = "0.1.0";
@@ -6,7 +6,7 @@ buildNpmPackage {
     root = ./.;
     fileset = lib.fileset.unions [
       ./package.json ./package-lock.json ./build.mjs ./app.mjs ./worker.mjs
-      ./logic.mjs ./sound.mjs ./covers.mjs ./index.html ./style.css ./server.py ./tests
+      ./logic.mjs ./sound.mjs ./covers.mjs ./search.mjs ./index.html ./style.css ./server.py ./text_query.py ./tests
     ];
   };
   npmDepsHash = "sha256-rMjW7mYkrkOusOpbdTTwvwA5GET9/mECayN03DPMteQ=";
@@ -23,8 +23,10 @@ buildNpmPackage {
     mkdir -p $out/share/beets-album-graph $out/libexec $out/bin
     cp -r dist/. $out/share/beets-album-graph/
     cp server.py $out/libexec/beets-album-graph.py
+    cp text_query.py $out/libexec/
     makeWrapper ${python3}/bin/python3 $out/bin/beets-album-graph \
-      --add-flags "$out/libexec/beets-album-graph.py --assets $out/share/beets-album-graph"
+      --add-flags "$out/libexec/beets-album-graph.py --assets $out/share/beets-album-graph" \
+      ${lib.optionalString (worker != null) ''--add-flags "--text-worker ${worker}/bin/beets-embed-worker"''}
     runHook postInstall
   '';
   meta = {

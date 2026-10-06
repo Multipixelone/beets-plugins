@@ -14,7 +14,10 @@ from PIL import Image, ImageOps
 
 LOG = logging.getLogger(__name__)
 COVER_NAME = re.compile(r"cover-[0-9a-f]{64}\.jpg\Z")
-RECIPE = "jpeg-128-contain-rgb-10151c-q82-v1"
+RECIPE = "jpeg-contain-rgb-10151c-q85-v2"
+THUMBNAIL_SIZE = 256
+CARD_SIZE = 512
+JPEG_QUALITY = 85
 MANIFEST = ".album-graph-covers.json"
 
 
@@ -64,7 +67,9 @@ class CoverCache:
         self.created = set()
         self.previous = set()
         self.stats = dict(covers_enabled=True, covers_available=0, covers_missing=0,
-                          covers_generated=0, covers_reused=0, covers_pruned=0)
+                          covers_generated=0, covers_reused=0, covers_pruned=0,
+                          covers_large_available=0, covers_large_missing=0,
+                          covers_large_generated=0, covers_large_reused=0)
         self.guard(self.directory / MANIFEST)
         self.directory.mkdir(mode=0o750, parents=True, exist_ok=True)
         manifest = self.directory / MANIFEST
@@ -92,44 +97,51 @@ class CoverCache:
             if (info.st_dev, info.st_ino) in self.protected_inodes:
                 raise ValueError("Cover output aliases original artwork or an input database")
 
-    def cover(self, source):
+    def cover(self, source, *, large=False):
+        size = CARD_SIZE if large else THUMBNAIL_SIZE
+        prefix = "covers_large" if large else "covers"
         if source is None:
-            self.stats["covers_missing"] += 1
+            self.stats[f"{prefix}_missing"] += 1
             return None
         try:
             source = source.resolve()
             before = identity(source)
-            key = json.dumps([str(source), before, RECIPE], separators=(",", ":")).encode()
+            key = json.dumps([str(source), before, f"{RECIPE}-{size}"], separators=(",", ":")).encode()
             name = f"cover-{hashlib.sha256(key).hexdigest()}.jpg"
             target = self.directory / name
             self.guard(target)
             # Check read access even when a cached thumbnail already exists.
             with source.open("rb") as original:
                 if target.is_file() and target.stat().st_size:
-                    self.stats["covers_reused"] += 1
+                    self.stats[f"{prefix}_reused"] += 1
                 else:
                     with warnings.catch_warnings():
                         warnings.simplefilter("error", Image.DecompressionBombWarning)
                         with Image.open(original) as image:
                             # JPEG draft decoding avoids decoding full-sized scans.
-                            image.draft("RGB", (256, 256))
+                            image.draft("RGB", (size * 2, size * 2))
                             image = ImageOps.exif_transpose(image)
-                            image.thumbnail((128, 128), Image.Resampling.LANCZOS)
-                            canvas = Image.new("RGB", (128, 128), (16, 21, 28))
+                            image.thumbnail((size, size), Image.Resampling.LANCZOS)
+                            canvas = Image.new("RGB", (size, size), (16, 21, 28))
                             rgba = image.convert("RGBA")
-                            canvas.paste(rgba, ((128 - image.width) // 2, (128 - image.height) // 2), rgba)
+                            canvas.paste(rgba, ((size - image.width) // 2, (size - image.height) // 2), rgba)
                             if identity(source) != before:
                                 raise OSError("Artwork changed during thumbnail generation")
-                            atomic_write(target, lambda out: canvas.save(out, "JPEG", quality=82))
+                            def write(out):
+                                canvas.save(out, "JPEG", quality=JPEG_QUALITY)
+                                if identity(source) != before:
+                                    raise OSError("Artwork changed during thumbnail encoding")
+                                self.guard(target)
+                            atomic_write(target, write)
                     self.created.add(name)
-                    self.stats["covers_generated"] += 1
+                    self.stats[f"{prefix}_generated"] += 1
             self.used.add(name)
-            self.stats["covers_available"] += 1
+            self.stats[f"{prefix}_available"] += 1
             return name
         except (OSError, ValueError, SyntaxError, Image.DecompressionBombError,
                 Image.DecompressionBombWarning) as exc:
             LOG.warning("Cannot thumbnail artwork %s: %s", source, exc)
-            self.stats["covers_missing"] += 1
+            self.stats[f"{prefix}_missing"] += 1
             return None
 
     def finish(self):
