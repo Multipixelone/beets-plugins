@@ -1,5 +1,5 @@
 import { Graph, defaultConfigValues } from '@cosmos.gl/graph';
-import { validateExport, groups, pointSizes, artworkSizes, seedPositions, searchMatches, showCovers, coverCandidates } from './logic.mjs';
+import { validateExport, groups, pointSizes, artworkSizes, seedLayout, layoutSpaceSize, layoutParameters, searchMatches, showCovers, coverCandidates } from './logic.mjs';
 
 import { CoverLoader, decodeCover, coverPolicy, drawnCoverPixels, constrainedCovers } from './covers.mjs';
 import { decodeColumn, selectionState, soundSections, groupLabels, placeLabels } from './sound.mjs';
@@ -84,10 +84,11 @@ function updateLabelTracking() {
 }
 let initialFitPending = false, strongestEdges = new Set();
 let coverGeometry = '', appliedLayout = false;
+let layout = { spaceSize: 4096, margin: 409.6, spacing: 112 }, geometryScale = 1;
 const coverURL = name => new URL(`covers/${name}`, location.href).href;
 function albumImageSizes() {
   const sizes = artworkSizes(data.albums, $('size').value, Number($('art-size').value));
-  sizes.forEach((size, i) => { sizes[i] = size * (selection.states[i]?.size ?? 1); });
+  sizes.forEach((size, i) => { sizes[i] = size * (selection.states[i]?.size ?? 1) * geometryScale; });
   return sizes;
 }
 function configureCovers(candidates) {
@@ -136,14 +137,14 @@ function refreshCovers() {
 }
 function updateCoverSizes() {
   if (!graphReady) return;
-  const geometry = `${coverActive}:${$('size').value}:${$('art-size').value}:${selected}`;
+  const geometry = `${coverActive}:${$('size').value}:${$('art-size').value}:${selected}:${geometryScale}`;
   const geometryChanged = geometry !== coverGeometry;
   const sizes = pointSizes(data.albums, $('size').value);
   // Artwork needs a readable baseline independent of the much smaller dot sizes.
   const artworkScale = Number($('art-size').value);
   const imageSizes = artworkSizes(data.albums, $('size').value, artworkScale);
-  sizes.forEach((size, i) => { sizes[i] = size * (selection.states[i]?.size ?? 1); });
-  imageSizes.forEach((size, i) => { imageSizes[i] = size * (selection.states[i]?.size ?? 1); });
+  sizes.forEach((size, i) => { sizes[i] = size * (selection.states[i]?.size ?? 1) * geometryScale; });
+  imageSizes.forEach((size, i) => { imageSizes[i] = size * (selection.states[i]?.size ?? 1) * geometryScale; });
   const shapes = new Float32Array(sizes.length);
   const indices = new Float32Array(sizes.length).fill(-1);
   const atlas = new Map(atlasEntries.map(([url], i) => [url, i]));
@@ -153,7 +154,7 @@ function updateCoverSizes() {
     indices[index] = atlas.get(coverURL(data.albums[index].cover)) ?? -1;
     shapes[index] = 1;
     // Cosmos draws squares at 80% of their point size. Selection stays rectangular.
-    sizes[index] = (imageSizes[index] + (index === selected ? 8 : 6)) / 0.8;
+    sizes[index] = (imageSizes[index] + (index === selected ? 8 : 6) * geometryScale) / 0.8;
   }
   graph.setPointImageIndices(indices);
   if (geometryChanged) {
@@ -163,6 +164,7 @@ function updateCoverSizes() {
 }
 function resizeArtwork() {
   if (!graphReady) return;
+  configureLayout();
   updateCoverSizes(); reheat(); scheduleCovers();
 }
 function updateAtlas() {
@@ -175,7 +177,7 @@ function updateAtlas() {
   if (atlasChanged) {
     graph.setImageData(entries.map(([, image]) => image)); atlasEntries = entries;
   }
-  const geometry = `${coverActive}:${$('size').value}:${$('art-size').value}:${selected}`;
+  const geometry = `${coverActive}:${$('size').value}:${$('art-size').value}:${selected}:${geometryScale}`;
   if (atlasChanged || geometry !== coverGeometry) {
     updateCoverSizes(); graph.render();
   }
@@ -192,9 +194,9 @@ const forceSpecs = [
   ['Friction (damping)', 'simulationFriction', 0, 1, 0.01],
 ];
 const forceInputs = new Map();
-const discoveryForces = { simulationRepulsion: 40, simulationLinkSpring: 0.01,
-  simulationLinkDistance: 150, simulationCollisionPadding: 40,
-  simulationGravity: 0.008, simulationCluster: 0.001, simulationFriction: 0.5 };
+const forceOutputs = new Map(), forceOverrides = new Map();
+let forceScales = {};
+const discoveryForces = layoutParameters([]).forces;
 for (const [name, key, min, max, step] of forceSpecs) {
   const label = document.createElement('label');
   label.append(name);
@@ -206,12 +208,39 @@ for (const [name, key, min, max, step] of forceSpecs) {
   const precision = step < 0.001 ? 4 : step < 0.01 ? 3 : step < 1 ? 2 : 0;
   output.value = Number(input.value).toFixed(precision);
   label.append(output, input); $('forces').append(label); forceInputs.set(key, input);
+  forceOutputs.set(key, output);
   input.addEventListener('input', () => {
-    output.value = Number(input.value).toFixed(precision);
+    output.value = Number(input.value).toFixed(forcePrecision(step * (forceScales[key] ?? 1)));
+    // Preserve the user's choice relative to the library's distance/count scale.
+    forceOverrides.set(key, Number(input.value) / (forceScales[key] ?? 1));
     if (!graph) return;
     graph.setConfigPartial({ [key]: key === 'simulationFriction' ? 1 - Number(input.value) : Number(input.value) });
     reheat();
   });
+}
+function forcePrecision(step) {
+  return Math.max(0, Math.min(6, Math.ceil(-Math.log10(step)) + (step < 1 ? 1 : 0)));
+}
+function configureLayout() {
+  const parameters = layoutParameters(data.albums, { ...layout,
+    metric: $('size').value, artworkScale: Number($('art-size').value),
+    emphasis: selection.states.map(state => state.size) });
+  geometryScale = parameters.geometryScale;
+  forceScales = { simulationRepulsion: parameters.repulsionScale,
+    simulationLinkDistance: parameters.distanceScale, simulationCollisionPadding: parameters.distanceScale };
+  const forces = {};
+  for (const [, key, min, max, step] of forceSpecs) {
+    const input = forceInputs.get(key), scale = forceScales[key] ?? 1;
+    const initial = forceOverrides.has(key) ? forceOverrides.get(key) * scale :
+      key === 'simulationFriction' ? 1 - parameters.forces[key] : parameters.forces[key];
+    Object.assign(input, { min: min * scale, max: max * scale, step: step * scale });
+    // Round padding down so slider quantization never exceeds the default budget.
+    input.value = key === 'simulationCollisionPadding' && !forceOverrides.has(key) ?
+      Math.floor(initial / (step * scale)) * step * scale : initial;
+    forceOutputs.get(key).value = Number(input.value).toFixed(forcePrecision(step * scale));
+    forces[key] = key === 'simulationFriction' ? 1 - Number(input.value) : Number(input.value);
+  }
+  graph.setConfigPartial(forces);
 }
 function status(message, error = false) {
   $('status').textContent = message; $('status').classList.toggle('error', error);
@@ -221,7 +250,7 @@ function options() {
     useThreshold: $('use-threshold').checked, threshold: Number($('threshold').value) };
 }
 function reheat() { graph.render(); if (!paused) graph.start(0.3); }
-function fitInitialView() {
+function fitInitialView(settled = false) {
   if (!initialFitPending || !graphReady) return;
   const duration = reducedMotion ? 0 : 450;
   // Scale artwork with the camera so zooming out never piles fixed-size covers together.
@@ -233,7 +262,7 @@ function fitInitialView() {
   // Open on a populated community; Fit view remains the whole-library overview.
   const initial = positions.filter((coordinate, i) => clusters[Math.floor(i / 2)] === largest);
   graph.setZoomTransformByPointPositions(Float32Array.from(initial), duration, scale, 0.08, false);
-  initialFitPending = false;
+  if (settled || paused) initialFitPending = false;
   scheduleCovers();
 }
 function coverElement(album, className) {
@@ -424,6 +453,7 @@ function updateSearch() {
     phraseScores: phraseResult?.salience,
     danceMin: Number($('dance-min').value), danceMax: Number($('dance-max').value),
     vocal: $('vocal').value, includeUnknown: $('include-unknown').checked });
+  if (graphReady) configureLayout();
   const matches = selection.matches;
   $('matches').textContent = matches.length ? `${matches.length} matching albums${matches.length > 30 ? ' · showing the first 30' : ''}` : 'No albums found. Try another album or artist.';
   $('search-results').hidden = !search;
@@ -459,6 +489,7 @@ async function load(exported, name) {
     $('dance-min-value').value = '0.00'; $('dance-max-value').value = '1.00';
     atlasEntries = []; visibleCovers = [];
     coverGeometry = ''; appliedLayout = false;
+    geometryScale = 1;
     worker?.terminate(); worker = undefined; graph?.destroy(); graph = undefined;
     data = exported;
     queryVectors = textVectors(data.albums);
@@ -491,7 +522,7 @@ async function load(exported, name) {
     $('k-value').value = $('k').value;
     $('empty').hidden = !!data.albums.length;
     if (!data.albums.length) { $('empty').textContent = 'No albums with current embeddings in this export.'; status('Empty export loaded.'); return; }
-    const config = { backgroundColor: '#0d1117', enableDrag: true, fitViewOnInit: false,
+    const config = { backgroundColor: '#0d1117', spaceSize: 4096, enableDrag: true, fitViewOnInit: false,
       pixelRatio: window.devicePixelRatio || 1,
       enableSimulation: !paused, enableSimulationDuringZoom: false,
       transitionDuration: 0, rescalePositions: false, scalePointsOnZoom: true,
@@ -506,19 +537,30 @@ async function load(exported, name) {
       simulationDecay: 1800,
       onMouseMove: (index, position, event) => hover(index, event),
       onPointMouseOver: (index, position, event) => hover(index, event?.sourceEvent ?? event),
-      onPointMouseOut: () => hover(undefined), onPointClick: index => { showInfo(index); $('search-results').hidden = true; },
-      onDragStart: () => { dragging = true; hover(undefined); if (!paused) graph.start(0.25); },
+      onPointMouseOut: () => hover(undefined), onPointClick: index => {
+        initialFitPending = false; showInfo(index); $('search-results').hidden = true;
+      },
+      onDragStart: () => { initialFitPending = false; dragging = true; hover(undefined); if (!paused) graph.start(0.25); },
       onDragEnd: () => { dragging = false; scheduleCovers(); scheduleLabels(); if (!paused) graph.start(0.2); },
-      onZoomStart: () => { zooming = true; hover(undefined); },
+      onZoomStart: event => { if (event?.sourceEvent) initialFitPending = false; zooming = true; hover(undefined); },
       onZoom: scheduleLabels,
       onZoomEnd: () => { zooming = false; scheduleCovers(); scheduleLabels(); },
       onSimulationTick: () => { scheduleCovers(); scheduleLabels(); },
-      onSimulationEnd: () => { scheduleCovers(); scheduleLabels(); } };
+      onSimulationEnd: () => { fitInitialView(true); scheduleCovers(); scheduleLabels(); } };
     for (const [key, input] of forceInputs) config[key] = key === 'simulationFriction' ? 1 - Number(input.value) : Number(input.value);
     graph = new Graph($('graph'), config);
     const currentGeneration = generation;
     await graph.ready;
     if (generation !== currentGeneration) return;
+    const gl = $('graph').querySelector('canvas').getContext('webgl2');
+    const constrained = constrainedCovers({ width: window.innerWidth,
+      coarsePointer: window.matchMedia('(pointer: coarse)').matches, deviceMemory: navigator.deviceMemory }) ||
+      /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+      (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+    const spaceSize = layoutSpaceSize(data.albums.length, {
+      maxTextureSize: gl.getParameter(gl.MAX_TEXTURE_SIZE), constrained });
+    layout = { spaceSize, margin: spaceSize * 0.1, spacing: 112 };
+    graph.setConfigPartial({ spaceSize });
     coverDpr = window.devicePixelRatio || 1;
     $('graph').style.visibility = 'hidden';
     worker = new Worker(new URL('./worker.js', import.meta.url), { type: 'module' });
@@ -538,7 +580,9 @@ async function load(exported, name) {
       for (const index of strongest.values()) strongestEdges.add(index);
       if (!appliedLayout) {
         // Start close neighbors together; Cosmos freely moves every album from here.
-        graph.setPointPositions(seedPositions(data.albums, edges, clusters));
+        const seeded = seedLayout(data.albums, edges, clusters, 112, layout);
+        layout = { spaceSize: seeded.spaceSize, margin: seeded.margin, spacing: seeded.spacing };
+        graph.setPointPositions(seeded.positions);
       }
       graphReady = true;
       coverActive = showCovers($('render-mode').value, graph.getZoomLevel(), data.albums.length, Number($('cover-zoom').value));

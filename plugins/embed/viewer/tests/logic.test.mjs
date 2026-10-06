@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { validateExport, similarityCache, buildEdges, communities, seedPositions, pointSizes, artworkSizes, groups, searchMatches } from '../logic.mjs';
+import { validateExport, similarityCache, buildEdges, communities, seedPositions, seedLayout, layoutSpaceSize, layoutParameters, pointSizes, artworkSizes, groups, searchMatches } from '../logic.mjs';
 const album = (id, vector, extra = {}) => ({ id, vector, album: `Album ${id}`, albumartist: 'Finn', genre: 'Folk',
   year: 2001, track_count: 3, embedded_tracks: 2, summed_plays: 16, mean_plays: 16 / 3, ...extra });
 const exported = albums => ({ schema_version: 1, model_id: 'style:v1', exported_at: '2026-10-05T00:00:00Z', albums });
@@ -72,6 +72,130 @@ test('initial seeds put connected albums closer than unrelated communities witho
   const linkedMean = edges.reduce((sum, { source, target }) => sum + distance(source, target), 0) / edges.length;
   const unrelatedMean = Array.from({ length: 9 }, (_, i) => distance(i, i + 10)).reduce((a, b) => a + b) / 9;
   assert.ok(linkedMean < unrelatedMean * .65, `${linkedMean} versus ${unrelatedMean}`);
+});
+
+function libraryFixture(count, mode = 'balanced') {
+  const albums = Array.from({ length: count }, (_, i) => album(i + 1, [1], {
+    summed_plays: i % 549, cover: `cover-${'a'.repeat(64)}.jpg` }));
+  const clusters = albums.map((_, i) => mode === 'skewed' && i < count * .9 ? 0 : i % 78);
+  const previous = new Map(), edges = [];
+  if (mode !== 'isolates') for (const [i, cluster] of clusters.entries()) {
+    if (previous.has(cluster)) edges.push({ source: previous.get(cluster), target: i, weight: .9 });
+    previous.set(cluster, i);
+  }
+  return { albums, edges, clusters };
+}
+
+test('large seeds fit the actual space with margins for balanced, uneven and isolated communities', () => {
+  for (const count of [400, 2719, 6400]) for (const mode of ['balanced', 'skewed', 'isolates']) {
+    const { albums, edges, clusters } = libraryFixture(count, mode);
+    for (const spaceSize of [2048, 4096, 8192]) {
+      const margin = spaceSize * .1, options = { spaceSize, margin };
+      const seeded = seedLayout(albums, edges, clusters, 112, options);
+      assert.equal(seeded.positions.length, count * 2);
+      assert.ok(seeded.spacing > 0 && seeded.spacing <= 112);
+      assert.deepEqual(seeded.positions, seedPositions(albums, edges, clusters, 112, options));
+      const cells = new Set();
+      for (let i = 0; i < count; i++) {
+        const x = seeded.positions[i * 2], y = seeded.positions[i * 2 + 1];
+        assert.ok(x >= margin && x <= spaceSize - margin, `${count}/${mode}/${spaceSize}: x=${x}`);
+        assert.ok(y >= margin && y <= spaceSize - margin, `${count}/${mode}/${spaceSize}: y=${y}`);
+        cells.add(`${Math.round(x / seeded.spacing)},${Math.round(y / seeded.spacing)}`);
+      }
+      assert.equal(cells.size, count, 'scaling must not clamp distinct albums onto the same cell');
+      for (const axis of [0, 1]) {
+        const values = Array.from(seeded.positions).filter((_, i) => i % 2 === axis);
+        assert.ok(Math.abs((Math.min(...values) + Math.max(...values)) / 2 - spaceSize / 2) < .001);
+      }
+      if (mode === 'balanced') {
+        const distance = (a, b) => Math.hypot(seeded.positions[a * 2] - seeded.positions[b * 2],
+          seeded.positions[a * 2 + 1] - seeded.positions[b * 2 + 1]);
+        const linked = edges.reduce((sum, e) => sum + distance(e.source, e.target), 0);
+        const unrelated = edges.reduce((sum, e) => sum + distance(e.source, (e.target + 1) % count), 0);
+        assert.ok(linked < unrelated * .65, 'community proximity survives fitting large libraries');
+      }
+    }
+  }
+});
+
+test('space selection respects count, constrained devices and Cosmos texture-limit adjustment', () => {
+  assert.equal(layoutSpaceSize(0), 4096);
+  assert.equal(layoutSpaceSize(400), 4096);
+  assert.equal(layoutSpaceSize(2719), 8192);
+  assert.equal(layoutSpaceSize(6400), 8192);
+  assert.equal(layoutSpaceSize(6400, { constrained: true }), 4096);
+  for (const limit of [2048, 4096, 8192, 12000, 16384]) {
+    const size = layoutSpaceSize(6400, { maxTextureSize: limit });
+    assert.ok(size < limit && size <= 8192);
+    assert.equal(Math.log2(size) % 1, 0);
+  }
+  assert.equal(layoutSpaceSize(2719, { maxTextureSize: 8192 }), 4096);
+  assert.equal(layoutSpaceSize(2719, { maxTextureSize: 4096 }), 2048);
+  for (const count of [-1, .5, NaN, Infinity]) assert.throws(() => layoutSpaceSize(count));
+  for (const maxTextureSize of [0, 2, NaN, Infinity]) assert.throws(() => layoutSpaceSize(1, { maxTextureSize }));
+});
+
+test('derived physics and geometry fit the collision budget as the library and artwork grow', () => {
+  for (const count of [400, 2719, 6400]) {
+    const { albums, edges, clusters } = libraryFixture(count);
+    for (const spaceSize of [2048, 4096, 8192]) {
+      const seeded = seedLayout(albums, edges, clusters, 112, { spaceSize });
+      for (const metric of ['uniform', 'summed_plays', 'mean_plays', 'track_count']) {
+        for (const artworkScale of [.6, 1, 1.8]) {
+          const emphasis = albums.map((_, i) => i % 2 ? 1.75 : 1);
+          const parameters = layoutParameters(albums, { ...seeded, metric, artworkScale, emphasis });
+          const { forces, geometryScale, distanceScale, repulsionScale } = parameters;
+          assert.ok(geometryScale > 0 && geometryScale <= 1);
+          assert.ok(parameters.collisionArea <= parameters.collisionAreaLimit + 1e-6);
+          assert.ok(Object.values(forces).every(Number.isFinite));
+          assert.ok(forces.simulationCollisionPadding >= 0 && forces.simulationCollisionPadding <= 40);
+          assert.equal(forces.simulationLinkDistance, 150 * distanceScale);
+          assert.equal(repulsionScale, Math.min(1, 400 / count) * distanceScale ** 2);
+          assert.equal(forces.simulationRepulsion, 40 * repulsionScale);
+          assert.equal(forces.simulationGravity, .008);
+          assert.equal(forces.simulationCluster, .001);
+          // Verify the footprint independently, including the highlighted artwork
+          // and selection frame rather than just checking the helper's accounting.
+          const sizes = artworkSizes(albums, metric, artworkScale);
+          const footprint = sizes.reduce((sum, size, i) => sum +
+            ((size * emphasis[i] + 8) / .8 * geometryScale + 2 * forces.simulationCollisionPadding) ** 2, 0);
+          assert.ok(footprint <= parameters.collisionAreaLimit + .01);
+        }
+      }
+    }
+  }
+});
+
+test('small layouts retain discovery defaults and custom spaces handle empty/single libraries', () => {
+  const { albums } = libraryFixture(100);
+  const small = layoutParameters(albums, { metric: 'uniform' });
+  assert.equal(small.geometryScale, 1);
+  assert.equal(small.forces.simulationCollisionPadding, 40);
+  assert.equal(small.forces.simulationRepulsion, 40);
+  assert.equal(small.forces.simulationLinkDistance, 150);
+  assert.deepEqual(seedPositions([], [], [], 112, { spaceSize: 8192 }), new Float32Array());
+  assert.deepEqual(seedPositions([album(1, [1])], [], [0], 112, { spaceSize: 8192 }),
+    new Float32Array([4096, 4096]));
+  assert.ok(Object.values(layoutParameters([]).forces).every(Number.isFinite));
+  for (const options of [{ spaceSize: 0 }, { margin: -1 }, { margin: 2048 }, { spacing: 0 },
+    { artworkScale: NaN }, { emphasis: [0] }]) assert.throws(() => layoutParameters(albums, options));
+  for (const options of [{ spaceSize: NaN }, { spaceSize: 0 }, { margin: -1 }, { margin: 2048 }]) {
+    assert.throws(() => seedPositions(albums, [], [], 112, options));
+  }
+});
+
+test('collision budgeting includes missing-cover dots and sound emphasis', () => {
+  const { albums } = libraryFixture(6400);
+  albums.forEach((a, i) => { if (i % 2) a.cover = null; });
+  const emphasis = albums.map((_, i) => i % 3 ? 1 : 1.75);
+  const parameters = layoutParameters(albums, { metric: 'uniform', emphasis });
+  const { geometryScale, forces } = parameters;
+  const footprint = albums.reduce((sum, a, i) => sum +
+    ((a.cover ? (56 * emphasis[i] + 8) / .8 : 12 * emphasis[i]) * geometryScale +
+      2 * forces.simulationCollisionPadding) ** 2, 0);
+  assert.ok(footprint <= parameters.collisionAreaLimit + .01);
+  const allDots = albums.map(a => ({ ...a, cover: null }));
+  assert.equal(layoutParameters(allDots, { metric: 'uniform', emphasis }).geometryScale, 1);
 });
 
 test('size metrics, missing metadata grouping and search', () => {

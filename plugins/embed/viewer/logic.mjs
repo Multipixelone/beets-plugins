@@ -154,8 +154,7 @@ export function communities(albums, edges) {
 
 // Only the starting positions: Cosmos remains free to move every album after
 // initialization. Related albums start nearby instead of crossing the library.
-export function seedPositions(albums, edges, clusters, spacing = 112) {
-  if (!Number.isFinite(spacing) || spacing <= 0) throw new Error('Seed spacing must be positive.');
+function seedCells(albums, edges, clusters) {
   const positions = new Float32Array(albums.length * 2);
   if (!albums.length) return positions;
   const adjacency = albums.map(() => []), members = new Map();
@@ -197,8 +196,8 @@ export function seedPositions(albums, edges, clusters, spacing = 112) {
       for (const { index, weight } of adjacency[i]) if (placed.has(index)) {
         // Favor the strongest similarities when several placed neighbors vote.
         const vote = Math.exp(24 * weight);
-        cx += (positions[index * 2] / spacing - x) * vote;
-        cy += (positions[index * 2 + 1] / spacing - y) * vote;
+        cx += (positions[index * 2] - x) * vote;
+        cy += (positions[index * 2 + 1] - y) * vote;
         total += vote;
       }
       cx = total ? cx / total : (columns - 1) / 2;
@@ -209,23 +208,84 @@ export function seedPositions(albums, edges, clusters, spacing = 112) {
         if (candidate < distance) { closest = j; distance = candidate; }
       }
       const [column, row] = cells.splice(closest, 1)[0];
-      positions[i * 2] = (x + column) * spacing;
-      positions[i * 2 + 1] = (y + row) * spacing;
+      positions[i * 2] = x + column;
+      positions[i * 2 + 1] = y + row;
       placed.add(i);
     }
     x += columns + 1; rowHeight = Math.max(rowHeight, rows);
   }
+  return positions;
+}
+
+export function seedLayout(albums, edges, clusters, spacing = 112,
+    { spaceSize = 4096, margin = spaceSize * 0.1 } = {}) {
+  if (!Number.isFinite(spacing) || spacing <= 0) throw new Error('Seed spacing must be positive.');
+  if (!Number.isFinite(spaceSize) || spaceSize < 2 || !Number.isFinite(margin) ||
+      margin < 0 || margin >= spaceSize / 2) throw new Error('Invalid seed space or margin.');
+  const positions = seedCells(albums, edges, clusters);
+  if (!albums.length) return { positions, spacing, spaceSize, margin };
   let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
-  for (const i of indices) {
+  for (let i = 0; i < albums.length; i++) {
     minX = Math.min(minX, positions[i * 2]); maxX = Math.max(maxX, positions[i * 2]);
     minY = Math.min(minY, positions[i * 2 + 1]); maxY = Math.max(maxY, positions[i * 2 + 1]);
   }
+  const span = Math.max(maxX - minX, maxY - minY);
+  // Leave Float32 rounding headroom rather than clamping albums onto a wall.
+  if (span) spacing = Math.min(spacing, (spaceSize - 2 * margin) * (1 - 1e-6) / span);
   const centerX = (minX + maxX) / 2, centerY = (minY + maxY) / 2;
-  for (const i of indices) {
-    positions[i * 2] += 2048 - centerX;
-    positions[i * 2 + 1] += 2048 - centerY;
+  for (let i = 0; i < albums.length; i++) {
+    positions[i * 2] = spaceSize / 2 + (positions[i * 2] - centerX) * spacing;
+    positions[i * 2 + 1] = spaceSize / 2 + (positions[i * 2 + 1] - centerY) * spacing;
   }
-  return positions;
+  return { positions, spacing, spaceSize, margin };
+}
+
+export function seedPositions(albums, edges, clusters, spacing = 112, options = {}) {
+  return seedLayout(albums, edges, clusters, spacing, options).positions;
+}
+
+export function layoutSpaceSize(count, { maxTextureSize = 16384, constrained = false } = {}) {
+  if (!Number.isInteger(count) || count < 0 || !Number.isFinite(maxTextureSize) || maxTextureSize < 4) {
+    throw new Error('Invalid layout count or texture limit.');
+  }
+  const desired = 2 ** Math.ceil(Math.log2(Math.max(4096, Math.sqrt(count) * 112 / 0.8)));
+  // Cosmos reduces spaceSize at >= MAX_TEXTURE_SIZE. Stay strictly below it,
+  // and retain its documented 4096 ceiling on constrained/iOS devices.
+  const deviceLimit = 2 ** (Math.ceil(Math.log2(maxTextureSize)) - 1);
+  return Math.min(desired, constrained ? 4096 : 8192, deviceLimit);
+}
+
+export function layoutParameters(albums, { spaceSize = 4096, margin = spaceSize * 0.1,
+    spacing = 112, metric = 'summed_plays', artworkScale = 1, emphasis = [] } = {}) {
+  if (!Number.isFinite(spaceSize) || spaceSize < 2 || !Number.isFinite(margin) ||
+      margin < 0 || margin >= spaceSize / 2 || !Number.isFinite(spacing) || spacing <= 0 ||
+      !Number.isFinite(artworkScale) || artworkScale <= 0) throw new Error('Invalid layout budget.');
+  const images = artworkSizes(albums, metric, artworkScale), dots = pointSizes(albums, metric);
+  let area = 0, diameterSum = 0;
+  for (let i = 0; i < albums.length; i++) {
+    const strength = emphasis[i] ?? 1;
+    if (!Number.isFinite(strength) || strength <= 0) throw new Error('Invalid layout emphasis.');
+    // Include the largest selection frame and Cosmos's 80% square rendering.
+    const diameter = albums[i].cover ? (images[i] * strength + 8) / 0.8 : dots[i] * strength;
+    area += diameter * diameter; diameterSum += diameter;
+  }
+  // Conservative square footprints leave half the seeded interior free for
+  // movement and irregular community packing. Reduce padding before artwork.
+  const collisionAreaLimit = 0.5 * (spaceSize - 2 * margin) ** 2;
+  const geometryScale = area ? Math.min(1, Math.sqrt(collisionAreaLimit / area)) : 1;
+  area *= geometryScale ** 2; diameterSum *= geometryScale;
+  const remaining = Math.max(0, collisionAreaLimit - area);
+  const padding = albums.length ? Math.min(40, remaining /
+    (2 * (Math.sqrt(diameterSum ** 2 + albums.length * remaining) + diameterSum))) : 40;
+  const distanceScale = Math.min(1, spacing / 112);
+  // Many-body repulsion sums over the library; gravity/cluster attraction
+  // depend on distance. Normalize count and squared distance, not attraction.
+  const repulsionScale = Math.min(1, 400 / Math.max(1, albums.length)) * distanceScale ** 2;
+  return { geometryScale, distanceScale, repulsionScale, collisionAreaLimit,
+    collisionArea: area + 4 * padding * diameterSum + 4 * albums.length * padding ** 2,
+    forces: { simulationRepulsion: 40 * repulsionScale, simulationLinkSpring: 0.01,
+      simulationLinkDistance: 150 * distanceScale, simulationCollisionPadding: padding,
+      simulationGravity: 0.008, simulationCluster: 0.001, simulationFriction: 0.5 } };
 }
 
 export function groups(albums, mode, clusters) {
