@@ -76,7 +76,7 @@ export function selectionState(albums, { search = '', lens, scores, danceMin = 0
       const value = album.essentia?.voice_instrumental?.value;
       match &&= value == null ? includeUnknown : value === vocal;
     }
-    return { match, strength: match ? strength : 0, opacity: !active ? 1 : match ? 0.65 + 0.35 * strength : 0.12,
+    return { match, strength: match ? strength : 0, opacity: !active ? 1 : match ? 0.65 + 0.35 * strength : 0,
              size: match && (lens || phraseScores) ? 1 + 0.75 * strength : 1 };
   });
   return { active, states, matches: states.flatMap((state, i) => state.match ? [i] : []) };
@@ -99,9 +99,12 @@ export function soundSections(album) {
   if (essentia.length) sections.push({ title: 'Essentia', rows: essentia });
   return sections;
 }
-export function groupLabels(albums, names) {
+export function groupLabels(albums, names, visible = () => true) {
   const members = new Map();
-  names.forEach((name, index) => { if (!members.has(name)) members.set(name, []); members.get(name).push(index); });
+  names.forEach((name, index) => {
+    if (!visible(index)) return;
+    if (!members.has(name)) members.set(name, []); members.get(name).push(index);
+  });
   return [...members].map(([name, indices]) => {
     const scores = new Map(), flavor = new Map();
     for (const i of indices) {

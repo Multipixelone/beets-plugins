@@ -52,7 +52,7 @@ export class CoverLoader {
     this.destroyed = false;
   }
   setBase(key, image) {
-    if (this.destroyed || this.base.has(key)) return;
+    if (this.destroyed || this.base.has(key) || (this.allowedKeys && !this.allowedKeys.has(key))) return;
     if (image.width !== this.baseSize || image.height !== this.baseSize ||
         this.baseBytes + image.data.byteLength > this.poolBytes / 2) throw new Error('Base cover budget exceeded');
     this.base.set(key, image); this.baseBytes += image.data.byteLength; this.onChange();
@@ -76,7 +76,8 @@ export class CoverLoader {
   pump() {
     if (this.destroyed) return;
     const bases = [...this.wanted, ...this.baseRequests].filter(request => !this.base.has(request.key) &&
-      !this.deferredBase.has(request.key)).map(request => ({ ...request, tier: this.baseSize, url: request.baseURL }));
+      !this.deferredBase.has(request.key) && (!this.allowedKeys || this.allowedKeys.has(request.key)))
+      .map(request => ({ ...request, tier: this.baseSize, url: request.baseURL }));
     // Visible base icons first, then visible detail, then background base files.
     const queue = [...bases.slice(0, this.wanted.length), ...this.wanted, ...bases];
     const requested = new Set(this.wanted.map(request => `${request.key}\n${request.tier}`));
@@ -95,7 +96,8 @@ export class CoverLoader {
       if (!detail && this.deferredBase.has(request.key)) continue;
       if (detail ? !affordable.has(id) || (this.best(request.key)?.width ?? 0) >= request.tier : this.base.has(request.key)) continue;
       if (this.failed.has(id) || this.loading.has(id)) continue;
-      const controller = new AbortController(); controller.detail = detail; this.loading.set(id, controller);
+      const controller = new AbortController(); controller.detail = detail; controller.key = request.key;
+      this.loading.set(id, controller);
       Promise.resolve().then(async () => {
         try { return await this.loadImage(request.url, controller.signal, request.tier); }
         catch (error) {
@@ -133,6 +135,9 @@ export class CoverLoader {
     return image;
   }
   dropHidden(visibleKeys) {
+    this.allowedKeys = visibleKeys;
+    this.wanted = this.wanted.filter(request => visibleKeys.has(request.key));
+    for (const controller of this.loading.values()) if (!visibleKeys.has(controller.key)) controller.abort();
     for (const [id, entry] of this.details) if (!visibleKeys.has(entry.key)) {
       this.detailBytes -= entry.image.data.byteLength; this.details.delete(id);
     }

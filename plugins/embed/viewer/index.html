@@ -17,7 +17,7 @@
 <div class="workspace">
   <button id="settings-backdrop" hidden aria-label="Close map settings"></button>
   <aside id="controls" aria-label="Map settings">
-    <div class="sidebar-intro"><h1>Album graph</h1><p id="library-count">No library loaded</p></div>
+    <div class="sidebar-intro"><h1>Album graph</h1><p id="library-count" role="status">No library loaded</p></div>
     <button id="surprise" class="primary" disabled>Random album</button>
     <details class="control-section" open><summary>Map appearance</summary><div class="section-content">
       <label>Album artwork <output id="art-size-value">100%</output><input id="art-size" type="range" min="0.6" max="1.8" step="0.1" value="1"></label>
@@ -38,7 +38,7 @@
     <label>Danceable: maximum <output id="dance-max-value">1.00</output><input id="dance-max" type="range" min="0" max="1" step="0.01" value="1"></label>
     <label>Vocals<select id="vocal"><option value="any">Any</option><option value="voice">Vocal</option><option value="instrumental">Instrumental</option></select></label>
     <label class="check"><input id="include-unknown" type="checkbox"> Include unknown filter values</label>
-    <p class="muted">Danceable is the Essentia classifier probability. Non-matches are dimmed.</p>
+    <p class="muted">Danceable is the Essentia classifier probability. Non-matches are hidden and frozen; visible albums keep moving.</p>
   </fieldset>
   <label class="check"><input id="show-labels" type="checkbox" checked> Show group sound labels</label>
 </div></details>

@@ -29,13 +29,13 @@ test('lens and name search intersect; clear restores sizes and opacity', () => {
   const state = selectionState(albums, { lens, scores: [2, 1, null], search: 'finn' });
   assert.deepEqual(state.matches, [0]);
   assert.ok(state.states[0].size > 1);
-  assert.equal(state.states[1].opacity, .12);
+  assert.equal(state.states[1].opacity, 0);
   const cleared = selectionState(albums);
   assert.equal(cleared.active, false);
   assert.ok(cleared.states.every(s => s.size === 1 && s.opacity === 1));
   assert.deepEqual(selectionState(albums, { lens, scores: [0, -.2, null] }).matches, []);
 });
-test('Essentia filters dim unknowns unless included; missing is never zero', () => {
+test('Essentia filters hide unknowns unless included; missing is never zero', () => {
   assert.deepEqual(selectionState(albums, { danceMin: .5, vocal: 'voice' }).matches, [0]);
   assert.deepEqual(selectionState(albums, { danceMin: .5, vocal: 'voice', includeUnknown: true }).matches, [0, 2]);
   assert.deepEqual(selectionState(albums, { vocal: 'instrumental' }).matches, [1]);

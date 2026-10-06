@@ -1,10 +1,11 @@
 import { Graph, defaultConfigValues } from '@cosmos.gl/graph';
-import { validateExport, groups, pointSizes, artworkSizes, seedLayout, layoutSpaceSize, layoutParameters, searchMatches, showCovers, coverCandidates } from './logic.mjs';
+import { validateExport, groups, pointSizes, artworkSizes, seedLayout, layoutSpaceSize, layoutParameters, showCovers, coverCandidates } from './logic.mjs';
 
 import { CoverLoader, decodeCover, coverPolicy, drawnCoverPixels, constrainedCovers, coverPriority, mipTier, decodeOverview } from './covers.mjs';
 import { decodeColumn, selectionState, soundSections, groupLabels, placeLabels } from './sound.mjs';
 import { atlasLayout } from './atlas.mjs';
 import { DRAG_ALPHA, dragAlpha } from './physics.mjs';
+import { FilterPositions, visibleLinks } from './visibility.mjs';
 import { textVectors, phraseScores, topMatches, PhraseSearch } from './search.mjs';
 
 const $ = id => document.getElementById(id);
@@ -17,6 +18,10 @@ let coverLimits, coverDpr = 1, overviewController, coverTiers = new Map();
 let labelTimer, labelGroups = [], labelDefinitions = [], trackedKey, hovered;
 let groupNames = [], groupIds = new Map(), lensOptions = new Map();
 let selection = { active: false, states: [], matches: [] }, lensScores, currentLens;
+let filterPositions;
+function visibleAlbum(index) {
+  return Number.isInteger(index) && !!data?.albums[index] && (!selection.active || !!selection.states[index]?.match);
+}
 let queryVectors = [], phraseResult;
 const phraseSearch = new PhraseSearch({
   request: async q => {
@@ -72,13 +77,14 @@ function updateColors() {
   if (!graphReady) return;
   graph.setPointColors(Float32Array.from(groupNames.flatMap((name, i) => {
     const rgba = i === selected ? [0.88, 0.94, 1, 1] : color(groupIds.get(name));
-    rgba[3] = selection.states[i]?.match === false ? 1 : selection.states[i]?.opacity ?? 1;
+    rgba[3] = selection.states[i]?.match === false ? 0 : selection.states[i]?.opacity ?? 1;
     return rgba;
   })));
 }
 function updateLabelTracking() {
   if (!graphReady) return;
-  labelGroups = labelDefinitions.filter(group => !selection.active || group.indices.some(i => selection.states[i]?.match))
+  const definitions = selection.active ? groupLabels(data.albums, groupNames, visibleAlbum) : labelDefinitions;
+  labelGroups = definitions.filter(group => !selection.active || group.indices.some(i => selection.states[i]?.match))
     .slice(0, 96).map(group => ({ ...group,
       tracked: group.indices.filter(i => !selection.active || selection.states[i]?.match).slice(0, 4) }));
   const indices = labelGroups.flatMap(group => group.tracked), key = indices.join(',');
@@ -181,12 +187,15 @@ function updateCoverSizes() {
   const indices = new Float32Array(sizes.length).fill(-1);
   const atlas = new Map(atlasEntries.map(([url], i) => [url, i]));
   if (coverActive) for (let index = 0; index < sizes.length; index++) {
-    if (!data.albums[index].cover) continue;
+    if (!data.albums[index].cover || !visibleAlbum(index)) continue;
     // Keep loaded artwork resident while panning; unloaded images use the same square footprint.
     indices[index] = atlas.get(coverURL(data.albums[index].cover)) ?? -1;
     shapes[index] = 1;
     // Cosmos draws squares at 80% of their point size. Selection stays rectangular.
     sizes[index] = (imageSizes[index] + (index === selected ? 8 : 6) * geometryScale) / 0.8;
+  }
+  for (let index = 0; index < sizes.length; index++) if (!visibleAlbum(index)) {
+    sizes[index] = imageSizes[index] = 0; indices[index] = -1;
   }
   graph.setPointImageIndices(indices);
   if (geometryChanged) {
@@ -334,9 +343,9 @@ function albumButton(index) {
   return button;
 }
 function focusAlbum(index) {
-  if (!graphReady) return;
+  if (!graphReady || !visibleAlbum(index)) return;
   initialFitPending = false;
-  $('search').value = ''; updateSearch(); setSettingsOpen(false);
+  setSettingsOpen(false);
   showInfo(index);
   $('clear').focus({ preventScroll: true });
 }
@@ -350,13 +359,16 @@ function updateHighlights() {
   const focus = query || selected !== undefined;
   const emphasized = new Set(links);
   const mode = $('edge-view').value;
+  const visibleEdges = query ? visibleLinks(edges, selection.states.map(state => state.match), mode, selected) : undefined;
   graph.setLinkColors(Float32Array.from(edges.flatMap((edge, i) => {
+    if (query) return visibleEdges.has(i) ? [0.39, 0.48, 0.60, 0.4] : [0, 0, 0, 0];
     if (focus) return emphasized.has(i) ? [0.64, 0.79, 0.94, 1] : [0, 0, 0, 0];
     return mode === 'all' || (mode === 'strongest' && strongestEdges.has(i)) ? [0.39, 0.48, 0.60, 0.4] : [0, 0, 0, 0];
   })));
-  graph.setConfigPartial({ highlightedPointIndices: focus ? [...points] : undefined,
-    highlightedLinkIndices: query || selected !== undefined ? links : undefined,
-    linkOpacity: 1, linkDefaultWidth: focus ? 1.65 : 1.1,
+  graph.setLinkWidths(Float32Array.from(edges, (_, i) => query ? visibleEdges.has(i) ? 1.1 : 0 : focus ? 1.65 : 1.1));
+  graph.setConfigPartial({ highlightedPointIndices: !query && focus ? [...points] : undefined,
+    highlightedLinkIndices: !query && selected !== undefined ? links : undefined,
+    linkOpacity: 1, linkDefaultWidth: !query && focus ? 1.65 : 1.1,
     outlinedPointIndices: undefined, focusedPointIndex: undefined });
   updateColors(); updateCoverSizes();
   graph.render();
@@ -366,7 +378,8 @@ function detailText(album) {
     `${album.embedded_tracks}/${album.track_count} tracks embedded\n` +
     `${album.summed_plays.toLocaleString()} plays · ${album.mean_plays.toLocaleString(undefined, { maximumFractionDigits: 1 })} mean plays`;
 }
-function showInfo(index) {
+function showInfo(index, center = true) {
+  if (index !== undefined && !visibleAlbum(index)) return;
   selected = index; scheduleCovers();
   $('details').hidden = index === undefined;
   document.querySelector('main').classList.toggle('has-selection', index !== undefined);
@@ -381,7 +394,8 @@ function showInfo(index) {
   info.textContent = [album.year || null, album.genre || null].filter(Boolean).join(' · ');
   const plays = document.createElement('p'); plays.className = 'album-meta';
   plays.textContent = `${album.track_count} tracks · ${album.summed_plays.toLocaleString()} plays`;
-  const related = edges.filter(edge => edge.source === index || edge.target === index)
+  const related = edges.filter(edge => (edge.source === index || edge.target === index) &&
+    visibleAlbum(edge.source) && visibleAlbum(edge.target))
     .sort((a, b) => b.similarity - a.similarity);
   const heading = document.createElement('p'); heading.className = 'related-heading';
   heading.textContent = related.length ? `CONNECTED ALBUMS · ${related.length}` : 'NO CONNECTIONS IN THIS VIEW';
@@ -392,7 +406,7 @@ function showInfo(index) {
     const hint = document.createElement('p'); hint.className = 'muted'; hint.textContent = 'Try a lower similarity threshold in Connections.'; $('info').append(hint);
   }
   $('details').scrollTop = 0;
-  requestAnimationFrame(() => {
+  if (center) requestAnimationFrame(() => {
     // Let the graph resize beside (or above) the details before centering the album.
     if (selected === index && graphReady) {
       const position = Float32Array.from(graph.getPointPositions().slice(index * 2, index * 2 + 2));
@@ -401,7 +415,7 @@ function showInfo(index) {
   });
 }
 function hover(index, event) {
-  if (zooming || dragging) index = undefined;
+  if (zooming || dragging || !visibleAlbum(index)) index = undefined;
   $('tooltip').hidden = index === undefined;
   if (index === undefined) { hovered = undefined; clearCard($('tooltip')); return; }
   if (hovered !== index) {
@@ -492,8 +506,26 @@ function updateSearch() {
     phraseScores: phraseResult?.salience,
     danceMin: Number($('dance-min').value), danceMax: Number($('dance-max').value),
     vocal: $('vocal').value, includeUnknown: $('include-unknown').checked });
+  if (graphReady) {
+    if (selection.active) initialFitPending = false;
+    const visible = data.albums.map((_, i) => visibleAlbum(i));
+    const positions = filterPositions.update(graph.getPointPositions(), visible);
+    if (positions) {
+      initialFitPending = false;
+      graph.setPinnedPoints(visible.flatMap((shown, i) => shown ? [] : [i]));
+      graph.setPointPositions(positions, true);
+      // Zero-duration absence updates preserve alpha/running state and never refit.
+      graph.render(undefined, 0);
+    }
+    coverLoader?.dropHidden(new Set(data.albums.flatMap((album, i) =>
+      album.cover && visible[i] ? [coverURL(album.cover)] : [])));
+    hover(undefined);
+    if (selected !== undefined) showInfo(visibleAlbum(selected) ? selected : undefined, false);
+  }
   if (graphReady) configureLayout();
   const matches = selection.matches;
+  $('library-count').textContent = `${matches.length.toLocaleString()} of ${data.albums.length.toLocaleString()} albums shown`;
+  $('surprise').disabled = !matches.length;
   $('matches').textContent = matches.length ? `${matches.length} matching albums${matches.length > 30 ? ' · showing the first 30' : ''}` : 'No albums found. Try another album or artist.';
   $('search-results').hidden = !search;
   $('search-list').replaceChildren(...(search ? matches.slice(0, 30).map(albumButton) : []));
@@ -529,9 +561,10 @@ async function load(exported, name) {
     $('dance-min-value').value = '0.00'; $('dance-max-value').value = '1.00';
     atlasEntries = []; visibleCovers = [];
     coverGeometry = ''; appliedLayout = false;
-    geometryScale = 1;
+    geometryScale = 1; simulationAlpha = 1;
     worker?.terminate(); worker = undefined; graph?.destroy(); graph = undefined;
     data = exported;
+    filterPositions = new FilterPositions(data.albums.length);
     queryVectors = textVectors(data.albums);
     $('phrase').disabled = !queryVectors.some(vector => vector !== null);
     $('phrase-status').textContent = $('phrase').disabled ? 'This export has no CLAP audio vectors. Export again after embedding albums.' : '';
@@ -556,7 +589,7 @@ async function load(exported, name) {
     $('source').style.whiteSpace = 'pre-line';
     $('search').disabled = true;
     $('surprise').disabled = true;
-    $('library-count').textContent = `${data.albums.length.toLocaleString()} albums in your collection`;
+    $('library-count').textContent = `${data.albums.length.toLocaleString()} of ${data.albums.length.toLocaleString()} albums shown`;
     $('k').max = Math.max(0, data.albums.length - 1);
     $('k').value = Math.min(8, Number($('k').max));
     $('k-value').value = $('k').value;
@@ -632,6 +665,7 @@ async function load(exported, name) {
         // Start close neighbors together; Cosmos freely moves every album from here.
         const seeded = seedLayout(data.albums, edges, clusters, 112, layout);
         layout = { spaceSize: seeded.spaceSize, margin: seeded.margin, spacing: seeded.spacing };
+        filterPositions.seed(seeded.positions);
         graph.setPointPositions(seeded.positions);
       }
       graphReady = true;
@@ -647,7 +681,7 @@ async function load(exported, name) {
       updateGroups(); updateSearch(); updateCoverSizes(); graph.render();
       if (paused) graph.pause(); else graph.start(appliedLayout ? 0.3 : 1);
       $('graph').style.visibility = '';
-      $('search').disabled = false; $('surprise').disabled = false;
+      $('search').disabled = false; $('surprise').disabled = !selection.matches.length;
       if (!appliedLayout) { fitInitialView(); appliedLayout = true; }
       scheduleCovers();
       if (selected !== undefined) showInfo(selected);
@@ -723,7 +757,7 @@ $('pause').addEventListener('click', () => {
 });
 $('clear').addEventListener('click', () => { showInfo(undefined); $('search').focus({ preventScroll: true }); });
 $('surprise').addEventListener('click', () => {
-  if (data?.albums.length) focusAlbum(Math.floor(Math.random() * data.albums.length));
+  if (selection.matches.length) focusAlbum(selection.matches[Math.floor(Math.random() * selection.matches.length)]);
 });
 function setSettingsOpen(open) {
   document.body.classList.toggle('settings-open', open);
@@ -739,7 +773,7 @@ $('search').addEventListener('focus', () => { if ($('search').value.trim()) $('s
 $('search').addEventListener('keydown', event => {
   if (event.key === 'ArrowDown') { $('search-list').querySelector('button')?.focus(); event.preventDefault(); }
   if (event.key === 'Enter' && data) {
-    const [match] = searchMatches(data.albums, $('search').value);
+    const [match] = selection.matches;
     if ($('search').value.trim() && match !== undefined) focusAlbum(match);
   }
 });

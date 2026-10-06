@@ -91,6 +91,18 @@ test('overview defers per-album base requests; shard failures release the fallba
   assert.deepEqual(calls, ['b-32.jpg']); assert.equal(loader.base.size, 2);
   loader.destroy();
 });
+test('a missing small file falls back to legacy art and hidden albums receive no background requests', async () => {
+  const calls = [];
+  const loader = new CoverLoader(async (url, signal, size) => {
+    calls.push(url); if (url.endsWith('-32.jpg')) throw Error('missing mip'); return image(size);
+  }, () => {}, { baseSize: 16, baseRequests: [request('a', 16), request('b', 16)] });
+  loader.dropHidden(new Set(['a'])); loader.setWanted([request('a', 16)]); await tick();
+  assert.deepEqual(calls, ['a-32.jpg', 'a']); assert.equal(loader.best('a').width, 16);
+  assert.equal(loader.best('b'), undefined);
+  loader.dropHidden(new Set(['a', 'b'])); loader.setWanted([request('b', 16)]); await tick();
+  assert.equal(loader.best('b').width, 16); assert.equal(loader.best('a').width, 16);
+  loader.destroy();
+});
 test('mixed atlas keeps thousands of base sprites when a few need 256px detail', async () => {
   const loader = new CoverLoader(async () => {}, () => {}, { baseSize: 16 });
   const keys = Array.from({ length: 6400 }, (_, i) => String(i));
