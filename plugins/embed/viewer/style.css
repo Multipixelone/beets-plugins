@@ -11,6 +11,7 @@ button, .file { padding: 8px 12px; border: 1px solid #4c627a; background: #24334
 #legend { max-height: 240px; overflow-y: auto; margin: 12px 0; font-size: 12px; } .legend-row { display: flex; align-items: center; gap: 8px; margin: 4px 0; } .swatch { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; } #status { color: #66d3c5; overflow-wrap: anywhere; } #status.error { color: #ffb4a8; }
 @media (max-width: 700px) { aside { width: 235px; padding: 14px; } #details { bottom: 10px; right: 10px; } }
 #details { max-height: 70dvh; overflow-y: auto; }
+.card-cover { display: block; object-fit: contain; max-width: 100%; margin-bottom: 10px; border-radius: 4px; }
 #tooltip { max-height: 65dvh; overflow: hidden; white-space: normal !important; }
 #tooltip h3, #info h3 { margin: 12px 0 4px; font-size: 13px; color: #c2d1e3; }
 .score-row { display: grid; grid-template-columns: 1fr auto; gap: 2px 8px; margin: 4px 0; font-size: 12px; }

@@ -26,6 +26,10 @@ export function validateExport(data) {
         (typeof album.cover !== 'string' || !/^cover-[0-9a-f]{64}\.jpg$/.test(album.cover))) {
       throw new Error('Invalid cover filename.');
     }
+    if (album.cover_large !== undefined && album.cover_large !== null &&
+        (typeof album.cover_large !== 'string' || !/^cover-[0-9a-f]{64}\.jpg$/.test(album.cover_large))) {
+      throw new Error('Invalid large cover filename.');
+    }
     for (const key of ['album', 'albumartist', 'genre']) {
       if (typeof album[key] !== 'string') throw new Error(`Invalid album ${key}.`);
     }

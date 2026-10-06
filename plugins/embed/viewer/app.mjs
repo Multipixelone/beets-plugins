@@ -1,13 +1,14 @@
 import { Graph, defaultConfigValues } from '@cosmos.gl/graph';
 import { validateExport, groups, pointSizes, showCovers, coverCandidates } from './logic.mjs';
 
-import { CoverLoader, decodeCover } from './covers.mjs';
+import { CoverLoader, decodeCover, coverPolicy, drawnCoverPixels, constrainedCovers } from './covers.mjs';
 import { decodeColumn, selectionState, soundSections, groupLabels, placeLabels } from './sound.mjs';
 
 const $ = id => document.getElementById(id);
 let graph, worker, data, clusters = [], edges = [], selected, paused = false;
 let coverLoader, coverTimer, atlasTimer, visibleCovers = [], atlasEntries = [], coverActive = false;
 let dragging = false, zooming = false, graphReady = false;
+let coverLimits, coverDpr = 1;
 let labelTimer, labelGroups = [], labelDefinitions = [], trackedKey, hovered;
 let groupNames = [], groupIds = new Map(), lensOptions = new Map();
 let selection = { active: false, states: [], matches: [] }, lensScores, currentLens;
@@ -51,6 +52,32 @@ function updateLabelTracking() {
   scheduleLabels();
 }
 const coverURL = name => new URL(`covers/${name}`, location.href).href;
+function albumImageSizes() {
+  const sizes = pointSizes(data.albums, $('size').value);
+  sizes.forEach((size, i) => { sizes[i] = size * (selection.states[i]?.size ?? 1); });
+  return sizes;
+}
+function configureCovers(candidates) {
+  const dpr = window.devicePixelRatio || 1;
+  if (coverDpr !== dpr) { coverDpr = dpr; graph.setConfigPartial({ pixelRatio: dpr }); }
+  const gl = $('graph').querySelector('canvas').getContext('webgl2');
+  const sizes = albumImageSizes();
+  const pixels = Math.max(0, ...candidates.map(i => drawnCoverPixels(sizes[i], {
+    dpr, zoom: graph.getZoomLevel(), maxPointPixels: gl.getParameter(gl.ALIASED_POINT_SIZE_RANGE)[1],
+  })));
+  const limits = coverPolicy(pixels, {
+    constrained: constrainedCovers({ width: window.innerWidth,
+      coarsePointer: window.matchMedia('(pointer: coarse)').matches, deviceMemory: navigator.deviceMemory }),
+    maxTextureSize: gl.getParameter(gl.MAX_TEXTURE_SIZE),
+  });
+  if (!coverLoader || limits.spriteSize !== coverLimits.spriteSize || limits.capacity !== coverLimits.capacity ||
+      limits.concurrency !== coverLimits.concurrency) {
+    coverLoader?.destroy();
+    // Drop both browser and cosmos references to the previous resolution before decoding again.
+    atlasEntries = []; graph.setImageData([]);
+    coverLimits = limits; coverLoader = new CoverLoader(decodeCover, scheduleAtlas, limits);
+  }
+}
 function scheduleCovers() {
   if (!coverTimer) coverTimer = setTimeout(() => { coverTimer = undefined; refreshCovers(); }, 500);
 }
@@ -58,24 +85,25 @@ function scheduleAtlas() {
   if (!atlasTimer) atlasTimer = setTimeout(() => { atlasTimer = undefined; updateAtlas(); }, 250);
 }
 function refreshCovers() {
-  if (!graphReady || !coverLoader || dragging || zooming) return;
+  if (!graphReady || dragging || zooming) return;
   coverActive = showCovers($('render-mode').value, graph.getZoomLevel(), data.albums.length, Number($('cover-zoom').value));
   if (!coverActive) {
-    visibleCovers = []; coverLoader.setWanted([]); updateCoverSizes(); graph.render();
+    visibleCovers = []; coverLoader?.setWanted([]); updateCoverSizes(); graph.render();
     $('cover-status').textContent = 'Colored dots'; return;
   }
   // Native viewport query at most twice a second, never on every animation frame.
   const { width, height } = $('graph').getBoundingClientRect();
   const visible = graph.findPointsInRect([[0, 0], [width, height]]);
   const priority = [selected, ...(selection.active ? selection.matches : [])];
-  visibleCovers = coverCandidates(data.albums, visible, priority);
+  const candidates = coverCandidates(data.albums, visible, priority, 256);
+  configureCovers(candidates);
+  visibleCovers = candidates.slice(0, coverLoader.capacity);
   coverLoader.setWanted(visibleCovers.map(i => coverURL(data.albums[i].cover)));
   scheduleAtlas();
 }
 function updateCoverSizes() {
   if (!graphReady) return;
-  const sizes = pointSizes(data.albums, $('size').value);
-  sizes.forEach((size, i) => { sizes[i] = size * (selection.states[i]?.size ?? 1); });
+  const sizes = albumImageSizes();
   const imageSizes = Float32Array.from(sizes);
   const shapes = new Float32Array(sizes.length);
   const indices = new Float32Array(sizes.length).fill(-1);
@@ -141,9 +169,10 @@ function detailText(album) {
 function showInfo(index) {
   selected = index; scheduleCovers();
   $('details').hidden = index === undefined;
-  $('info').replaceChildren();
+  clearCard($('info'));
   if (index === undefined) return;
   const album = data.albums[index];
+  appendCover($('info'), album, 160);
   const title = document.createElement('h2'); title.textContent = album.album;
   const info = document.createElement('p'); info.style.whiteSpace = 'pre-line';
   info.textContent = detailText(album).split('\n').slice(1).join('\n');
@@ -153,9 +182,10 @@ function showInfo(index) {
 }
 function hover(index, event) {
   $('tooltip').hidden = index === undefined;
-  if (index === undefined) return;
+  if (index === undefined) { hovered = undefined; clearCard($('tooltip')); return; }
   if (hovered !== index) {
-    hovered = index; $('tooltip').replaceChildren();
+    hovered = index; clearCard($('tooltip'));
+    appendCover($('tooltip'), data.albums[index], 80);
     const summary = document.createElement('div'); summary.style.whiteSpace = 'pre-line';
     summary.textContent = detailText(data.albums[index]); $('tooltip').append(summary);
     appendSounds($('tooltip'), data.albums[index]);
@@ -164,6 +194,25 @@ function hover(index, event) {
     $('tooltip').style.left = `${Math.max(8, Math.min(window.innerWidth - 330, event.clientX + 14))}px`;
     $('tooltip').style.top = `${Math.max(8, Math.min(window.innerHeight - $('tooltip').offsetHeight - 8, event.clientY + 14))}px`;
   }
+}
+function clearCard(container) {
+  for (const image of container.querySelectorAll('img')) {
+    image.onerror = null; image.removeAttribute('src');
+  }
+  container.replaceChildren();
+}
+function appendCover(container, album, size) {
+  if (!album.cover) return;
+  const image = document.createElement('img');
+  image.className = 'card-cover'; image.alt = ''; image.width = image.height = size;
+  image.decoding = 'async';
+  const name = size > 80 ? album.cover_large ?? album.cover : album.cover;
+  image.onerror = () => {
+    if (!image.isConnected) return;
+    if (name !== album.cover) { image.onerror = () => image.remove(); image.src = coverURL(album.cover); }
+    else image.remove();
+  };
+  image.src = coverURL(name); container.append(image);
 }
 function appendSounds(container, album) {
   for (const section of soundSections(album)) {
@@ -233,7 +282,8 @@ async function load(exported, name) {
     validateExport(exported);
     generation++; revision = 0; clearTimeout(edgeTimer);
     coverLoader?.destroy(); clearTimeout(coverTimer); clearTimeout(atlasTimer);
-    coverTimer = atlasTimer = undefined; graphReady = false; dragging = zooming = false;
+    coverTimer = atlasTimer = undefined; coverLoader = coverLimits = undefined;
+    graphReady = false; dragging = zooming = false;
     clearTimeout(labelTimer); labelTimer = undefined; labelGroups = []; labelDefinitions = []; groupNames = [];
     trackedKey = hovered = undefined;
     $('map-labels').replaceChildren(); selection = { active: false, states: [], matches: [] };
@@ -254,6 +304,7 @@ async function load(exported, name) {
     if (data.schema_version === 1) data.albums.forEach(album => { album.cover = null; });
     edges = []; clusters = []; selected = undefined;
     $('details').hidden = true; $('tooltip').hidden = true;
+    clearCard($('info')); clearCard($('tooltip'));
     $('search').value = ''; $('matches').textContent = ''; $('legend').replaceChildren();
     const skipped = data.summary?.skipped_albums ?? 0;
     $('source').textContent = `${name}\n${data.model_id}\n${data.exported_at}\n${data.albums.length} albums · ${skipped} skipped`;
@@ -265,6 +316,7 @@ async function load(exported, name) {
     $('empty').hidden = !!data.albums.length;
     if (!data.albums.length) { $('empty').textContent = 'No albums with current embeddings in this export.'; status('Empty export loaded.'); return; }
     const config = { backgroundColor: '#10151c', enableDrag: true, fitViewOnInit: true,
+      pixelRatio: window.devicePixelRatio || 1,
       transitionDuration: 0, rescalePositions: false, linkOpacity: 0.35, pointGreyoutOpacity: 0.12,
       onMouseMove: (index, position, event) => hover(index, event),
       onPointMouseOver: (index, position, event) => hover(index, event?.sourceEvent ?? event),
@@ -289,7 +341,7 @@ async function load(exported, name) {
     });
     graph.setPointPositions(positions);
     graphReady = true;
-    coverLoader = new CoverLoader(decodeCover, scheduleAtlas);
+    coverDpr = window.devicePixelRatio || 1;
     updateCoverSizes(); scheduleCovers();
     graph.render(); if (paused) graph.pause(); else graph.start();
     worker = new Worker(new URL('./worker.js', import.meta.url), { type: 'module' });
@@ -323,12 +375,20 @@ for (const id of ['use-k', 'k', 'use-threshold', 'threshold']) {
     edgeTimer = setTimeout(() => worker.postMessage({ type: 'edges', options: options(), generation, revision }), 100);
   });
 }
-$('size').addEventListener('change', () => { if (graph) { updateCoverSizes(); graph.render(); } });
+$('size').addEventListener('change', () => { if (graph) { updateCoverSizes(); graph.render(); scheduleCovers(); } });
 $('render-mode').addEventListener('change', refreshCovers);
 $('cover-zoom').addEventListener('input', () => {
   $('cover-zoom-value').value = Number($('cover-zoom').value).toFixed(2); refreshCovers();
 });
 window.addEventListener('resize', () => { scheduleCovers(); scheduleLabels(); });
+let dprQuery;
+function watchDpr() {
+  dprQuery?.removeEventListener('change', watchDpr);
+  dprQuery = window.matchMedia(`(resolution: ${window.devicePixelRatio || 1}dppx)`);
+  dprQuery.addEventListener('change', watchDpr);
+  scheduleCovers();
+}
+watchDpr();
 $('group').addEventListener('change', () => { if (graph) { updateGroups(); reheat(); } });
 $('search').addEventListener('input', updateSearch);
 for (const id of ['lens', 'vocal', 'include-unknown']) $(id).addEventListener('input', updateSearch);

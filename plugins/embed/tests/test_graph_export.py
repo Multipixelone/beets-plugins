@@ -193,15 +193,24 @@ class GraphExportTests(unittest.TestCase):
         self.assertRegex(name, r'^cover-[0-9a-f]{64}\.jpg$')
         thumbnail = self.root / 'covers' / name
         with Image.open(thumbnail) as image:
-            self.assertEqual(image.size, (128, 128))
+            self.assertEqual(image.size, (256, 256))
             self.assertEqual(image.format, 'JPEG')
-            self.assertLess(max(image.getpixel((64, 8))), 40)  # Padding rather than cropping.
-            self.assertGreater(image.getpixel((64, 64))[0], 180)
+            self.assertLess(max(image.getpixel((128, 8))), 40)  # Padding rather than cropping.
+            self.assertGreater(image.getpixel((128, 128))[0], 180)
         self.assertEqual(thumbnail.stat().st_mode & 0o777, 0o640)
+        large = self.root / 'covers' / result['albums'][0]['cover_large']
+        self.assertNotEqual(large.name, name)
+        with Image.open(large) as image:
+            self.assertEqual(image.size, (512, 512))
+            self.assertLess(max(image.getpixel((256, 8))), 40)
+            self.assertGreater(image.getpixel((256, 256))[0], 180)
+        large_stamp = large.stat().st_mtime_ns
         stamp = thumbnail.stat().st_mtime_ns
         with patch('beets_embed.covers.Image.open', side_effect=AssertionError('decoded unchanged art')):
             repeated = self.export_covers()
         self.assertEqual(repeated['summary']['covers_reused'], 1)
+        self.assertEqual(repeated['summary']['covers_large_reused'], 1)
+        self.assertEqual(large.stat().st_mtime_ns, large_stamp)
         self.assertEqual(thumbnail.stat().st_mtime_ns, stamp)
         self.assertEqual(source.read_bytes(), original)
         unrelated = self.root / 'covers' / ('cover-' + 'f' * 64 + '.jpg')
@@ -210,11 +219,12 @@ class GraphExportTests(unittest.TestCase):
         changed = self.export_covers()
         self.assertNotEqual(changed['albums'][0]['cover'], name)
         self.assertEqual(changed['summary']['covers_generated'], 1)
-        self.assertEqual(changed['summary']['covers_pruned'], 1)
+        self.assertEqual(changed['summary']['covers_pruned'], 2)
         self.assertFalse(thumbnail.exists())
+        self.assertFalse(large.exists())
         self.assertTrue(unrelated.exists())
         removed = self.export_covers(set())
-        self.assertEqual(removed['summary']['covers_pruned'], 1)
+        self.assertEqual(removed['summary']['covers_pruned'], 2)
         self.assertEqual(list((self.root / 'covers').glob('cover-*.jpg')), [unrelated])
         self.assertEqual(json.loads(self.output.read_text()), removed)
         self.assertFalse(list((self.root / 'covers').glob('.cover-*')))
@@ -249,17 +259,88 @@ class GraphExportTests(unittest.TestCase):
         self.assertEqual(result['summary']['covers_reused'], 1)
         before = self.output.read_bytes()
         old_cover = self.root / 'covers' / result['albums'][0]['cover']
+        old_large = self.root / 'covers' / result['albums'][0]['cover_large']
+        self.assertEqual(result['albums'][0]['cover_large'], result['albums'][1]['cover_large'])
+        self.assertEqual(result['summary']['covers_large_generated'], 1)
+        self.assertEqual(result['summary']['covers_large_reused'], 1)
         Image.new('RGB', (200, 200), 'blue').save(source)
         with patch('beets_embed.graph_export.write_export', side_effect=OSError('cannot publish')):
             with self.assertRaises(OSError):
                 self.export_covers()
         self.assertEqual(self.output.read_bytes(), before)
         self.assertTrue(old_cover.exists())
-        self.assertEqual(list((self.root / 'covers').glob('cover-*.jpg')), [old_cover])
+        self.assertEqual(set((self.root / 'covers').glob('cover-*.jpg')), {old_cover, old_large})
         with patch('beets_embed.covers.atomic_write', side_effect=OSError('cannot encode/write')):
             failed = self.export_covers()
         self.assertIsNone(failed['albums'][0]['cover'])
         self.assertEqual(failed['summary']['covers_missing'], 1)
+
+    def test_exif_orientation_and_alpha_padding_for_both_variants(self):
+        source = self.set_art()
+        exif = Image.Exif()
+        exif[274] = 6
+        Image.new('RGB', (300, 150), (200, 40, 20)).save(source, 'JPEG', exif=exif)
+        result = self.export_covers()
+        for field, size in [('cover', 256), ('cover_large', 512)]:
+            with Image.open(self.root / 'covers' / result['albums'][0][field]) as image:
+                self.assertEqual(image.size, (size, size))
+                self.assertLess(max(image.getpixel((8, size // 2))), 40)
+                self.assertGreater(image.getpixel((size // 2, size // 2))[0], 180)
+        Image.new('RGBA', (300, 150), (255, 0, 0, 0)).save(source, 'PNG')
+        transparent = self.export_covers()
+        for field, size in [('cover', 256), ('cover_large', 512)]:
+            with Image.open(self.root / 'covers' / transparent['albums'][0][field]) as image:
+                self.assertLess(max(image.getpixel((size // 2, size // 2))), 40)
+
+    def test_recipe_change_regenerates_both_variants_once(self):
+        self.set_art()
+        with patch('beets_embed.covers.RECIPE', 'jpeg-128-contain-rgb-10151c-q82-v1'):
+            old = self.export_covers()
+        changed = self.export_covers()
+        self.assertNotEqual(old['albums'][0]['cover'], changed['albums'][0]['cover'])
+        self.assertNotEqual(old['albums'][0]['cover_large'], changed['albums'][0]['cover_large'])
+        self.assertEqual(changed['summary']['covers_generated'], 1)
+        self.assertEqual(changed['summary']['covers_large_generated'], 1)
+        self.assertEqual(changed['summary']['covers_pruned'], 2)
+        warm = self.export_covers()
+        self.assertEqual(warm['summary']['covers_generated'], 0)
+        self.assertEqual(warm['summary']['covers_large_generated'], 0)
+        self.assertEqual(warm['summary']['covers_reused'], 1)
+        self.assertEqual(warm['summary']['covers_large_reused'], 1)
+
+    def test_large_variant_failure_keeps_map_thumbnail(self):
+        self.set_art()
+        save = Image.Image.save
+        def fail_large(image, *args, **kwargs):
+            if image.size == (512, 512):
+                raise OSError('cannot encode large variant')
+            return save(image, *args, **kwargs)
+        with patch.object(Image.Image, 'save', fail_large):
+            result = self.export_covers()
+        self.assertIsNotNone(result['albums'][0]['cover'])
+        self.assertIsNone(result['albums'][0]['cover_large'])
+        self.assertEqual(result['summary']['covers_large_missing'], 1)
+        self.assertEqual(len(list((self.root / 'covers').glob('cover-*.jpg'))), 1)
+        self.assertFalse(list((self.root / 'covers').glob('.cover-*')))
+
+    def test_bomb_and_source_change_do_not_publish_thumbnails(self):
+        self.set_art()
+        # 45,000 pixels: trigger both Pillow warning and error without a large fixture.
+        for limit in (30000, 10000):
+            with patch.object(Image, 'MAX_IMAGE_PIXELS', limit):
+                result = self.export_covers()
+            self.assertIsNone(result['albums'][0]['cover'])
+            self.assertIsNone(result['albums'][0]['cover_large'])
+        from beets_embed.covers import identity
+        source = self.root / 'art.png'
+        initial = identity(source)
+        changed = (*initial[:3], initial[3] + 1)
+        for observations in ([initial, changed], [initial, initial, changed]):
+            with patch('beets_embed.covers.identity', side_effect=observations):
+                result = self.export_covers()
+            self.assertIsNone(result['albums'][0]['cover'])
+            self.assertFalse(list((self.root / 'covers').glob('cover-*.jpg')))
+            self.assertFalse(list((self.root / 'covers').glob('.cover-*')))
 
     def test_art_and_manifest_aliases_are_protected(self):
         source = self.set_art()

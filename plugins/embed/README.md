@@ -60,8 +60,10 @@ embedding store; ordinary beets startup behavior still applies. Output cannot
 overwrite either database or its SQLite sidecars, including aliases.
 
 `--covers-dir DIR` enables a dedicated incremental thumbnail cache. Pillow fits
-full artwork into 128×128 JPEGs with neutral padding; quality 82 JPEG keeps
-encoding inexpensive and works in browsers without extra codecs. Original
+full artwork into 256×256 map JPEGs and separate 512×512 card JPEGs with neutral
+padding. Quality 85 retains more detail than 82 for about 10% more bytes at
+256px; quality 88 costs another 13%. JPEG works without extra browser codecs.
+Original
 artwork is opened only for reading. Names hash the resolved source path, file
 identity, size, nanosecond modification time, and thumbnail recipe; unchanged
 sources skip decoding. Thumbnail and manifest writes are atomic. After publishing
@@ -73,8 +75,13 @@ Do not delete its `.album-graph-covers.json` ownership manifest.
 Missing, unreadable or corrupt art produces `cover: null`, with counts in the
 summary; thumbnail failures do not fail the export. An invalid or unwritable
 cache directory is a configuration error. Exports use schema v3 and include a
-relative `cover` filename or null on every album; omitting `--covers-dir` disables
-covers. The viewer also accepts v1/v2 exports; v1 shows colored dots.
+relative `cover` and `cover_large` filenames or null on every album; omitting
+`--covers-dir` disables covers. `cover_large` is an optional v3 extension; old
+v1/v2/v3 exports remain usable, with cards falling back to `cover`. Both variants
+use the same strict hashed filename format and manifest. `covers_*` summary
+counters describe map thumbnails; `covers_large_*` counters describe card
+variants, and `covers_pruned` counts files across both variants. A card variant
+failure leaves a successful map thumbnail available. v1 shows colored dots.
 `--covers DIR` serves only allowed hashed JPEG names, rejects symlinks and
 traversal, and sets immutable cache headers. It never exposes original art paths.
 
@@ -82,8 +89,36 @@ Covers is the default rendering mode. Dots disables cover loading; Auto uses dot
 below the adjustable zoom threshold (initially 1) or above 1,000 albums. Missing
 and not-yet-loaded covers remain dots. Native GPU images retain a colored group
 border and all picking/dragging behavior. Visible covers load lazily with at most
-four concurrent requests/decodes and 256 resident images; off-screen images are
-evicted first. Atlas uploads are batched and deferred during drag/zoom gestures.
+four concurrent requests/decodes on desktop, two on constrained devices;
+off-screen images are evicted first. Click cards show 160px artwork from the
+512px variant (enough for DPR 3); hover cards show 80px from the 256px thumbnail.
+Larger variants load only when a click card opens, never into the GPU map atlas.
+Closing/replacing cards drops their image references. Small originals cannot
+gain detail; exports retain their original proportions and do not upscale them.
+
+Map decoding chooses the smallest adequate 32/64/96/128/192/256px sprite tier
+from the drawn image size × DPR, including sound-lens size emphasis, cosmos's
+zoom rule and the hardware point-size cap. DPR changes also update the graph's
+rendering pixel ratio. The pinned cosmos.gl 3.4.2 image path packs
+`ceil(sqrt(count))` square cells at the largest sprite dimension. It does not
+reduce images that fit; its RGBA8 texture has one mip level. Exceeding
+`MAX_TEXTURE_SIZE` causes nearest-neighbor
+downsampling. We avoid that path by capping the grid before upload. All cached
+map sprites share a tier, so a single large image cannot inflate smaller cells.
+Atlas uploads are batched and deferred during drag/zoom gestures; tier changes
+cancel old decoding and drop old browser/cosmos image references.
+
+Constrained devices are screens ≤700px wide, coarse-pointer devices, or devices
+reporting ≤4 GiB RAM (missing memory information falls back to screen/pointer).
+Each CPU sprite pool and GPU atlas is capped at **8 MiB** there, **16 MiB** on
+desktop. Count limits are 128/256, further reduced by the byte and texture-size
+limits: at 256px, 25 phone sprites or 64 desktop sprites. At 128px, phones allow
+121 sprites. Excess nodes remain dots. The artwork allocation envelope is
+**48 MiB phone / 96 MiB desktop**, allowing current/previous sprite references,
+atlas packing, texture replacement, bounded decode scratch and two card images.
+These are application buffer budgets, not total browser-memory limits: cosmos's
+simulation/framebuffers, browser HTTP/decoded-image caches, and GC/driver
+allocation timing are separate.
 
 For systemd deployment, pass `--covers-dir /var/lib/beets-album-graph/covers` to
 the export and `--covers /var/lib/beets-album-graph/covers` to the server. The
@@ -94,10 +129,38 @@ The cover directory needs exporter write access and server read/traverse access.
 New cache directories use mode 0750 and thumbnails/manifest use 0640; share the
 `album-graph` group as in the existing services. JSON permissions remain managed
 by the existing publication wrapper. Keep this cache persistent across daily
-runs, even if JSON is exported into a staging directory. The 99-album smoke
-sample produced 0.51 MiB of JPEGs (0.73 MiB allocated for the cache). Scaling
-that sample to all 6,268 artworks suggests about 32 MiB of JPEGs, or roughly
-46 MiB allocated; actual size depends on artwork complexity and shared sources.
+runs, even if JSON is exported into a staging directory. The recipe changes
+once, regenerating both variants; old recorded thumbnails are pruned only after
+the new JSON is published. An interrupted export preserves the prior cache.
+
+An October 6 sample of **406 real artworks** reproduced the old 128px/q82 total
+of 2,232,567 bytes. Actual locked-launcher exports measured:
+
+| Variant | Sample JPEG bytes | Projection for 6,400 artworks |
+| --- | ---: | ---: |
+| 256px/q85 map | 7,533,233 | 118,750,471 (119 MB) |
+| 512px/q85 card | 21,846,375 | 344,376,355 (344 MB) |
+| Both | 29,379,608 | 463,126,826 (463 MB / 442 MiB) |
+
+The card variant adds about 344 MB but supplies the selected 160px cards at DPR
+3; 256px alone would suffice for an 80px card. The sample's 812 JPEG files
+allocated 31,014,912 bytes on this filesystem, projecting about 489 MB allocated.
+These estimates exclude JSON, manifest and phrase-cache storage, assume one
+unique artwork per album, and vary with artwork complexity/shared sources.
+Generating both variants for the fixed 407-album snapshot (one missing cover)
+took 29.7 seconds with a warm descriptor cache; the repeated export took 5.2
+seconds and reused all 812 JPEGs. JSON measured 1,641,824 bytes. The smoke used
+the normal locked launcher, copied databases and temporary output/cache paths;
+checksums confirmed the copied inputs were unchanged. The final packaged warm
+repeat took 5.5 seconds and again reused both variants.
+
+Validation ran through `agent-run-long`: 49 plugin Python tests, one HTTP server
+test, 23 Node tests, and the targeted `embed`/`beets-album-graph` package builds
+passed. No heavy dependencies or aggregate package were compiled. The full
+browser/GPU smoke remains unverified on this host: headless Chromium times out
+navigating to the localhost viewer before it loads the application. Sprite byte
+limits and the pinned atlas packing/downsampling path were checked through
+unit tests and source inspection; browser/driver memory was not measured.
 
 Tune kNN, cosine threshold, physics, node size, and color/grouping without
 exporting again. With both edge rules enabled, the threshold filters each
