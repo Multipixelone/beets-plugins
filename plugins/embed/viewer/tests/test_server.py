@@ -32,6 +32,10 @@ class ServerTests(unittest.TestCase):
             covers.mkdir()
             name = 'cover-' + 'a' * 64 + '.jpg'
             (covers / name).write_bytes(b'jpeg fixture')
+            # Mips and overview sheets intentionally share the immutable allowlist.
+            new_names = ['cover-' + char * 64 + '.jpg' for char in 'cdef']
+            for variant in new_names:
+                (covers / variant).write_bytes(b'mip or sheet fixture')
             alias = 'cover-' + 'b' * 64 + '.jpg'
             (covers / alias).symlink_to(assets / 'secret.txt')
             data = root / 'export.json'
@@ -51,6 +55,10 @@ class ServerTests(unittest.TestCase):
                         self.assertEqual(response.read(), b'jpeg fixture')
                         self.assertEqual(response.headers['Content-Type'], 'image/jpeg')
                         self.assertEqual(response.headers['Cache-Control'], 'public, max-age=31536000, immutable')
+                    for variant in new_names:
+                        with urlopen(url + '/covers/' + variant) as response:
+                            self.assertEqual(response.read(), b'mip or sheet fixture')
+                            self.assertEqual(response.headers['Cache-Control'], 'public, max-age=31536000, immutable')
                     for path in [*server_module.ASSETS, '/data.json']:
                         with urlopen(url + path) as response:
                             self.assertEqual(response.headers['Cache-Control'], 'no-cache')

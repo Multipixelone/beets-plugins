@@ -11,7 +11,7 @@ from pathlib import Path
 
 import numpy as np
 
-from .covers import CoverCache, source_path
+from .covers import CoverCache, MIP_SIZES, source_path
 from .retrieval import album_vectors
 from .store import Store, model_ids
 from .sounds import (ESSENTIA_FIELDS, LabelColumns, add_main_labels, aggregate_essentia,
@@ -159,6 +159,11 @@ def export_albums(lib, selected_ids, store_path, model, output, covers_dir=None,
             for album, source in zip(albums, artwork):
                 album["cover"] = cache.cover(source)
                 album["cover_large"] = cache.cover(source if album["cover"] else None, large=True)
+                variants = {str(size): cache.cover(source if album["cover"] else None, size=size)
+                            for size in MIP_SIZES}
+                variants.update({"256": album["cover"], "512": album["cover_large"]})
+                album["cover_variants"] = {size: name for size, name in variants.items() if name}
+            result["cover_atlases"] = cache.overview(albums)
             result["summary"].update(cache.stats)
         write_export(result, target, lib.path, store_path, artwork)
     except BaseException:

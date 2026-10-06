@@ -215,6 +215,17 @@ class GraphExportTests(unittest.TestCase):
         original = source.read_bytes()
         result = self.export_covers()
         name = result['albums'][0]['cover']
+        variants = result['albums'][0]['cover_variants']
+        self.assertEqual(set(variants), {'32', '64', '128', '256', '512'})
+        self.assertEqual(variants['256'], name)
+        for size in (32, 64, 128):
+            with Image.open(self.root / 'covers' / variants[str(size)]) as image:
+                self.assertEqual(image.size, (size, size))
+                self.assertLess(max(image.getpixel((size // 2, 0))), 40)
+        sheet = result['cover_atlases'][0]
+        self.assertEqual(sheet['album_ids'], [self.first.id])
+        with Image.open(self.root / 'covers' / sheet['file']) as image:
+            self.assertEqual(image.size, (32, 32))
         self.assertRegex(name, r'^cover-[0-9a-f]{64}\.jpg$')
         thumbnail = self.root / 'covers' / name
         with Image.open(thumbnail) as image:
@@ -235,6 +246,8 @@ class GraphExportTests(unittest.TestCase):
             repeated = self.export_covers()
         self.assertEqual(repeated['summary']['covers_reused'], 1)
         self.assertEqual(repeated['summary']['covers_large_reused'], 1)
+        self.assertEqual(repeated['summary']['cover_atlases_reused'], 1)
+        self.assertEqual(repeated['albums'][0]['cover_variants'], variants)
         self.assertEqual(large.stat().st_mtime_ns, large_stamp)
         self.assertEqual(thumbnail.stat().st_mtime_ns, stamp)
         self.assertEqual(source.read_bytes(), original)
@@ -244,12 +257,12 @@ class GraphExportTests(unittest.TestCase):
         changed = self.export_covers()
         self.assertNotEqual(changed['albums'][0]['cover'], name)
         self.assertEqual(changed['summary']['covers_generated'], 1)
-        self.assertEqual(changed['summary']['covers_pruned'], 2)
+        self.assertEqual(changed['summary']['covers_pruned'], 6)
         self.assertFalse(thumbnail.exists())
         self.assertFalse(large.exists())
         self.assertTrue(unrelated.exists())
         removed = self.export_covers(set())
-        self.assertEqual(removed['summary']['covers_pruned'], 2)
+        self.assertEqual(removed['summary']['covers_pruned'], 6)
         self.assertEqual(list((self.root / 'covers').glob('cover-*.jpg')), [unrelated])
         self.assertEqual(json.loads(self.output.read_text()), removed)
         self.assertFalse(list((self.root / 'covers').glob('.cover-*')))
@@ -282,6 +295,7 @@ class GraphExportTests(unittest.TestCase):
         self.assertEqual(result['albums'][0]['cover'], result['albums'][1]['cover'])
         self.assertEqual(result['summary']['covers_generated'], 1)
         self.assertEqual(result['summary']['covers_reused'], 1)
+        previous_files = set((self.root / 'covers').glob('cover-*.jpg'))
         before = self.output.read_bytes()
         old_cover = self.root / 'covers' / result['albums'][0]['cover']
         old_large = self.root / 'covers' / result['albums'][0]['cover_large']
@@ -294,7 +308,7 @@ class GraphExportTests(unittest.TestCase):
                 self.export_covers()
         self.assertEqual(self.output.read_bytes(), before)
         self.assertTrue(old_cover.exists())
-        self.assertEqual(set((self.root / 'covers').glob('cover-*.jpg')), {old_cover, old_large})
+        self.assertEqual(set((self.root / 'covers').glob('cover-*.jpg')), previous_files)
         with patch('beets_embed.covers.atomic_write', side_effect=OSError('cannot encode/write')):
             failed = self.export_covers()
         self.assertIsNone(failed['albums'][0]['cover'])
@@ -326,7 +340,7 @@ class GraphExportTests(unittest.TestCase):
         self.assertNotEqual(old['albums'][0]['cover_large'], changed['albums'][0]['cover_large'])
         self.assertEqual(changed['summary']['covers_generated'], 1)
         self.assertEqual(changed['summary']['covers_large_generated'], 1)
-        self.assertEqual(changed['summary']['covers_pruned'], 2)
+        self.assertEqual(changed['summary']['covers_pruned'], 6)
         warm = self.export_covers()
         self.assertEqual(warm['summary']['covers_generated'], 0)
         self.assertEqual(warm['summary']['covers_large_generated'], 0)
@@ -345,7 +359,7 @@ class GraphExportTests(unittest.TestCase):
         self.assertIsNotNone(result['albums'][0]['cover'])
         self.assertIsNone(result['albums'][0]['cover_large'])
         self.assertEqual(result['summary']['covers_large_missing'], 1)
-        self.assertEqual(len(list((self.root / 'covers').glob('cover-*.jpg'))), 1)
+        self.assertEqual(len(list((self.root / 'covers').glob('cover-*.jpg'))), 5)
         self.assertFalse(list((self.root / 'covers').glob('.cover-*')))
 
     def test_bomb_and_source_change_do_not_publish_thumbnails(self):

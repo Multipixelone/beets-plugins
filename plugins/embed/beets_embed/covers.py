@@ -17,6 +17,9 @@ COVER_NAME = re.compile(r"cover-[0-9a-f]{64}\.jpg\Z")
 RECIPE = "jpeg-contain-rgb-10151c-q85-v2"
 THUMBNAIL_SIZE = 256
 CARD_SIZE = 512
+MIP_SIZES = (32, 64, 128)
+OVERVIEW_COLUMNS = 64
+OVERVIEW_CAPACITY = OVERVIEW_COLUMNS ** 2
 JPEG_QUALITY = 85
 MANIFEST = ".album-graph-covers.json"
 
@@ -70,6 +73,11 @@ class CoverCache:
                           covers_generated=0, covers_reused=0, covers_pruned=0,
                           covers_large_available=0, covers_large_missing=0,
                           covers_large_generated=0, covers_large_reused=0)
+        for size in MIP_SIZES:
+            for outcome in ("available", "missing", "generated", "reused"):
+                self.stats[f"covers_{size}_{outcome}"] = 0
+        self.stats.update(cover_atlases_generated=0, cover_atlases_reused=0,
+                          cover_atlases_bytes=0)
         self.guard(self.directory / MANIFEST)
         self.directory.mkdir(mode=0o750, parents=True, exist_ok=True)
         manifest = self.directory / MANIFEST
@@ -97,12 +105,15 @@ class CoverCache:
             if (info.st_dev, info.st_ino) in self.protected_inodes:
                 raise ValueError("Cover output aliases original artwork or an input database")
 
-    def cover(self, source, *, large=False):
-        size = CARD_SIZE if large else THUMBNAIL_SIZE
-        prefix = "covers_large" if large else "covers"
+    def cover(self, source, *, large=False, size=None):
+        size = size if size is not None else CARD_SIZE if large else THUMBNAIL_SIZE
+        if size not in (*MIP_SIZES, THUMBNAIL_SIZE, CARD_SIZE):
+            raise ValueError("Unsupported cover size")
+        prefix = "covers_large" if size == CARD_SIZE else "covers" if size == THUMBNAIL_SIZE else f"covers_{size}"
         if source is None:
             self.stats[f"{prefix}_missing"] += 1
             return None
+
         try:
             source = source.resolve()
             before = identity(source)
@@ -143,6 +154,46 @@ class CoverCache:
             LOG.warning("Cannot thumbnail artwork %s: %s", source, exc)
             self.stats[f"{prefix}_missing"] += 1
             return None
+
+    def overview(self, albums):
+        """Immutable overview sheets; per-album files remain the failure fallback."""
+        entries = [(album["id"], album["cover_variants"]["32"]) for album in albums
+                   if album.get("cover_variants", {}).get("32")]
+        sheets = []
+        for first in range(0, len(entries), OVERVIEW_CAPACITY):
+            chunk = entries[first:first + OVERVIEW_CAPACITY]
+            columns = min(OVERVIEW_COLUMNS, len(chunk))
+            key = json.dumps(["overview-32-q85-v1", columns, [name for _, name in chunk]],
+                             separators=(",", ":")).encode()
+            name = f"cover-{hashlib.sha256(key).hexdigest()}.jpg"
+            target = self.directory / name
+            try:
+                self.guard(target)
+                if target.is_file() and target.stat().st_size:
+                    self.stats["cover_atlases_reused"] += 1
+                else:
+                    rows = (len(chunk) + columns - 1) // columns
+                    with Image.new("RGB", (columns * 32, rows * 32), (16, 21, 28)) as canvas:
+                        for index, (_, tile_name) in enumerate(chunk):
+                            tile = self.directory / tile_name
+                            self.guard(tile)
+                            with Image.open(tile) as image:
+                                if image.size != (32, 32):
+                                    raise ValueError("Invalid overview tile")
+                                canvas.paste(image, ((index % columns) * 32, (index // columns) * 32))
+                        def write(out):
+                            canvas.save(out, "JPEG", quality=JPEG_QUALITY)
+                            self.guard(target)
+                        atomic_write(target, write)
+                    self.created.add(name)
+                    self.stats["cover_atlases_generated"] += 1
+                self.used.add(name)
+                self.stats["cover_atlases_bytes"] += target.stat().st_size
+                sheets.append(dict(file=name, tile_size=32, columns=columns,
+                                   album_ids=[album_id for album_id, _ in chunk]))
+            except (OSError, ValueError, SyntaxError) as exc:
+                LOG.warning("Cannot build cover overview %s: %s", name, exc)
+        return sheets
 
     def finish(self):
         """Called only after the JSON is published. Delete only recorded cache files."""
