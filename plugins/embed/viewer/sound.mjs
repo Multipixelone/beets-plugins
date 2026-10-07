@@ -139,7 +139,7 @@ function labelMembers(albums, names) {
   });
 }
 
-function summarizeLabel(albums, group, edges) {
+function summarizeLabel(albums, group, edges, mode) {
   const scores = new Map(), descriptors = new Map();
   const source = ['style', 'mood', 'instruments'].find(key =>
     group.indices.some(i => albums[i].sound?.[key]?.labels?.length));
@@ -167,8 +167,9 @@ function summarizeLabel(albums, group, edges) {
     }
   }
   const main = [...scores.values()].sort((a, b) => b.score - a.score || compareText(a.label, b.label))[0]?.label;
-  const primaryText = main ? cleanText(main) : cleanText(group.name.replace(/^Cluster /, 'Community '));
-  const family = source === 'style' && main?.includes('---') ? cleanText(main.split('---')[0]) : '';
+  const primaryText = mode !== 'cluster' ? group.name.normalize('NFKC').replace(/\s+/g, ' ').trim() :
+    main ? cleanText(main) : cleanText(group.name.replace(/^Cluster /, 'Community '));
+  const family = mode === 'cluster' && source === 'style' && main?.includes('---') ? cleanText(main.split('---')[0]) : '';
   const anchors = representativeLabelAnchors(albums, group.indices, edges, group.indices.length);
   const artist = anchors.map(i => albums[i].albumartist?.trim()).find(text =>
     text && !['unknown', 'unknown artist', 'various artists'].includes(labelKey(text))) || '';
@@ -255,7 +256,7 @@ export function groupLabels(albums, names, visible = () => true,
   const members = labelMembers(albums, names), cached = new Map(previous.map(group => [group.membershipKey, group]));
   const unchanged = members.length === previous.length && members.every(group => cached.get(group.membershipKey)?.mode === mode);
   const definitions = unchanged ? members.map(group => ({ ...group, naming: cached.get(group.membershipKey).naming })) :
-    resolveLabelNames(members.map(group => summarizeLabel(albums, group, edges)), rules);
+    resolveLabelNames(members.map(group => summarizeLabel(albums, group, edges, mode)), rules);
   return visibleGroupLabels(albums, definitions.map(group => ({ ...group, mode })), visible, { edges, anchorCount });
 }
 

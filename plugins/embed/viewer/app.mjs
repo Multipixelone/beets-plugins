@@ -663,12 +663,16 @@ function color(index) {
 }
 function updateGroups() {
   if (!graph || !data) return;
-  const names = groups(data.albums, $('group').value, clusters);
+  const mode = $('group').value;
+  const heading = $('group').selectedOptions[0].textContent.toLowerCase();
+  $('map-labels').setAttribute('aria-label', mode === 'cluster' ? 'Sound communities' : `Albums by ${heading}`);
+  $('legend').setAttribute('aria-label', `${heading} legend`);
+  const names = groups(data.albums, mode, clusters);
   const unique = [...new Set(names)].sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
   const ids = new Map(unique.map((name, i) => [name, i]));
   groupNames = names; groupIds = ids;
   updateColors();
-  labelDefinitions = groupLabels(data.albums, names, () => true, { edges, previous: labelDefinitions, mode: $('group').value });
+  labelDefinitions = groupLabels(data.albums, names, () => true, { edges, previous: labelDefinitions, mode });
   const definitions = new Map(labelDefinitions.map(group => [group.name, group]));
   // Bounded GPU readback, refreshed by cosmos alongside point rendering.
   updateLabelTracking();

@@ -174,6 +174,22 @@ test('hidden siblings and communities beyond map limits participate in canonical
   assert.equal(filtered[0].naming.displayName, complete.find(group => group.name === 'Cluster 100').naming.displayName);
 });
 
+test('non-community headings follow the selected grouping value and switching modes invalidates naming', () => {
+  const library = [soundAlbum(1, 'AC_DC', 'Pop---K-pop', [descriptor('glossy')]),
+    soundAlbum(2, 'Second', 'Pop---K-pop', [descriptor('glossy')])];
+  library.forEach((album, i) => { album.year = 2001 + i * 10; album.genre = i ? 'Rock' : 'Pop'; });
+  const community = groupLabels(library, ['2001', '2011']);
+  for (const mode of ['year', 'decade', 'albumartist', 'genre', 'style', 'mood', 'flavor']) {
+    const names = groups(library, mode, []);
+    const labels = groupLabels(library, names, () => true, { mode, previous: community });
+    for (const group of labels) {
+      assert.equal(group.naming.primaryText, group.name);
+      assert.equal(group.naming.qualifier, '');
+      assert.notStrictEqual(group.naming, community.find(other => other.membershipKey === group.membershipKey)?.naming);
+    }
+  }
+});
+
 test('map lines, legend, tooltip and accessible names retain complete long qualifiers', () => {
   const phrase = 'sparkling synth arpeggios and slowly evolving layered harmonies 星빛';
   const library = [soundAlbum(1, 'First', 'Pop---K-pop', [descriptor(phrase, 1, 'instrumentation')]),

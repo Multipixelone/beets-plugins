@@ -44,11 +44,11 @@
     <label class="check"><input id="include-unknown" type="checkbox"> Include unknown filter values</label>
     <p class="muted">Danceable is the Essentia classifier probability. Non-matches are hidden and frozen; visible albums keep moving.</p>
   </fieldset>
-  <label class="check"><input id="show-labels" type="checkbox" checked> Show group sound labels</label>
+  <label class="check"><input id="show-labels" type="checkbox" checked> Show group labels</label>
 </div></details>
     <details class="control-section"><summary>Connections</summary><div class="section-content">
       <label>Visible connections<select id="edge-view"><option value="strongest">Local neighbors and bridges</option><option value="all">All connections</option><option value="selected">Focused album only</option></select></label>
-      <p class="muted">Hover or select an album to reveal its connections. Its closest neighbors stand out; quieter bridges connect sounds. Click a sound label to explore its community.</p>
+      <p class="muted">Hover or select an album to reveal its connections. Its closest neighbors stand out; quieter bridges connect sounds. Click a group label to explore its albums.</p>
       <label class="check"><input id="use-k" type="checkbox" checked> Limit nearest neighbors</label>
       <label>Neighbors <output id="k-value">8</output><input id="k" type="range" min="0" max="100" step="1" value="8"></label>
       <label class="check"><input id="use-threshold" type="checkbox" checked> Filter by similarity</label>
