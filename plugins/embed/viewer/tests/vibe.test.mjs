@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { vibeAppearance, vibeLinkOpacity, matchBounds } from '../vibe.mjs';
+import { readFile } from 'node:fs/promises';
+import { runInNewContext } from 'node:vm';
+import { vibeAppearance, vibeLinkOpacity, matchBounds, GatherAppearance } from '../vibe.mjs';
 import { selectionState } from '../sound.mjs';
 import { FilterPositions } from '../visibility.mjs';
 import { VibeGraph } from '../cosmos-vibe.mjs';
@@ -10,6 +12,94 @@ const albums = [
   { id: 2, album: 'Two', albumartist: 'Other', essentia: { danceable: { value: .2 } } },
   { id: 3, album: 'Unknown', albumartist: 'Finn' },
 ];
+const close = (actual, expected) => assert.ok(Math.abs(actual - expected) < 1e-10, `${actual} != ${expected}`);
+test('gather appearance animates enlarged matches and readable background, then restores plain vibes', () => {
+  const states = selectionState(albums, { phraseScores: [.5, 4, null] }).states;
+  const original = structuredClone(states), appearance = new GatherAppearance();
+  appearance.set([0, 1], 1, 0);
+  assert.equal(appearance.size(0), 1);
+  assert.equal(appearance.opacity(states[2], true), .15);
+  appearance.frame(225);
+  close(appearance.size(0), 1.175);
+  close(appearance.opacity(states[2], true), .275);
+  appearance.frame(450);
+  close(states[0].size * appearance.size(0), 1.15 * 1.35);
+  close(states[1].size * appearance.size(1), 2 * 1.35);
+  assert.equal(appearance.size(2), 1);
+  assert.equal(appearance.opacity(states[2], true), .40);
+  const effective = states.map(state => ({ ...state, opacity: appearance.opacity(state, true) }));
+  assert.equal(vibeLinkOpacity({ source: 0, target: 2 }, effective), .40);
+  assert.equal(vibeLinkOpacity({ source: 0, target: 1 }, effective), .70);
+  assert.equal(appearance.opacity({ ...states[2], visible: false, opacity: 0 }, true), 0);
+  assert.equal(appearance.opacity(states[2], false), .15);
+  assert.deepEqual(states, original, 'display changes never mutate selection or collision inputs');
+  appearance.set([], 1, 500);
+  close(appearance.size(0), 1.35);
+  appearance.frame(725);
+  close(appearance.size(0), 1.175);
+  close(appearance.opacity(states[2], true), .275);
+  appearance.frame(950);
+  assert.equal(appearance.size(0), 1);
+  assert.equal(appearance.opacity(states[2], true), .15);
+  assert.equal(appearance.transitions.size, 0);
+  assert.equal(appearance.sizes.size, 0);
+});
+test('gather appearance handles fitted footprints, interrupted toggles and immediate reduced motion', () => {
+  const appearance = new GatherAppearance();
+  appearance.set([0], .5, 0);
+  appearance.frame(225);
+  close(appearance.size(0), (1 + .5 * 1.35) / 2);
+  const current = appearance.size(0);
+  appearance.set([], 1, 225);
+  assert.equal(appearance.size(0), current);
+  appearance.set([0], 1, 225);
+  assert.equal(appearance.size(0), current);
+  appearance.frame(675);
+  close(appearance.size(0), 1.35);
+  appearance.set([1], .5, 700, 0);
+  assert.equal(appearance.size(0), 1);
+  close(appearance.size(1), .675);
+  assert.equal(appearance.background, 1);
+  assert.equal(appearance.transitions.size, 0);
+  appearance.set([], 1, 701, 0);
+  assert.equal(appearance.size(1), 1);
+  assert.equal(appearance.background, 0);
+});
+test('renderer boosts dots and artwork without changing collision sizes, and restores display sizes', async () => {
+  const source = await readFile(new URL('../app.mjs', import.meta.url), 'utf8');
+  const renderer = source.slice(source.indexOf('function updateCoverSizes()'), source.indexOf('function resizeArtwork()'));
+  for (const coverActive of [false, true]) {
+    const appearance = new GatherAppearance(), output = {};
+    const context = {
+      graphReady: true, coverActive, coverGeometry: '', geometryScale: 1, gatherScale: .8,
+      selected: 0, atlasEntries: [], data: { albums: albums.map(album => ({ ...album, cover: 'cover.jpg' })) },
+      selection: selectionState(albums, { phraseScores: [.5, 4, null] }),
+      gather: { saved: new Map([[0, []], [1, []]]) }, gatherAppearance: appearance,
+      gatheredScale: index => appearance.size(index), visibleAlbum: () => true,
+      pointSizes: () => [20, 20, 20], artworkSizes: () => [80, 80, 80],
+      $: () => ({ value: '1' }), coverURL: name => name,
+      vibeGraph: { collisionSizes: sizes => { output.collisions = [...sizes]; } },
+      graph: { setPointImageIndices() {}, setPointShapes() {},
+        setPointImageSizes: sizes => { output.artwork = [...sizes]; },
+        setPointSizes: sizes => { output.points = [...sizes]; } },
+    };
+    runInNewContext(`${renderer}; updateCoverSizes();`, context);
+    const baseline = structuredClone(output);
+    appearance.set([0, 1], .8, 0);
+    for (const time of [225, 450]) {
+      appearance.frame(time);
+      runInNewContext('updateCoverSizes();', context);
+      assert.deepEqual(output.collisions, baseline.collisions);
+      close(output.artwork[0], baseline.artwork[0] * appearance.size(0));
+    }
+    close(output.points[0], baseline.points[0] * .8 * 1.35);
+    assert.equal(output.points[2], baseline.points[2]);
+    appearance.set([], 1, 500);
+    appearance.frame(950);
+    runInNewContext('updateCoverSizes();', context);
+    assert.deepEqual(output, baseline);
+  }
+});
 test('salience curve enlarges every match and clamps stronger size, opacity and brightness', () => {
   assert.deepEqual(vibeAppearance(.5), { match: true, size: 1.15, opacity: .7, brightness: 1.05 });
   assert.deepEqual(vibeAppearance(4), { match: true, size: 2, opacity: 1, brightness: 1.25 });

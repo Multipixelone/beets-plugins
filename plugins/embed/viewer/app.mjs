@@ -7,7 +7,7 @@ import { atlasLayout } from './atlas.mjs';
 import { DRAG_ALPHA, dragAlpha, communityLayout, communityLinkStrengths } from './physics.mjs';
 import { FilterPositions, bridgeLinks, edgeStyles } from './visibility.mjs';
 import { textVectors, phraseScores, topMatches, PhraseSearch } from './search.mjs';
-import { vibeLinkOpacity, matchBounds } from './vibe.mjs';
+import { vibeLinkOpacity, matchBounds, GatherAppearance, GATHER_SIZE_MULTIPLIER, GATHER_TRANSITION_MS } from './vibe.mjs';
 import { VibeGraph } from './cosmos-vibe.mjs';
 import { GatherPositions, gatherRings } from './gather.mjs';
 
@@ -25,6 +25,7 @@ let communityGeometry = '', communityModel;
 let groupNames = [], groupIds = new Map(), lensOptions = new Map();
 let selection = { active: false, states: [], matches: [] }, lensScores, currentLens;
 let filterPositions, vibeGraph, renderedSizes = [], layoutGeometryKey = '', vibeFitKey;
+let gatherAppearance = new GatherAppearance();
 let gather = new GatherPositions(), gatherEnabled = false, gatherScale = 1, gatherFrame, dragIndex, edgeStrengths = [];
 function visibleAlbum(index) {
   return Number.isInteger(index) && !!data?.albums[index] && selection.states[index]?.visible !== false;
@@ -111,7 +112,7 @@ function updateColors() {
   if (!graphReady) return;
   graph.setPointColors(Float32Array.from(groupNames.flatMap((name, i) => {
     const rgba = i === selected ? [0.88, 0.94, 1, 1] : color(groupIds.get(name));
-    rgba[3] = selection.states[i]?.opacity ?? 1;
+    rgba[3] = gatherAppearance.opacity(selection.states[i], selection.vibeActive);
     return rgba;
   })));
   graph.setConfigPartial({ albumVibeActive: selection.vibeActive });
@@ -252,13 +253,13 @@ function refreshCovers() {
 }
 function updateCoverSizes() {
   if (!graphReady) return;
-  const geometry = `${coverActive}:${$('size').value}:${$('art-size').value}:${selected}:${geometryScale}:${gatherScale}`;
+  const geometry = `${coverActive}:${$('size').value}:${$('art-size').value}:${selected}:${geometryScale}:${gatherScale}:${[...gatherAppearance.sizes].join(',')}`;
   const geometryChanged = geometry !== coverGeometry;
   const sizes = pointSizes(data.albums, $('size').value);
   // Artwork needs a readable baseline independent of the much smaller dot sizes.
   const artworkScale = Number($('art-size').value);
   const imageSizes = artworkSizes(data.albums, $('size').value, artworkScale);
-  const baseImageSizes = imageSizes.slice();
+  const baseImageSizes = imageSizes.slice(), basePointSizes = sizes.slice();
   const collisionSizes = Float32Array.from(sizes, (size, i) => size * (selection.states[i]?.baseSize ?? 1) * geometryScale);
   sizes.forEach((size, i) => { sizes[i] = size * (selection.states[i]?.size ?? 1) * geometryScale * gatheredScale(i); });
   imageSizes.forEach((size, i) => { imageSizes[i] = size * (selection.states[i]?.size ?? 1) * geometryScale * gatheredScale(i); });
@@ -275,7 +276,12 @@ function updateCoverSizes() {
     collisionSizes[index] = (baseImageSizes[index] *
       (selection.states[index]?.baseSize ?? 1) + (index === selected ? 8 : 6)) * geometryScale / 0.8;
   }
-  for (const index of gather.saved.keys()) collisionSizes[index] = sizes[index];
+  // Preserve Gather's unboosted collision footprint throughout visual animation.
+  for (const index of gather.saved.keys()) {
+    collisionSizes[index] = coverActive && data.albums[index].cover ?
+      (baseImageSizes[index] * (selection.states[index]?.size ?? 1) + (index === selected ? 8 : 6)) * geometryScale * gatherScale / .8 :
+      basePointSizes[index] * (selection.states[index]?.size ?? 1) * geometryScale * gatherScale;
+  }
   for (let index = 0; index < sizes.length; index++) if (!visibleAlbum(index)) {
     sizes[index] = imageSizes[index] = 0; indices[index] = -1;
     collisionSizes[index] = 0;
@@ -308,7 +314,7 @@ function updateAtlas() {
   if (atlasChanged) {
     graph.setImageData(entries.map(([, image]) => image)); atlasEntries = entries;
   }
-  const geometry = `${coverActive}:${$('size').value}:${$('art-size').value}:${selected}:${geometryScale}:${gatherScale}`;
+  const geometry = `${coverActive}:${$('size').value}:${$('art-size').value}:${selected}:${geometryScale}:${gatherScale}:${[...gatherAppearance.sizes].join(',')}`;
   if (atlasChanged || geometry !== coverGeometry) { updateCoverSizes(); graph.render(); }
   if (coverActive) {
     const atlas = new Map(entries);
@@ -444,7 +450,7 @@ function fitVibeMatches() {
     scheduleCovers();
   });
 }
-function gatheredScale(index) { return gather.saved.has(index) ? gatherScale : 1; }
+function gatheredScale(index) { return gatherAppearance.size(index); }
 // Keep the orbit clear of springs that would pull background albums through
 // the pinned rings; background-to-background links and collisions stay live.
 function gatheredStrengths() {
@@ -472,7 +478,7 @@ function updateGatherPhysics() {
   graph.setClusterPositions(gatherEnabled ? undefined : communityModel ? Array.from(communityModel.centers) : undefined);
   graph.setPointClusterStrength(gatherEnabled ? new Float32Array(data.albums.length) : communityModel?.strengths);
   graph.setLinkStrength(gatheredStrengths());
-  coverGeometry = ''; updateCoverSizes(); graph.render(undefined, 0);
+  coverGeometry = ''; updateHighlights(); graph.render(undefined, 0);
   if (gatherEnabled && !paused) graph.start(simulationAlpha = Math.max(.3, simulationAlpha));
 }
 function animateGather() {
@@ -482,6 +488,8 @@ function animateGather() {
     gatherFrame = undefined;
     if (!graphReady || generation !== currentGeneration) return;
     const rotating = gatherEnabled && !paused && !reducedMotion;
+    const appearanceChanging = gatherAppearance.transitions.size > 0;
+    gatherAppearance.frame(now);
     const { positions, restored } = gather.frame(now, { rotate: rotating, dragIndex });
     vibeGraph.positions(positions);
     if (restored.length) {
@@ -489,22 +497,24 @@ function animateGather() {
       if (!gather.saved.size) { gatherScale = 1; fitVibeMatches(); }
       updateGatherPhysics();
     }
+    if (appearanceChanging) updateHighlights();
     scheduleCovers(); scheduleLabels();
-    if (gather.transitions.size || rotating) gatherFrame = requestAnimationFrame(frame);
+    if (gather.transitions.size || gatherAppearance.transitions.size || rotating) gatherFrame = requestAnimationFrame(frame);
   };
   gatherFrame = requestAnimationFrame(frame);
 }
 function layoutGather(fit = true) {
   if (!graphReady || !gatherEnabled) return;
   const indices = topMatches(data.albums, phraseResult.cosines, selection.matches, Infinity);
-  const sizes = renderedSizes.map((size, i) => size / gatheredScale(i));
+  const sizes = renderedSizes.map((size, i) => size / gatheredScale(i) * GATHER_SIZE_MULTIPLIER);
   const rings = gatherRings(indices, sizes, { center: [layout.spaceSize / 2, layout.spaceSize / 2],
     spaceSize: layout.spaceSize, margin: layout.margin, gap: 16 * geometryScale });
   const now = performance.now();
-  gather.reconcile(indices, graph.getPointPositions(), rings.positions, now, reducedMotion ? 0 : 700);
+  gather.reconcile(indices, graph.getPointPositions(), rings.positions, now, reducedMotion ? 0 : GATHER_TRANSITION_MS);
   gather.setOrbit(rings, now);
   for (const [index, saved] of gather.saved) filterPositions.saved.set(saved, index * 2);
   gatherScale = rings.scale;
+  gatherAppearance.set(indices, rings.scale, now, reducedMotion ? 0 : GATHER_TRANSITION_MS);
   if (!indices.length) gatherEnabled = false;
   updateGatherPhysics(); updateGatherControls(); animateGather();
   if (fit && indices.length) {
@@ -512,13 +522,15 @@ function layoutGather(fit = true) {
     const radius = Math.max(rings.radius * 1.55, 180 * geometryScale);
     const [cx, cy] = rings.center;
     graph.setZoomTransformByPointPositions(new Float32Array([cx - radius, cy - radius, cx + radius, cy + radius]),
-      reducedMotion ? 0 : 700, undefined, 0.12, false);
+      reducedMotion ? 0 : GATHER_TRANSITION_MS, undefined, 0.12, false);
   }
 }
 function endGather() {
   if (!gatherEnabled || !graphReady) return;
   gatherEnabled = false;
-  gather.end(graph.getPointPositions(), performance.now(), reducedMotion ? 0 : 450);
+  const now = performance.now();
+  gather.end(graph.getPointPositions(), now, reducedMotion ? 0 : GATHER_TRANSITION_MS);
+  gatherAppearance.set([], 1, now, reducedMotion ? 0 : GATHER_TRANSITION_MS);
   updateGatherPhysics(); updateGatherControls(); animateGather();
 }
 function coverElement(album, className) {
@@ -566,7 +578,10 @@ function updateHighlights() {
     visible: query ? selection.states.map(state => state.visible) : undefined,
     coverPixels: pixels, bridges: query ? undefined : bridgeEdges, strongest: query ? undefined : strongestEdges });
   // Vibe search keeps every visible link but grades alpha by endpoint salience.
-  if (selection.vibeActive) edges.forEach((edge, i) => { style.colors[i * 4 + 3] *= vibeLinkOpacity(edge, selection.states); });
+  if (selection.vibeActive) {
+    const states = selection.states.map(state => ({ ...state, opacity: gatherAppearance.opacity(state, true) }));
+    edges.forEach((edge, i) => { style.colors[i * 4 + 3] *= vibeLinkOpacity(edge, states); });
+  }
   graph.setLinkColors(style.colors); graph.setLinkWidths(style.widths);
   graph.setConfigPartial({ highlightedPointIndices: !query && style.focus !== undefined ? [...style.points] : undefined,
     highlightedLinkIndices: undefined,
@@ -786,7 +801,7 @@ async function load(exported, name) {
     cancelAnimationFrame(labelFrame); labelFrame = undefined; labelGroups = []; labelDefinitions = []; groupNames = [];
     labelElements.clear(); labelOffsets.clear(); labelObstacles = []; communityGeometry = ''; communityModel = undefined;
     cancelAnimationFrame(gatherFrame); gatherFrame = undefined;
-    gather = new GatherPositions(); gatherEnabled = false; gatherScale = 1;
+    gather = new GatherPositions(); gatherAppearance = new GatherAppearance(); gatherEnabled = false; gatherScale = 1;
     trackedKey = hovered = undefined;
     $('map-labels').replaceChildren(); selection = { active: false, states: [], matches: [] };
     currentLens = lensScores = undefined; lensOptions = new Map(); $('lens').value = '';

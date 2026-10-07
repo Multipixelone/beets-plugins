@@ -3,10 +3,38 @@ import assert from 'node:assert/strict';
 import { GatherPositions, gatherRings } from '../gather.mjs';
 import { FilterPositions } from '../visibility.mjs';
 import { VibeGraph } from '../cosmos-vibe.mjs';
+import { GATHER_SIZE_MULTIPLIER } from '../vibe.mjs';
 
 const initial = new Float32Array([10.25, 20.75, 30.5, 40.5, 50, 60]);
 const targets = new Map([[0, new Float32Array([100, 100])], [2, new Float32Array([200, 100])]]);
 const apply = (positions, updates) => { for (const [index, point] of updates) positions.set(point, index * 2); };
+test('enlarged gathered footprints grow ring pitch and still shrink to fit without overlap', () => {
+  const options = { center: [500, 500], spaceSize: 1000, margin: 100 };
+  const small = gatherRings([0, 1], [40, 40], options);
+  const bigger = gatherRings([0, 1], [40, 40].map(size => size * GATHER_SIZE_MULTIPLIER), options);
+  assert.equal(bigger.scale, 1);
+  assert.ok(bigger.radius > small.radius);
+  for (const count of [2, 7, 177]) {
+    const indices = Array.from({ length: count }, (_, i) => i);
+    const sizes = indices.map(i => (40 + i % 6 * 7) * GATHER_SIZE_MULTIPLIER);
+    const layout = gatherRings(indices, sizes, options);
+    const gather = new GatherPositions(); gather.setOrbit(layout, 0);
+    assert.ok(layout.radius <= 200 + .001);
+    for (const angle of [0, Math.PI / 4, 1.24]) {
+      gather.angle = angle;
+      const points = indices.map(index => gather.orbitPosition(index));
+      for (const i of indices) {
+        for (const coordinate of points[i]) {
+          assert.ok(coordinate - sizes[i] * layout.scale / 2 >= 100 - .001);
+          assert.ok(coordinate + sizes[i] * layout.scale / 2 <= 900 + .001);
+        }
+        for (let j = i + 1; j < count; j++) assert.ok(
+          Math.abs(points[i][0] - points[j][0]) >= (sizes[i] + sizes[j]) * layout.scale / 2 - .001 ||
+          Math.abs(points[i][1] - points[j][1]) >= (sizes[i] + sizes[j]) * layout.scale / 2 - .001);
+      }
+    }
+  }
+});
 test('gather rings keep covers apart throughout rotation for small and large result sets', () => {
   for (const count of [1, 2, 6, 7, 24, 177, 1000]) {
     const indices = Array.from({ length: count }, (_, i) => i);
