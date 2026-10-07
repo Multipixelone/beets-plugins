@@ -9,6 +9,7 @@ import { FilterPositions, bridgeLinks, edgeStyles } from './visibility.mjs';
 import { textVectors, phraseScores, topMatches, PhraseSearch } from './search.mjs';
 import { vibeLinkOpacity, matchBounds } from './vibe.mjs';
 import { VibeGraph } from './cosmos-vibe.mjs';
+import { GatherPositions, gatherGrid } from './gather.mjs';
 
 const $ = id => document.getElementById(id);
 const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -24,6 +25,7 @@ let communityGeometry = '', communityModel;
 let groupNames = [], groupIds = new Map(), lensOptions = new Map();
 let selection = { active: false, states: [], matches: [] }, lensScores, currentLens;
 let filterPositions, vibeGraph, renderedSizes = [], layoutGeometryKey = '', vibeFitKey;
+let gather = new GatherPositions(), gatherEnabled = false, gatherScale = 1, gatherFrame, dragIndex, edgeStrengths = [];
 function visibleAlbum(index) {
   return Number.isInteger(index) && !!data?.albums[index] && selection.states[index]?.visible !== false;
 }
@@ -45,6 +47,7 @@ const phraseSearch = new PhraseSearch({
     return result;
   },
   change: ({ status: message, result }) => {
+    if (!result) endGather();
     phraseResult = undefined;
     if (result && data) {
       try {
@@ -155,7 +158,7 @@ let layout = { spaceSize: 4096, margin: 409.6, spacing: 112 }, geometryScale = 1
 const coverURL = name => new URL(`covers/${name}`, location.href).href;
 function albumImageSizes() {
   const sizes = artworkSizes(data.albums, $('size').value, Number($('art-size').value));
-  sizes.forEach((size, i) => { sizes[i] = size * (selection.states[i]?.size ?? 1) * geometryScale; });
+  sizes.forEach((size, i) => { sizes[i] = size * (selection.states[i]?.size ?? 1) * geometryScale * gatheredScale(i); });
   return sizes;
 }
 function configureCovers() {
@@ -235,7 +238,7 @@ function refreshCovers() {
 }
 function updateCoverSizes() {
   if (!graphReady) return;
-  const geometry = `${coverActive}:${$('size').value}:${$('art-size').value}:${selected}:${geometryScale}`;
+  const geometry = `${coverActive}:${$('size').value}:${$('art-size').value}:${selected}:${geometryScale}:${gatherScale}`;
   const geometryChanged = geometry !== coverGeometry;
   const sizes = pointSizes(data.albums, $('size').value);
   // Artwork needs a readable baseline independent of the much smaller dot sizes.
@@ -243,8 +246,8 @@ function updateCoverSizes() {
   const imageSizes = artworkSizes(data.albums, $('size').value, artworkScale);
   const baseImageSizes = imageSizes.slice();
   const collisionSizes = Float32Array.from(sizes, (size, i) => size * (selection.states[i]?.baseSize ?? 1) * geometryScale);
-  sizes.forEach((size, i) => { sizes[i] = size * (selection.states[i]?.size ?? 1) * geometryScale; });
-  imageSizes.forEach((size, i) => { imageSizes[i] = size * (selection.states[i]?.size ?? 1) * geometryScale; });
+  sizes.forEach((size, i) => { sizes[i] = size * (selection.states[i]?.size ?? 1) * geometryScale * gatheredScale(i); });
+  imageSizes.forEach((size, i) => { imageSizes[i] = size * (selection.states[i]?.size ?? 1) * geometryScale * gatheredScale(i); });
   const shapes = new Float32Array(sizes.length);
   const indices = new Float32Array(sizes.length).fill(-1);
   const atlas = new Map(atlasEntries.map(([url], i) => [url, i]));
@@ -254,10 +257,11 @@ function updateCoverSizes() {
     indices[index] = atlas.get(coverURL(data.albums[index].cover)) ?? -1;
     shapes[index] = 1;
     // Cosmos draws squares at 80% of their point size. Selection stays rectangular.
-    sizes[index] = (imageSizes[index] + (index === selected ? 8 : 6) * geometryScale) / 0.8;
+    sizes[index] = (imageSizes[index] + (index === selected ? 8 : 6) * geometryScale * gatheredScale(index)) / 0.8;
     collisionSizes[index] = (baseImageSizes[index] *
       (selection.states[index]?.baseSize ?? 1) + (index === selected ? 8 : 6)) * geometryScale / 0.8;
   }
+  for (const index of gather.saved.keys()) collisionSizes[index] = sizes[index];
   for (let index = 0; index < sizes.length; index++) if (!visibleAlbum(index)) {
     sizes[index] = imageSizes[index] = 0; indices[index] = -1;
     collisionSizes[index] = 0;
@@ -275,6 +279,7 @@ function resizeArtwork() {
   if (!graphReady) return;
   configureLayout();
   updateCoverSizes(); reheat(); scheduleCovers();
+  if (gatherEnabled) layoutGather();
 }
 function updateAtlas() {
   if (!graphReady || !coverLoader) return;
@@ -289,7 +294,7 @@ function updateAtlas() {
   if (atlasChanged) {
     graph.setImageData(entries.map(([, image]) => image)); atlasEntries = entries;
   }
-  const geometry = `${coverActive}:${$('size').value}:${$('art-size').value}:${selected}:${geometryScale}`;
+  const geometry = `${coverActive}:${$('size').value}:${$('art-size').value}:${selected}:${geometryScale}:${gatherScale}`;
   if (atlasChanged || geometry !== coverGeometry) { updateCoverSizes(); graph.render(); }
   if (coverActive) {
     const atlas = new Map(entries);
@@ -369,7 +374,8 @@ function configureCommunities() {
   const key = `${generation}:${revision}:${$('layout-mode').value}:${$('size').value}:${$('art-size').value}:${geometryScale}:${padding}`;
   if (key === communityGeometry) return;
   communityGeometry = key;
-  graph.setLinkStrength(communityLinkStrengths(edges, clusters, $('layout-mode').value === 'free' ? 1 : .25));
+  edgeStrengths = communityLinkStrengths(edges, clusters, $('layout-mode').value === 'free' ? 1 : .25);
+  graph.setLinkStrength(gatheredStrengths());
   if ($('layout-mode').value === 'free') {
     graph.setClusterPositions(undefined); graph.setPointClusterStrength(undefined); communityModel = undefined;
     return;
@@ -409,6 +415,7 @@ function fitInitialView(settled = false) {
   scheduleCovers();
 }
 function fitVibeMatches() {
+  if (gather.saved.size) return;
   const key = phraseResult ? `${phraseSearch.revision}:${selection.matches.join(',')}` : undefined;
   if (key === vibeFitKey) return;
   vibeFitKey = key;
@@ -420,6 +427,70 @@ function fitVibeMatches() {
     if (bounds) graph.setZoomTransformByPointPositions(bounds, reducedMotion ? 0 : 450, undefined, 0.12, false);
     scheduleCovers();
   });
+}
+function gatheredScale(index) { return gather.saved.has(index) ? gatherScale : 1; }
+// Gathered albums are pinned; pausing their incident links keeps the
+// comparison grid still without changing the map's base physics.
+function gatheredStrengths() {
+  return gather.saved.size ? Float32Array.from(edgeStrengths, (strength, i) =>
+    gather.saved.has(edges[i].source) || gather.saved.has(edges[i].target) ? 0 : strength) : edgeStrengths;
+}
+function updateGatherControls() {
+  for (const id of ['gather', 'gather-map']) {
+    $(id).hidden = !phraseResult || (id === 'gather-map' && !gatherEnabled);
+    $(id).disabled = !selection.matches.length;
+    $(id).textContent = gatherEnabled ? 'Ungather' : 'Gather matches';
+    $(id).setAttribute('aria-pressed', String(gatherEnabled));
+  }
+}
+function updateGatherPhysics() {
+  if (!graphReady) return;
+  graph.setPinnedPoints([...new Set([...gather.saved.keys(),
+    ...selection.states.flatMap((state, i) => state.visible ? [] : [i])])]);
+  vibeGraph.anchors = gather.saved;
+  graph.setLinkStrength(gatheredStrengths());
+  coverGeometry = ''; updateCoverSizes(); graph.render(undefined, 0);
+}
+function animateGather() {
+  if (gatherFrame !== undefined || !graphReady) return;
+  const currentGeneration = generation;
+  const frame = now => {
+    gatherFrame = undefined;
+    if (!graphReady || generation !== currentGeneration) return;
+    const { positions, restored } = gather.frame(now);
+    vibeGraph.positions(positions);
+    if (restored.length) {
+      vibeGraph.clearVelocity(restored);
+      if (!gather.saved.size) { gatherScale = 1; fitVibeMatches(); }
+      updateGatherPhysics();
+    }
+    scheduleCovers(); scheduleLabels();
+    if (gather.transitions.size) gatherFrame = requestAnimationFrame(frame);
+  };
+  gatherFrame = requestAnimationFrame(frame);
+}
+function layoutGather() {
+  if (!graphReady || !gatherEnabled) return;
+  const indices = topMatches(data.albums, phraseResult.cosines, selection.matches, Infinity);
+  const { width, height } = $('graph').getBoundingClientRect();
+  const sizes = renderedSizes.map((size, i) => size / gatheredScale(i));
+  const grid = gatherGrid(indices, sizes, { center: graph.screenToSpacePosition([width / 2, height / 2]),
+    aspect: width / Math.max(1, height), spaceSize: layout.spaceSize, margin: layout.margin, gap: 16 * geometryScale });
+  gather.reconcile(indices, graph.getPointPositions(), grid.positions, performance.now(), reducedMotion ? 0 : 450);
+  for (const [index, saved] of gather.saved) filterPositions.saved.set(saved, index * 2);
+  gatherScale = grid.scale;
+  if (!indices.length) gatherEnabled = false;
+  updateGatherPhysics(); updateGatherControls(); animateGather();
+  const targets = new Float32Array(data.albums.length * 2).fill(NaN);
+  for (const [index, coordinates] of grid.positions) targets.set(coordinates, index * 2);
+  const bounds = matchBounds(indices, targets, renderedSizes);
+  if (bounds) graph.setZoomTransformByPointPositions(bounds, reducedMotion ? 0 : 450, undefined, 0.12, false);
+}
+function endGather() {
+  if (!gatherEnabled || !graphReady) return;
+  gatherEnabled = false;
+  gather.end(graph.getPointPositions(), performance.now(), reducedMotion ? 0 : 450);
+  updateGatherControls(); animateGather();
 }
 function coverElement(album, className) {
   const fallback = () => {
@@ -486,6 +557,9 @@ function detailText(album) {
 function showInfo(index, center = true) {
   if (index !== undefined && !visibleAlbum(index)) return;
   selected = index; scheduleCovers();
+  for (const button of $('phrase-results').querySelectorAll('button')) {
+    button.setAttribute('aria-pressed', String(Number(button.dataset.index) === index));
+  }
   $('details').hidden = index === undefined;
   document.querySelector('main').classList.toggle('has-selection', index !== undefined);
   clearCard($('info'));
@@ -615,13 +689,15 @@ function updateSearch() {
   if (graphReady) {
     if (selection.active) initialFitPending = false;
     const visible = data.albums.map((_, i) => visibleAlbum(i));
-    const positions = filterPositions.update(graph.getPointPositions(), visible);
+    const previousVisible = filterPositions.visible.slice();
+    const positions = filterPositions.update(gather.canonical(graph.getPointPositions()), visible);
     if (positions) {
       initialFitPending = false;
-      graph.setPinnedPoints(visible.flatMap((shown, i) => shown ? [] : [i]));
-      graph.setPointPositions(positions, true);
-      // Zero-duration absence updates preserve alpha/running state and never refit.
-      graph.render(undefined, 0);
+      const changes = new Map(visible.flatMap((shown, i) => Number(shown) !== previousVisible[i] ?
+        [[i, positions.slice(i * 2, i * 2 + 2)]] : []));
+      gather.forgetHidden(visible);
+      vibeGraph.positions(changes, { visibility: true });
+      updateGatherPhysics();
     }
     coverLoader?.dropHidden(new Set(data.albums.flatMap((album, i) =>
       album.cover && visible[i] ? [coverURL(album.cover)] : [])));
@@ -650,13 +726,15 @@ function updateSearch() {
       score.textContent = phraseResult.cosines[index].toFixed(3); button.append(score);
       button.setAttribute('aria-label', `${rank + 1}. ${album.albumartist} — ${album.album}, cosine similarity ${score.textContent}`);
       button.setAttribute('aria-pressed', String(selected === index));
+      button.dataset.index = index;
       row.append(button); $('phrase-results').append(row);
     }
     if (!$('phrase-results').children.length) $('phrase-status').textContent = 'No salient matches under the current filters.';
   }
   coverGeometry = '';
   updateHighlights(); updateLabelTracking(); scheduleCovers();
-  fitVibeMatches();
+  updateGatherControls();
+  if (gatherEnabled) layoutGather(); else fitVibeMatches();
 }
 async function load(exported, name) {
   try {
@@ -670,6 +748,8 @@ async function load(exported, name) {
     graphReady = false; dragging = zooming = false;
     cancelAnimationFrame(labelFrame); labelFrame = undefined; labelGroups = []; labelDefinitions = []; groupNames = [];
     labelElements.clear(); labelOffsets.clear(); labelObstacles = []; communityGeometry = ''; communityModel = undefined;
+    cancelAnimationFrame(gatherFrame); gatherFrame = undefined;
+    gather = new GatherPositions(); gatherEnabled = false; gatherScale = 1;
     trackedKey = hovered = undefined;
     $('map-labels').replaceChildren(); selection = { active: false, states: [], matches: [] };
     currentLens = lensScores = undefined; lensOptions = new Map(); $('lens').value = '';
@@ -678,7 +758,7 @@ async function load(exported, name) {
     atlasEntries = []; visibleCovers = [];
     coverGeometry = ''; appliedLayout = false; layoutGeometryKey = ''; vibeFitKey = undefined;
     geometryScale = 1; simulationAlpha = 1;
-    worker?.terminate(); worker = undefined; graph?.destroy(); graph = undefined;
+    worker?.terminate(); worker = undefined; vibeGraph?.destroy(); graph?.destroy(); graph = undefined;
     data = exported;
     filterPositions = new FilterPositions(data.albums.length);
     queryVectors = textVectors(data.albums);
@@ -731,10 +811,17 @@ async function load(exported, name) {
       },
       onDragStart: () => {
         initialFitPending = false; dragging = true; hover(undefined);
+        dragIndex = graph.store.draggingPointIndex;
+        if (gather.saved.has(dragIndex)) gather.drag(dragIndex);
         if (!paused) graph.start(simulationAlpha = dragAlpha(simulationAlpha));
       },
       onDragEnd: () => {
         dragging = false; scheduleCovers(); scheduleLabels();
+        if (gather.saved.has(dragIndex) && !gather.members.has(dragIndex)) {
+          gather.returnOne(dragIndex, graph.getPointPositions(), performance.now(), reducedMotion ? 0 : 450);
+          animateGather();
+        }
+        dragIndex = undefined;
         if (!paused) graph.start(simulationAlpha = dragAlpha(simulationAlpha, true));
       },
       onZoomStart: event => { if (event?.sourceEvent) initialFitPending = false; zooming = true; hover(undefined); },
@@ -796,7 +883,11 @@ async function load(exported, name) {
       graph.setLinks(Float32Array.from(edges.flatMap(e => [e.source, e.target])));
       // Sound similarity determines layout even when covers use metadata colors.
       graph.setPointClusters(clusters);
+      // Gather mode pauses links incident to gathered albums; keep the same
+      // community-weighted baseline that configureCommunities applies.
+      edgeStrengths = communityLinkStrengths(edges, clusters, $('layout-mode').value === 'free' ? 1 : .25);
       updateGroups(); updateSearch(); updateCoverSizes(); graph.render();
+      if (gather.saved.size) updateGatherPhysics();
       if (paused) graph.pause(); else graph.start(appliedLayout ? 0.3 : 1);
       $('graph').style.visibility = '';
       $('search').disabled = false; $('surprise').disabled = !selection.matches.length;
@@ -835,7 +926,7 @@ $('render-mode').addEventListener('change', () => { refreshCovers(); if (graphRe
 $('cover-zoom').addEventListener('input', () => {
   $('cover-zoom-value').value = Number($('cover-zoom').value).toFixed(2); refreshCovers();
 });
-window.addEventListener('resize', () => { scheduleCovers(); scheduleLabels(); });
+window.addEventListener('resize', () => { scheduleCovers(); scheduleLabels(); if (gatherEnabled) layoutGather(); });
 let dprQuery;
 function watchDpr() {
   dprQuery?.removeEventListener('change', watchDpr);
@@ -850,6 +941,14 @@ $('edge-view').addEventListener('change', updateHighlights);
 $('search').addEventListener('input', updateSearch);
 $('phrase').addEventListener('input', () => phraseSearch.set($('phrase').value));
 $('clear-phrase').addEventListener('click', () => { $('phrase').value = ''; phraseSearch.set(''); });
+for (const id of ['gather', 'gather-map']) $(id).addEventListener('click', () => {
+  if (!graphReady || !phraseResult) return;
+  if (gatherEnabled) endGather();
+  else {
+    setSettingsOpen(false); gatherEnabled = true; initialFitPending = false;
+    layoutGather();
+  }
+});
 for (const id of ['lens', 'vocal', 'include-unknown']) $(id).addEventListener('input', updateSearch);
 for (const id of ['dance-min', 'dance-max']) $(id).addEventListener('input', () => {
   if (Number($('dance-min').value) > Number($('dance-max').value)) $(id === 'dance-min' ? 'dance-max' : 'dance-min').value = $(id).value;

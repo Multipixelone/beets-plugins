@@ -146,6 +146,12 @@ export function patchCosmosAtlas(source, version, atlasPath) {
   // continue to use the larger visual footprint.
   replace('s = Math.max(s, i.getResolvedPointSize(p))', 's = Math.max(s, i.albumCollisionSizes?.[p] ?? i.getResolvedPointSize(p))');
   replace('l[p * 4] = i.getResolvedPointSize(p)', 'l[p * 4] = i.albumCollisionSizes?.[p] ?? i.getResolvedPointSize(p)');
+  // Only centroid reductions see the original anchors. Repulsion/collision and
+  // rendering still see the temporary comparison positions.
+  replace('this.calculateCentermassCommand.setBindings({\n      positionsTexture: i.previousPositionTexture,',
+    'this.calculateCentermassCommand.setBindings({\n      positionsTexture: i.albumAttractionPositions?.() ?? i.previousPositionTexture,');
+  replace('clusterTexture: this.clusterTexture,\n      positionsTexture: t.previousPositionTexture,',
+    'clusterTexture: this.clusterTexture,\n      positionsTexture: t.albumAttractionPositions?.() ?? t.previousPositionTexture,');
   return `import { createAtlasDataFromImageData as albumAtlas } from ${JSON.stringify(atlasPath)};\n` +
     patchAlbumQuads(patched);
 }

@@ -89,5 +89,10 @@ main { flex: 1; min-width: 0; position: relative; overflow: hidden; }
 #phrase-results .album-result .vibe-score { flex: 0 0 auto; font-size: 11px; color: var(--accent); font-variant-numeric: tabular-nums; }
 #phrase-results .album-result[aria-pressed=true] { background: #253142; }
 #clear-phrase { min-height: 44px; margin-bottom: 10px; }
+.phrase-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; }
+.phrase-actions button { min-height: 44px; margin: 0; padding: 8px 10px; font-size: 12px; }
+#gather-map { position: absolute; right: 24px; top: 20px; min-height: 44px; z-index: 2; }
+@media (min-width: 761px) { .has-selection #gather-map { right: 320px; } }
+@media (max-width: 760px) { #gather-map { top: 12px; right: 12px; } }
 #sound-controls { margin: 0 0 14px; padding: 0; border: 0; min-width: 0; }
 #sound-controls legend { display: none; }
