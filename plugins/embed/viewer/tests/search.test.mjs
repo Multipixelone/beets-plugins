@@ -16,7 +16,8 @@ test('cosines normalize decoded vectors, retain missing and rank ties by ID', ()
   assert.deepEqual(result.cosines, [1, 1, -1, null]);
   const state = selectionState(albums, { phraseScores: result.salience });
   assert.deepEqual(state.matches, [0, 1]);
-  assert.equal(state.states[3].opacity, 0);
+  assert.equal(state.states[3].opacity, 0.15);
+  assert.equal(state.states[3].visible, true);
   assert.ok(state.states[0].size > 1);
   assert.deepEqual(topMatches(albums, result.cosines, state.matches), [1, 0]);
   assert.deepEqual(topMatches(albums, result.cosines, state.matches, 1), [1]);

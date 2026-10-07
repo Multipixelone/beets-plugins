@@ -7,6 +7,8 @@ import { atlasLayout } from './atlas.mjs';
 import { DRAG_ALPHA, dragAlpha, communityLayout, communityLinkStrengths } from './physics.mjs';
 import { FilterPositions, bridgeLinks, edgeStyles } from './visibility.mjs';
 import { textVectors, phraseScores, topMatches, PhraseSearch } from './search.mjs';
+import { vibeLinkOpacity, matchBounds } from './vibe.mjs';
+import { VibeGraph } from './cosmos-vibe.mjs';
 
 const $ = id => document.getElementById(id);
 const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -21,9 +23,9 @@ let labelFootprints = new Float32Array();
 let communityGeometry = '', communityModel;
 let groupNames = [], groupIds = new Map(), lensOptions = new Map();
 let selection = { active: false, states: [], matches: [] }, lensScores, currentLens;
-let filterPositions;
+let filterPositions, vibeGraph, renderedSizes = [], layoutGeometryKey = '', vibeFitKey;
 function visibleAlbum(index) {
-  return Number.isInteger(index) && !!data?.albums[index] && (!selection.active || !!selection.states[index]?.match);
+  return Number.isInteger(index) && !!data?.albums[index] && selection.states[index]?.visible !== false;
 }
 let queryVectors = [], phraseResult;
 const phraseSearch = new PhraseSearch({
@@ -106,9 +108,10 @@ function updateColors() {
   if (!graphReady) return;
   graph.setPointColors(Float32Array.from(groupNames.flatMap((name, i) => {
     const rgba = i === selected ? [0.88, 0.94, 1, 1] : color(groupIds.get(name));
-    rgba[3] = selection.states[i]?.match === false ? 0 : selection.states[i]?.opacity ?? 1;
+    rgba[3] = selection.states[i]?.opacity ?? 1;
     return rgba;
   })));
+  graph.setConfigPartial({ albumVibeActive: selection.vibeActive });
 }
 function updateLabelTracking() {
   if (!graphReady) return;
@@ -210,15 +213,15 @@ function refreshCovers() {
   // Native viewport query and position readback at most twice a second.
   const { width, height } = $('graph').getBoundingClientRect();
   const visible = graph.findPointsInRect([[0, 0], [width, height]])
-    .filter(i => !selection.active || selection.states[i]?.match);
+    .filter(visibleAlbum);
   const sizes = albumImageSizes();
   visibleCovers = coverPriority(data.albums, coverCandidates(data.albums, visible, [], Infinity),
-    graph.getPointPositions(), sizes, graph.screenToSpacePosition([width / 2, height / 2]), [selected, hovered]);
+    graph.getPointPositions(), sizes, graph.screenToSpacePosition([width / 2, height / 2]), [selected, hovered, ...(selection.vibeActive ? selection.matches : [])]);
   const requests = visibleCovers.map(i => {
     const album = data.albums[i], key = coverURL(album.cover);
     const pixels = drawnCoverPixels(sizes[i], { dpr: coverDpr, zoom: graph.getZoomLevel(),
       scaleOnZoom: true });
-    const tier = pixels <= coverLimits.baseSize ? coverLimits.baseSize : mipTier(pixels, coverTiers.get(key) ?? coverLimits.baseSize);
+    const tier = (selection.vibeActive && !selection.states[i].match) || pixels <= coverLimits.baseSize ? coverLimits.baseSize : mipTier(pixels, coverTiers.get(key) ?? coverLimits.baseSize);
     coverTiers.set(key, tier);
     return { key, tier, baseURL: coverURL(album.cover_variants?.['32'] ?? album.cover),
       // Legacy large covers may include a matte absent from the map thumbnail.
@@ -226,7 +229,7 @@ function refreshCovers() {
       url: coverURL(album.cover_variants?.[String(tier)] ?? album.cover) };
   });
   coverLoader.dropHidden(new Set(data.albums.flatMap((album, i) =>
-    album.cover && (!selection.active || selection.states[i]?.match) ? [coverURL(album.cover)] : [])));
+    album.cover && visibleAlbum(i) ? [coverURL(album.cover)] : [])));
   coverLoader.setWanted(requests);
   scheduleAtlas();
 }
@@ -238,6 +241,8 @@ function updateCoverSizes() {
   // Artwork needs a readable baseline independent of the much smaller dot sizes.
   const artworkScale = Number($('art-size').value);
   const imageSizes = artworkSizes(data.albums, $('size').value, artworkScale);
+  const baseImageSizes = imageSizes.slice();
+  const collisionSizes = Float32Array.from(sizes, (size, i) => size * (selection.states[i]?.baseSize ?? 1) * geometryScale);
   sizes.forEach((size, i) => { sizes[i] = size * (selection.states[i]?.size ?? 1) * geometryScale; });
   imageSizes.forEach((size, i) => { imageSizes[i] = size * (selection.states[i]?.size ?? 1) * geometryScale; });
   const shapes = new Float32Array(sizes.length);
@@ -250,13 +255,18 @@ function updateCoverSizes() {
     shapes[index] = 1;
     // Cosmos draws squares at 80% of their point size. Selection stays rectangular.
     sizes[index] = (imageSizes[index] + (index === selected ? 8 : 6) * geometryScale) / 0.8;
+    collisionSizes[index] = (baseImageSizes[index] *
+      (selection.states[index]?.baseSize ?? 1) + (index === selected ? 8 : 6)) * geometryScale / 0.8;
   }
   for (let index = 0; index < sizes.length; index++) if (!visibleAlbum(index)) {
     sizes[index] = imageSizes[index] = 0; indices[index] = -1;
+    collisionSizes[index] = 0;
   }
   labelFootprints = Float32Array.from(sizes, (size, i) => shapes[i] === 1 ? size * .8 : size);
   graph.setPointImageIndices(indices);
   if (geometryChanged) {
+    renderedSizes = sizes;
+    vibeGraph.collisionSizes(collisionSizes);
     graph.setPointImageSizes(imageSizes); graph.setPointShapes(shapes); graph.setPointSizes(sizes);
     coverGeometry = geometry;
   }
@@ -270,7 +280,7 @@ function updateAtlas() {
   if (!graphReady || !coverLoader) return;
   if (dragging || zooming) { scheduleAtlas(); return; }
   const keys = [...new Set(data.albums.flatMap((album, i) => album.cover &&
-    (!selection.active || selection.states[i]?.match) ? [coverURL(album.cover)] : []))];
+    visibleAlbum(i) ? [coverURL(album.cover)] : []))];
   const wanted = coverLoader.wanted.filter(request => keys.includes(request.key));
   const entries = coverLoader.atlasEntries(keys, wanted, coverLimits.maxTextureSize);
   // One atomic atlas replacement; the previous sprite remains until decode completes.
@@ -329,9 +339,12 @@ function forcePrecision(step) {
   return Math.max(0, Math.min(6, Math.ceil(-Math.log10(step)) + (step < 1 ? 1 : 0)));
 }
 function configureLayout() {
+  const key = `${$('size').value}:${$('art-size').value}:${selection.states.map(state => state.baseSize).join(',')}`;
+  if (key === layoutGeometryKey) return;
+  layoutGeometryKey = key;
   const parameters = layoutParameters(data.albums, { ...layout,
     metric: $('size').value, artworkScale: Number($('art-size').value),
-    emphasis: selection.states.map(state => state.size) });
+    emphasis: selection.states.map(state => state.baseSize) });
   geometryScale = parameters.geometryScale;
   forceScales = { simulationRepulsion: parameters.repulsionScale,
     simulationLinkDistance: parameters.distanceScale, simulationCollisionPadding: parameters.distanceScale };
@@ -395,6 +408,19 @@ function fitInitialView(settled = false) {
   if (settled || paused) initialFitPending = false;
   scheduleCovers();
 }
+function fitVibeMatches() {
+  const key = phraseResult ? `${phraseSearch.revision}:${selection.matches.join(',')}` : undefined;
+  if (key === vibeFitKey) return;
+  vibeFitKey = key;
+  if (!key || !graphReady) return;
+  initialFitPending = false;
+  requestAnimationFrame(() => {
+    if (key !== vibeFitKey || !graphReady) return;
+    const bounds = matchBounds(selection.matches, graph.getPointPositions(), renderedSizes);
+    if (bounds) graph.setZoomTransformByPointPositions(bounds, reducedMotion ? 0 : 450, undefined, 0.12, false);
+    scheduleCovers();
+  });
+}
 function coverElement(album, className) {
   const fallback = () => {
     const element = document.createElement('span');
@@ -437,8 +463,10 @@ function updateHighlights() {
   const focus = hovered ?? selected, sizes = albumImageSizes();
   const pixels = (sizes[focus] ?? 56 * geometryScale) * graph.getZoomLevel();
   const style = edgeStyles(edges, { clusters, mode: $('edge-view').value, selected, hovered,
-    visible: query ? selection.states.map(state => state.match) : undefined,
+    visible: query ? selection.states.map(state => state.visible) : undefined,
     coverPixels: pixels, bridges: query ? undefined : bridgeEdges, strongest: query ? undefined : strongestEdges });
+  // Vibe search keeps every visible link but grades alpha by endpoint salience.
+  if (selection.vibeActive) edges.forEach((edge, i) => { style.colors[i * 4 + 3] *= vibeLinkOpacity(edge, selection.states); });
   graph.setLinkColors(style.colors); graph.setLinkWidths(style.widths);
   graph.setConfigPartial({ highlightedPointIndices: !query && style.focus !== undefined ? [...style.points] : undefined,
     highlightedLinkIndices: undefined,
@@ -602,11 +630,12 @@ function updateSearch() {
   }
   if (graphReady) configureLayout();
   const matches = selection.matches;
-  $('library-count').textContent = `${matches.length.toLocaleString()} of ${data.albums.length.toLocaleString()} albums shown`;
+  const shown = selection.visibleIndices;
+  $('library-count').textContent = `${shown.length.toLocaleString()} of ${data.albums.length.toLocaleString()} albums shown`;
   $('surprise').disabled = !matches.length;
-  $('matches').textContent = matches.length ? `${matches.length} matching albums${matches.length > 30 ? ' · showing the first 30' : ''}` : 'No albums found. Try another album or artist.';
+  $('matches').textContent = shown.length ? `${shown.length} matching albums${shown.length > 30 ? ' · showing the first 30' : ''}` : 'No albums found. Try another album or artist.';
   $('search-results').hidden = !search;
-  $('search-list').replaceChildren(...(search ? matches.slice(0, 30).map(albumButton) : []));
+  $('search-list').replaceChildren(...(search ? shown.slice(0, 30).map(albumButton) : []));
   $('phrase-results').replaceChildren();
   if (phraseResult) {
     $('phrase-status').textContent = 'Ranked by cosine; map emphasis is relative to this library.';
@@ -620,6 +649,7 @@ function updateSearch() {
   }
   coverGeometry = '';
   updateHighlights(); updateLabelTracking(); scheduleCovers();
+  fitVibeMatches();
 }
 async function load(exported, name) {
   try {
@@ -639,7 +669,7 @@ async function load(exported, name) {
     $('dance-min').value = 0; $('dance-max').value = 1; $('vocal').value = 'any'; $('include-unknown').checked = false;
     $('dance-min-value').value = '0.00'; $('dance-max-value').value = '1.00';
     atlasEntries = []; visibleCovers = [];
-    coverGeometry = ''; appliedLayout = false;
+    coverGeometry = ''; appliedLayout = false; layoutGeometryKey = ''; vibeFitKey = undefined;
     geometryScale = 1; simulationAlpha = 1;
     worker?.terminate(); worker = undefined; graph?.destroy(); graph = undefined;
     data = exported;
@@ -715,6 +745,7 @@ async function load(exported, name) {
     const currentGeneration = generation;
     await graph.ready;
     if (generation !== currentGeneration) return;
+    vibeGraph = new VibeGraph(graph);
     const gl = $('graph').querySelector('canvas').getContext('webgl2');
     const constrained = constrainedCovers({ width: window.innerWidth,
       coarsePointer: window.matchMedia('(pointer: coarse)').matches, deviceMemory: navigator.deviceMemory }) ||

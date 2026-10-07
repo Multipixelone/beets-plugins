@@ -1,4 +1,5 @@
 // Pure sound/lens/filter/label logic. Byte zero means missing, never score zero.
+import { vibeAppearance } from './vibe.mjs';
 export function expandSounds(data) {
   if (data.sound_encoding === undefined) return;
   if (data.sound_encoding !== 'catalog-pairs-v1' || !Array.isArray(data.essentia_fields) ||
@@ -52,7 +53,8 @@ export function soundGroup(album, mode) {
 export function selectionState(albums, { search = '', lens, scores, danceMin = 0, danceMax = 1,
                                        vocal = 'any', includeUnknown = false, phraseScores } = {}) {
   const needle = search.trim().toLocaleLowerCase();
-  const active = !!needle || !!lens || !!phraseScores || danceMin > 0 || danceMax < 1 || vocal !== 'any';
+  const filterActive = !!needle || !!lens || danceMin > 0 || danceMax < 1 || vocal !== 'any';
+  const vibeActive = !!phraseScores, active = filterActive || vibeActive;
   const states = albums.map((album, index) => {
     let match = `${album.album}\n${album.albumartist}`.toLocaleLowerCase().includes(needle);
     let strength = 1;
@@ -63,11 +65,6 @@ export function selectionState(albums, { search = '', lens, scores, danceMin = 0
       match &&= score != null && score >= floor;
       strength = score == null ? 0 : Math.max(0, Math.min(1, relative ? (score - 0.5) / 3.5 : score));
     }
-    if (phraseScores) {
-      const score = phraseScores[index];
-      match &&= score != null && score >= 0.5;
-      strength = Math.min(strength, score == null ? 0 : Math.max(0, Math.min(1, (score - 0.5) / 3.5)));
-    }
     if (danceMin > 0 || danceMax < 1) {
       const value = album.essentia?.danceable?.value;
       match &&= value == null ? includeUnknown : value >= danceMin && value <= danceMax;
@@ -76,10 +73,15 @@ export function selectionState(albums, { search = '', lens, scores, danceMin = 0
       const value = album.essentia?.voice_instrumental?.value;
       match &&= value == null ? includeUnknown : value === vocal;
     }
-    return { match, strength: match ? strength : 0, opacity: !active ? 1 : match ? 0.65 + 0.35 * strength : 0,
-             size: match && (lens || phraseScores) ? 1 + 0.75 * strength : 1 };
+    const visible = match, baseSize = match && lens ? 1 + 0.75 * strength : 1;
+    const appearance = vibeActive ? vibeAppearance(phraseScores[index]) : null;
+    return { visible, match: visible && (!vibeActive || appearance.match), strength: visible ? strength : 0,
+      opacity: !visible ? 0 : vibeActive ? appearance.opacity : !filterActive ? 1 : 0.65 + 0.35 * strength,
+      size: baseSize * (appearance?.size ?? 1), baseSize, brightness: visible ? appearance?.brightness ?? 1 : 1 };
   });
-  return { active, states, matches: states.flatMap((state, i) => state.match ? [i] : []) };
+  return { active, filterActive, vibeActive, states,
+    visibleIndices: states.flatMap((state, i) => state.visible ? [i] : []),
+    matches: states.flatMap((state, i) => state.match ? [i] : []) };
 }
 export function soundSections(album) {
   const sections = [];

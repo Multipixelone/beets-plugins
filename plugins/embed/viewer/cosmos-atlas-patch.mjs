@@ -123,8 +123,31 @@ export function patchCosmosAtlas(source, version, atlasPath) {
   if (start < 0 || end < 0 || source.indexOf('function Ai(a, e = 16384) {', start + 1) >= 0) {
     throw new Error('Expected exactly one Cosmos 3.4.2 atlas helper');
   }
+  let patched = source.slice(0, start) + 'function Ai(a, e = 16384) { return albumAtlas(a, e); }\n' + source.slice(end);
+  const replace = (before, after, count = 1) => {
+    if (patched.split(before).length - 1 !== count) throw new Error(`Unexpected Cosmos adapter site: ${before}`);
+    patched = patched.replaceAll(before, after);
+  };
+  // A cover's alpha must inherit the album alpha, without blending its RGB
+  // with the group frame. Brightness follows the same salience curve as alpha.
+  replace('float renderMode;\n} drawFragment;', 'float renderMode;\n  float albumVibeActive;\n} drawFragment;');
+  replace('#define renderMode drawFragment.renderMode', '#define renderMode drawFragment.renderMode\n#define albumVibeActive drawFragment.albumVibeActive');
+  replace('uniform float renderMode;\n#endif', 'uniform float renderMode;\nuniform float albumVibeActive;\n#endif');
+  replace('renderMode: "f32"\n        }', 'renderMode: "f32",\n          albumVibeActive: "f32"\n        }');
+  replace('renderMode: 0\n        }', 'renderMode: 0,\n          albumVibeActive: t.albumVibeActive ? 1 : 0\n        }');
+  replace('renderMode: 0\n    }, r =', 'renderMode: 0,\n      albumVibeActive: i.albumVibeActive ? 1 : 0\n    }, r =');
+  replace('float finalPointAlpha = max(finalShapeColor.a, finalImageColor.a);',
+    'float finalPointAlpha = max(finalShapeColor.a, finalImageColor.a * shapeColor.a);');
+  replace('mix(finalShapeColor.rgb, finalImageColor.rgb, finalImageColor.a),',
+    'clamp(mix(finalShapeColor.rgb, finalImageColor.rgb, finalImageColor.a) *\n' +
+    '          (albumVibeActive > 0.5 && shapeColor.a >= 0.6999 ?\n' +
+    '           1.05 + 0.2 * clamp((shapeColor.a - 0.7) / 0.3, 0.0, 1.0) : 1.0), 0.0, 1.0),');
+  // Only collision-grid consumers use the baseline sizes. Picking and drawing
+  // continue to use the larger visual footprint.
+  replace('s = Math.max(s, i.getResolvedPointSize(p))', 's = Math.max(s, i.albumCollisionSizes?.[p] ?? i.getResolvedPointSize(p))');
+  replace('l[p * 4] = i.getResolvedPointSize(p)', 'l[p * 4] = i.albumCollisionSizes?.[p] ?? i.getResolvedPointSize(p)');
   return `import { createAtlasDataFromImageData as albumAtlas } from ${JSON.stringify(atlasPath)};\n` +
-    patchAlbumQuads(source.slice(0, start) + 'function Ai(a, e = 16384) { return albumAtlas(a, e); }\n' + source.slice(end));
+    patchAlbumQuads(patched);
 }
 
 export const cosmosAtlasPlugin = {
