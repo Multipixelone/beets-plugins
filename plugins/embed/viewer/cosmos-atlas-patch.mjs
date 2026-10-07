@@ -19,6 +19,71 @@ function patchSection(source, startMarker, endMarker, patch) {
   return source.slice(0, start) + patch(source.slice(start, end)) + source.slice(end);
 }
 
+// Gather uses the existing once-per-tick gravity pass for a soft annular force.
+// Background albums keep their native springs, collisions and drag behavior;
+// no full position readback or second simulation is needed.
+function patchAlbumOrbit(source) {
+  source = patchSection(source, 'const Ht = `', '`;', shader => {
+    shader = replaceOnce(shader, 'uniform sampler2D positionsTexture;',
+      'uniform sampler2D positionsTexture;\nuniform sampler2D pinnedStatusTexture;');
+    shader = replaceOnce(shader, '  float alpha;\n} forceGravity;',
+      '  float alpha;\n  vec4 albumOrbitGeometry;\n  vec4 albumOrbitMotion;\n} forceGravity;');
+    shader = replaceOnce(shader, '#define alpha forceGravity.alpha',
+      '#define alpha forceGravity.alpha\n#define albumOrbitGeometry forceGravity.albumOrbitGeometry\n#define albumOrbitMotion forceGravity.albumOrbitMotion');
+    shader = replaceOnce(shader, 'uniform float alpha;\n#endif',
+      'uniform float alpha;\nuniform vec4 albumOrbitGeometry;\nuniform vec4 albumOrbitMotion;\n#endif');
+    return replaceOnce(shader, '  vec4 velocity = vec4(0.0);', `  vec4 velocity = vec4(0.0);
+  if (albumOrbitMotion.x > 0.0) {
+    // Hidden points retain NaN coordinates. Pinned matches and the album under
+    // the pointer are controlled elsewhere, so never add orbit forces to them.
+    float index = pointPosition.b;
+    if (any(isnan(pointPosition.rg)) || any(isinf(pointPosition.rg)) ||
+        texelFetch(pinnedStatusTexture, pointTexel, 0).r > 0.5 ||
+        index == albumOrbitMotion.w) {
+      fragColor = velocity;
+      return;
+    }
+    vec2 offset = pointPosition.rg - albumOrbitGeometry.xy;
+    float distance = length(offset);
+    float seed = fract(sin((index + 1.0) * 12.9898) * 43758.5453);
+    float angle = seed * 6.28318530718;
+    vec2 radial = distance > 0.001 ? offset / distance : vec2(cos(angle), sin(angle));
+    float innerRadius = albumOrbitGeometry.z;
+    float outerRadius = albumOrbitGeometry.w;
+    // Spread equilibrium radii over annular area instead of collapsing every
+    // background album onto the same circumference.
+    float target = sqrt(mix(innerRadius * innerRadius, outerRadius * outerRadius, 0.15 + 0.7 * seed));
+    float correction = (target - distance) * 0.12;
+    correction += max(0.0, innerRadius - distance);
+    correction -= max(0.0, distance - outerRadius);
+    float limit = max(2.0, outerRadius * 0.025);
+    float pull = clamp(correction * albumOrbitMotion.z, -limit, limit);
+    velocity.rg = radial * pull + vec2(-radial.y, radial.x) *
+      max(distance, innerRadius) * albumOrbitMotion.y;
+    fragColor = velocity;
+    return;
+  }`);
+  });
+  source = patchSection(source, 'class we extends V {', '\nfunction Xt(', gravity => {
+    gravity = replaceOnce(gravity, '          alpha: "f32"',
+      '          alpha: "f32",\n          albumOrbitGeometry: "vec4<f32>",\n          albumOrbitMotion: "vec4<f32>"');
+    gravity = replaceOnce(gravity, 'if (!t || !this.runCommand',
+      'if (!t || !t.pinnedStatusTexture || t.pinnedStatusTexture.destroyed || !this.runCommand');
+    gravity = replaceOnce(gravity, '    this.uniformStore.setUniforms({', `    const orbit = this.data.albumOrbit, now = performance.now();
+    const elapsed = Math.min(1 / 30, Math.max(0, (now - (this.albumOrbitTime ?? now - 1000 / 60)) / 1000));
+    this.albumOrbitTime = orbit ? now : undefined;
+    this.uniformStore.setUniforms({`);
+    gravity = replaceOnce(gravity, '        alpha: i.alpha', `        alpha: i.alpha,
+        albumOrbitGeometry: orbit ? [...orbit.center, orbit.innerRadius, orbit.outerRadius] : [0, 0, 0, 0],
+        albumOrbitMotion: orbit ? [1, orbit.speed * elapsed * 2, orbit.strength * elapsed * 60,
+          i.draggingPointIndex ?? -1] : [0, 0, 0, -1]`);
+    return replaceOnce(gravity, '      positionsTexture: t.previousPositionTexture',
+      '      positionsTexture: t.previousPositionTexture,\n      pinnedStatusTexture: t.pinnedStatusTexture');
+  });
+  return replaceOnce(source, '&& (t && ((c = this.points)',
+    '&& ((t || this.graph.albumOrbit) && ((c = this.points)');
+}
+
 // GL_POINTS silently clips cover growth to the device's ALIASED_POINT_SIZE_RANGE.
 // Use four-vertex instances for both drawing and picking. They
 // sample the same GPU positions, uniforms and atlas, so camera motion does not
@@ -153,7 +218,7 @@ export function patchCosmosAtlas(source, version, atlasPath) {
   replace('clusterTexture: this.clusterTexture,\n      positionsTexture: t.previousPositionTexture,',
     'clusterTexture: this.clusterTexture,\n      positionsTexture: t.albumAttractionPositions?.() ?? t.previousPositionTexture,');
   return `import { createAtlasDataFromImageData as albumAtlas } from ${JSON.stringify(atlasPath)};\n` +
-    patchAlbumQuads(patched);
+    patchAlbumQuads(patchAlbumOrbit(patched));
 }
 
 export const cosmosAtlasPlugin = {

@@ -9,7 +9,7 @@ import { FilterPositions, bridgeLinks, edgeStyles } from './visibility.mjs';
 import { textVectors, phraseScores, topMatches, PhraseSearch } from './search.mjs';
 import { vibeLinkOpacity, matchBounds } from './vibe.mjs';
 import { VibeGraph } from './cosmos-vibe.mjs';
-import { GatherPositions, gatherGrid } from './gather.mjs';
+import { GatherPositions, gatherRings } from './gather.mjs';
 
 const $ = id => document.getElementById(id);
 const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -214,7 +214,14 @@ function scheduleAtlas() {
 }
 function refreshCovers() {
   if (!graphReady || dragging || zooming) return;
+  const previous = coverActive;
   coverActive = showCovers($('render-mode').value, graph.getZoomLevel(), data.albums.length, Number($('cover-zoom').value), coverActive);
+  if (previous !== coverActive && gatherEnabled) {
+    updateCoverSizes();
+    // Auto may change rendering during zoom. Refit the rings to their new
+    // footprints without changing the camera and triggering another mode flip.
+    layoutGather(false);
+  }
   if (!coverActive) {
     visibleCovers = []; coverLoader?.setWanted([]); updateCoverSizes(); graph.render();
     $('cover-status').textContent = 'Colored dots'; return;
@@ -384,14 +391,15 @@ function configureCommunities() {
   edgeStrengths = communityLinkStrengths(edges, clusters, $('layout-mode').value === 'free' ? 1 : .25);
   graph.setLinkStrength(gatheredStrengths());
   if ($('layout-mode').value === 'free') {
-    graph.setClusterPositions(undefined); graph.setPointClusterStrength(undefined); communityModel = undefined;
+    graph.setClusterPositions(undefined);
+    graph.setPointClusterStrength(gatherEnabled ? new Float32Array(data.albums.length) : undefined); communityModel = undefined;
     return;
   }
   communityModel = communityLayout(data.albums, edges, clusters, { ...layout,
     metric: $('size').value, artworkScale: Number($('art-size').value), geometryScale,
     padding });
-  graph.setClusterPositions(Array.from(communityModel.centers));
-  graph.setPointClusterStrength(communityModel.strengths);
+  graph.setClusterPositions(gatherEnabled ? undefined : Array.from(communityModel.centers));
+  graph.setPointClusterStrength(gatherEnabled ? new Float32Array(data.albums.length) : communityModel.strengths);
   if (!appliedLayout) {
     filterPositions.seed(communityModel.positions);
     graph.setPointPositions(Float32Array.from(communityModel.positions,
@@ -428,16 +436,17 @@ function fitVibeMatches() {
   vibeFitKey = key;
   if (!key || !graphReady) return;
   initialFitPending = false;
+  const currentGeneration = generation;
   requestAnimationFrame(() => {
-    if (key !== vibeFitKey || !graphReady) return;
+    if (key !== vibeFitKey || !graphReady || generation !== currentGeneration || gather.saved.size || gatherEnabled) return;
     const bounds = matchBounds(selection.matches, graph.getPointPositions(), renderedSizes);
     if (bounds) graph.setZoomTransformByPointPositions(bounds, reducedMotion ? 0 : 450, undefined, 0.12, false);
     scheduleCovers();
   });
 }
 function gatheredScale(index) { return gather.saved.has(index) ? gatherScale : 1; }
-// Gathered albums are pinned; pausing their incident links keeps the
-// comparison grid still without changing the map's base physics.
+// Keep the orbit clear of springs that would pull background albums through
+// the pinned rings; background-to-background links and collisions stay live.
 function gatheredStrengths() {
   return gather.saved.size ? Float32Array.from(edgeStrengths, (strength, i) =>
     gather.saved.has(edges[i].source) || gather.saved.has(edges[i].target) ? 0 : strength) : edgeStrengths;
@@ -454,9 +463,17 @@ function updateGatherPhysics() {
   if (!graphReady) return;
   graph.setPinnedPoints([...new Set([...gather.saved.keys(),
     ...selection.states.flatMap((state, i) => state.visible ? [] : [i])])]);
-  vibeGraph.anchors = gather.saved;
+  vibeGraph.anchors = gatherEnabled ? new Map() : gather.saved;
+  const orbit = gatherEnabled ? gather.orbit : undefined;
+  const padding = Math.max(16 * geometryScale, ...renderedSizes) * .8;
+  vibeGraph.orbit(orbit ? { center: orbit.center, speed: reducedMotion ? 0 : .06,
+    innerRadius: orbit.radius + padding,
+    outerRadius: Math.max(orbit.radius + padding * 3, (layout.spaceSize - layout.margin * 2) * .46) } : null);
+  graph.setClusterPositions(gatherEnabled ? undefined : communityModel ? Array.from(communityModel.centers) : undefined);
+  graph.setPointClusterStrength(gatherEnabled ? new Float32Array(data.albums.length) : communityModel?.strengths);
   graph.setLinkStrength(gatheredStrengths());
   coverGeometry = ''; updateCoverSizes(); graph.render(undefined, 0);
+  if (gatherEnabled && !paused) graph.start(simulationAlpha = Math.max(.3, simulationAlpha));
 }
 function animateGather() {
   if (gatherFrame !== undefined || !graphReady) return;
@@ -464,7 +481,8 @@ function animateGather() {
   const frame = now => {
     gatherFrame = undefined;
     if (!graphReady || generation !== currentGeneration) return;
-    const { positions, restored } = gather.frame(now);
+    const rotating = gatherEnabled && !paused && !reducedMotion;
+    const { positions, restored } = gather.frame(now, { rotate: rotating, dragIndex });
     vibeGraph.positions(positions);
     if (restored.length) {
       vibeGraph.clearVelocity(restored);
@@ -472,32 +490,36 @@ function animateGather() {
       updateGatherPhysics();
     }
     scheduleCovers(); scheduleLabels();
-    if (gather.transitions.size) gatherFrame = requestAnimationFrame(frame);
+    if (gather.transitions.size || rotating) gatherFrame = requestAnimationFrame(frame);
   };
   gatherFrame = requestAnimationFrame(frame);
 }
-function layoutGather() {
+function layoutGather(fit = true) {
   if (!graphReady || !gatherEnabled) return;
   const indices = topMatches(data.albums, phraseResult.cosines, selection.matches, Infinity);
-  const { width, height } = $('graph').getBoundingClientRect();
   const sizes = renderedSizes.map((size, i) => size / gatheredScale(i));
-  const grid = gatherGrid(indices, sizes, { center: graph.screenToSpacePosition([width / 2, height / 2]),
-    aspect: width / Math.max(1, height), spaceSize: layout.spaceSize, margin: layout.margin, gap: 16 * geometryScale });
-  gather.reconcile(indices, graph.getPointPositions(), grid.positions, performance.now(), reducedMotion ? 0 : 450);
+  const rings = gatherRings(indices, sizes, { center: [layout.spaceSize / 2, layout.spaceSize / 2],
+    spaceSize: layout.spaceSize, margin: layout.margin, gap: 16 * geometryScale });
+  const now = performance.now();
+  gather.reconcile(indices, graph.getPointPositions(), rings.positions, now, reducedMotion ? 0 : 700);
+  gather.setOrbit(rings, now);
   for (const [index, saved] of gather.saved) filterPositions.saved.set(saved, index * 2);
-  gatherScale = grid.scale;
+  gatherScale = rings.scale;
   if (!indices.length) gatherEnabled = false;
   updateGatherPhysics(); updateGatherControls(); animateGather();
-  const targets = new Float32Array(data.albums.length * 2).fill(NaN);
-  for (const [index, coordinates] of grid.positions) targets.set(coordinates, index * 2);
-  const bounds = matchBounds(indices, targets, renderedSizes);
-  if (bounds) graph.setZoomTransformByPointPositions(bounds, reducedMotion ? 0 : 450, undefined, 0.12, false);
+  if (fit && indices.length) {
+    // Fit the entire rotating footprint and some of the surrounding current.
+    const radius = Math.max(rings.radius * 1.55, 180 * geometryScale);
+    const [cx, cy] = rings.center;
+    graph.setZoomTransformByPointPositions(new Float32Array([cx - radius, cy - radius, cx + radius, cy + radius]),
+      reducedMotion ? 0 : 700, undefined, 0.12, false);
+  }
 }
 function endGather() {
   if (!gatherEnabled || !graphReady) return;
   gatherEnabled = false;
   gather.end(graph.getPointPositions(), performance.now(), reducedMotion ? 0 : 450);
-  updateGatherControls(); animateGather();
+  updateGatherPhysics(); updateGatherControls(); animateGather();
 }
 function coverElement(album, className) {
   const fallback = () => {
@@ -832,8 +854,8 @@ async function load(exported, name) {
       },
       onDragEnd: () => {
         dragging = false; scheduleCovers(); scheduleLabels();
-        if (gather.saved.has(dragIndex) && !gather.members.has(dragIndex)) {
-          gather.returnOne(dragIndex, graph.getPointPositions(), performance.now(), reducedMotion ? 0 : 450);
+        if (gather.saved.has(dragIndex)) {
+          gather.release(dragIndex, graph.getPointPositions(), performance.now(), reducedMotion ? 0 : 450);
           animateGather();
         }
         dragIndex = undefined;
@@ -846,6 +868,7 @@ async function load(exported, name) {
       onSimulationTick: alpha => {
         simulationAlpha = alpha;
         if (dragging && !paused && alpha < DRAG_ALPHA) graph.start(simulationAlpha = DRAG_ALPHA);
+        else if (gatherEnabled && !paused && !reducedMotion && alpha < .3) graph.start(simulationAlpha = .3);
         scheduleCovers();
       },
       onSimulationEnd: () => { fitInitialView(true); scheduleCovers(); scheduleLabels(); } };
@@ -898,7 +921,7 @@ async function load(exported, name) {
       graph.setLinks(Float32Array.from(edges.flatMap(e => [e.source, e.target])));
       // Sound similarity determines layout even when covers use metadata colors.
       graph.setPointClusters(clusters);
-      // Gather mode pauses links incident to gathered albums; keep the same
+      // Gather mode suppresses links incident to gathered albums; keep the same
       // community-weighted baseline that configureCommunities applies.
       edgeStrengths = communityLinkStrengths(edges, clusters, $('layout-mode').value === 'free' ? 1 : .25);
       updateGroups(); updateSearch(); updateCoverSizes(); graph.render();
@@ -961,7 +984,7 @@ for (const id of ['gather', 'gather-map']) $(id).addEventListener('click', () =>
   if (!graphReady || !phraseResult) return;
   if (gatherEnabled) endGather();
   else {
-    setSettingsOpen(false); gatherEnabled = true; initialFitPending = false;
+    setSettingsOpen(false); gatherEnabled = true; initialFitPending = false; vibeFitKey = undefined;
     layoutGather();
   }
 });
@@ -987,7 +1010,7 @@ $('pause').addEventListener('click', () => {
   paused = !paused; initialFitPending = false; updatePauseButton();
   if (graphReady) {
     graph.setConfigPartial({ enableSimulation: !paused });
-    if (paused) graph.pause(); else graph.start(0.2);
+    if (paused) graph.pause(); else { graph.start(0.3); animateGather(); }
   }
 });
 $('clear').addEventListener('click', () => { showInfo(undefined); $('search').focus({ preventScroll: true }); });

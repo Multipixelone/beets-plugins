@@ -1,7 +1,8 @@
 // Small bridge to the hash-guarded Cosmos 3.4.2 adapter. Visual sizes must not
 // change collision forces when a phrase is applied or cleared.
-function writeTexels(texture, updates, side, velocity = false) {
-  if (!texture || texture.destroyed) return;
+function writeTexels(targets, updates, side, velocity = false) {
+  const textures = (Array.isArray(targets) ? targets : [targets]).filter(texture => texture && !texture.destroyed);
+  if (!textures.length) return;
   const sorted = [...updates].sort((a, b) => a[0] - b[0]);
   for (let offset = 0; offset < sorted.length;) {
     const start = offset, first = sorted[offset][0];
@@ -12,8 +13,8 @@ function writeTexels(texture, updates, side, velocity = false) {
       const [index, coordinates] = sorted[i];
       if (!velocity) data.set([coordinates[0], coordinates[1], index, 0], (i - start) * 4);
     }
-    texture.copyImageData({ data, bytesPerRow: data.byteLength, width: offset - start, height: 1,
-      x: first % side, y: Math.floor(first / side), mipLevel: 0 });
+    for (const texture of textures) texture.copyImageData({ data, bytesPerRow: data.byteLength,
+      width: offset - start, height: 1, x: first % side, y: Math.floor(first / side), mipLevel: 0 });
   }
 }
 
@@ -28,13 +29,21 @@ export class VibeGraph {
     this.graph.graph.albumCollisionSizes = Float32Array.from(sizes);
     this.graph.isForceCollisionReady = false;
   }
+  orbit(options) {
+    if (!options) { this.graph.graph.albumOrbit = undefined; return; }
+    const { center, innerRadius, outerRadius, speed = .06, strength = .08 } = options;
+    if (center?.length !== 2 || ![...center, innerRadius, outerRadius, speed, strength].every(Number.isFinite) ||
+        innerRadius < 0 || outerRadius <= innerRadius || speed < 0 || strength < 0) {
+      throw new Error('Invalid gather orbit geometry.');
+    }
+    this.graph.graph.albumOrbit = { center: Array.from(center), innerRadius, outerRadius, speed, strength };
+  }
   // No setPointPositions/render transition: those reset all velocities or pause
   // live physics. Only the supplied point texels change here.
   positions(updates, { visibility = false, resetVelocity = false } = {}) {
     if (!updates.size) return;
     const graph = this.graph, points = graph.points, side = graph.store.pointsTextureSize;
-    writeTexels(points.currentPositionTexture, updates, side);
-    writeTexels(points.previousPositionTexture, updates, side);
+    writeTexels([points.currentPositionTexture, points.previousPositionTexture], updates, side);
     if (resetVelocity || visibility) writeTexels(points.velocityTexture, updates, side, true);
     if (visibility) {
       for (const [index, coordinates] of updates) {
@@ -67,6 +76,7 @@ export class VibeGraph {
   }
   destroy() {
     this.anchorTexture?.destroy();
+    if (this.graph.graph) this.graph.graph.albumOrbit = undefined;
     if (this.graph.points) this.graph.points.albumAttractionPositions = undefined;
   }
 }

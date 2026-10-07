@@ -178,6 +178,14 @@ group. Friction is shown as damping (higher means quicker settling). Search
 highlights album/artist matches, hover or click shows album information, and
 dragged nodes settle back under physics. The viewer requires WebGL 2.
 
+After a phrase search, **Gather matches** arranges the salient albums in slowly
+rotating concentric rings at the map's center. Other albums remain draggable
+and flow around the outside, retaining their mutual links and collisions.
+Dragging a gathered album temporarily lifts it from its slot; releasing it
+returns it to the ring. **Pause physics** also pauses rotation, and reduced
+motion disables the automatic spin. **Ungather** restores the matches to their
+original map positions and resumes the usual community forces.
+
 ### Sound labels, lens and filters
 
 Schema v3 adds `sound`, `essentia` and text-track coverage per album, plus a

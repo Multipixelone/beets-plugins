@@ -1,22 +1,123 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { GatherPositions, gatherGrid } from '../gather.mjs';
+import { GatherPositions, gatherRings } from '../gather.mjs';
 import { FilterPositions } from '../visibility.mjs';
 import { VibeGraph } from '../cosmos-vibe.mjs';
 
 const initial = new Float32Array([10.25, 20.75, 30.5, 40.5, 50, 60]);
 const targets = new Map([[0, new Float32Array([100, 100])], [2, new Float32Array([200, 100])]]);
 const apply = (positions, updates) => { for (const [index, point] of updates) positions.set(point, index * 2); };
-test('comparison grid preserves score order, centers rows and fits map bounds', () => {
-  const grid = gatherGrid([2, 0, 1], [40, 80, 60], { center: [500, 500], aspect: 1, spaceSize: 1000, margin: 100 });
-  assert.deepEqual([...grid.positions.keys()], [2, 0, 1]);
-  assert.ok(grid.positions.get(2)[0] < grid.positions.get(0)[0]);
-  assert.ok(grid.positions.get(2)[1] > grid.positions.get(1)[1]);
-  assert.equal(grid.positions.get(1)[0], 500);
-  const tiny = gatherGrid([0, 1, 2], [1000, 1000, 1000], { center: [-100, 2000], aspect: .5, spaceSize: 1000, margin: 100 });
-  assert.ok(tiny.scale < 1);
-  for (const point of tiny.positions.values()) for (const value of point) assert.ok(value >= 100 && value <= 900);
-  assert.equal(gatherGrid([], [], {}).positions.size, 0);
+test('gather rings keep covers apart throughout rotation for small and large result sets', () => {
+  for (const count of [1, 2, 6, 7, 24, 177, 1000]) {
+    const indices = Array.from({ length: count }, (_, i) => i);
+    const sizes = indices.map(i => 32 + i % 6 * 7);
+    const layout = gatherRings(indices, sizes, { center: [500, 500], spaceSize: 1000, margin: 100 });
+    const gather = new GatherPositions(); gather.setOrbit(layout, 0);
+    assert.equal(layout.positions.size, count);
+    for (const angle of [0, .137, Math.PI / 4, 1.24, Math.PI, 5.9]) {
+      gather.angle = angle;
+      const points = indices.map(index => gather.orbitPosition(index));
+      for (let i = 0; i < count; i++) for (let j = i + 1; j < count; j++) {
+        const clearance = (sizes[i] + sizes[j]) * layout.scale / 2;
+        const dx = Math.abs(points[i][0] - points[j][0]), dy = Math.abs(points[i][1] - points[j][1]);
+        assert.ok(dx + .001 >= clearance || dy + .001 >= clearance,
+          `${count} matches overlap at angle ${angle}: ${i}, ${j}`);
+      }
+    }
+  }
+});
+test('gather rings preserve score rank from the center outward and reserve space around the cluster', () => {
+  const ranked = [8, 2, 0, 5, 1, 7, 6, 4, 3];
+  const layout = gatherRings(ranked, new Array(9).fill(80), { center: [500, 500], spaceSize: 1000, margin: 100 });
+  assert.deepEqual([...layout.positions.keys()], ranked);
+  assert.deepEqual([...layout.positions.get(ranked[0])], layout.center);
+  const radii = ranked.map(index => Math.hypot(...layout.positions.get(index).map((value, axis) => value - layout.center[axis])));
+  for (let i = 1; i < radii.length; i++) assert.ok(radii[i] + .001 >= radii[i - 1]);
+  assert.ok(radii[7] > radii[6], 'the seventh ring member starts a new ring');
+  assert.ok(layout.radius <= (1000 - 100 * 2) / 4);
+  const one = gatherRings([0], [80], { center: [500, 500], spaceSize: 1000, margin: 100 });
+  assert.deepEqual([...one.positions.get(0)], [500, 500]);
+});
+test('large covers remain within map bounds at every angle, including off-map requested centers', () => {
+  const indices = Array.from({ length: 177 }, (_, i) => i);
+  const layout = gatherRings(indices, new Array(indices.length).fill(1000), { center: [-100, 2000], spaceSize: 1000, margin: 100 });
+  assert.ok(layout.scale > 0 && layout.scale < 1);
+  const gather = new GatherPositions(); gather.setOrbit(layout, 0);
+  for (const angle of [0, .137, Math.PI / 4, 1.24, Math.PI, 5.9]) {
+    gather.angle = angle;
+    for (const index of indices) for (const value of gather.orbitPosition(index)) {
+      assert.ok(value - 500 * layout.scale >= 100 - .001);
+      assert.ok(value + 500 * layout.scale <= 900 + .001);
+    }
+  }
+  assert.deepEqual(gatherRings([], [], {}), { positions: new Map(), scale: 1, radius: 0, center: undefined });
+});
+
+function orbitGather(duration = 0) {
+  const gather = new GatherPositions(), positions = initial.slice();
+  const layout = gatherRings([0, 2], [40, 40, 40], { center: [500, 500], spaceSize: 1000, margin: 100 });
+  gather.reconcile([0, 2], positions, layout.positions, 0, duration);
+  gather.setOrbit(layout, 0);
+  apply(positions, gather.frame(0).positions);
+  return { gather, positions, layout };
+}
+test('gathered albums keep orbiting after arrival without changing the background or canonical positions', () => {
+  const { gather, positions, layout } = orbitGather(450);
+  apply(positions, gather.frame(450, { rotate: true }).positions);
+  assert.equal(gather.transitions.size, 0);
+  const settled = positions.slice();
+  apply(positions, gather.frame(500, { rotate: true }).positions);
+  assert.notDeepEqual([...positions.slice(0, 2)], [...settled.slice(0, 2)]);
+  assert.notDeepEqual([...positions.slice(4, 6)], [...settled.slice(4, 6)]);
+  assert.deepEqual([...positions.slice(2, 4)], [...initial.slice(2, 4)]);
+  for (const index of [0, 2]) {
+    const radius = Math.hypot(positions[index * 2] - layout.center[0], positions[index * 2 + 1] - layout.center[1]);
+    const originalRadius = Math.hypot(...layout.positions.get(index).map((value, axis) => value - layout.center[axis]));
+    assert.ok(Math.abs(radius - originalRadius) < .001);
+  }
+  assert.deepEqual([...gather.canonical(positions)], [...initial]);
+  positions.set([33, 44], 2);
+  gather.end(positions, 510);
+  apply(positions, gather.frame(960, { rotate: true }).positions);
+  assert.deepEqual([...positions], [10.25, 20.75, 33, 44, 50, 60]);
+  assert.equal(gather.saved.size, 0);
+  assert.equal(gather.frame(1000, { rotate: true }).positions.size, 0);
+});
+test('disabled rotation freezes slots for pause or reduced motion and resumes without catching up', () => {
+  const paused = orbitGather(), reference = orbitGather();
+  const settled = paused.positions.slice();
+  for (const now of [50, 5000, 100000]) apply(paused.positions, paused.gather.frame(now, { rotate: false }).positions);
+  assert.deepEqual([...paused.positions], [...settled]);
+  apply(paused.positions, paused.gather.frame(100016, { rotate: true }).positions);
+  apply(reference.positions, reference.gather.frame(16, { rotate: true }).positions);
+  assert.deepEqual([...paused.positions], [...reference.positions]);
+});
+test('returning from a background tab caps rotation elapsed time', () => {
+  const delayed = orbitGather(), reference = orbitGather();
+  apply(delayed.positions, delayed.gather.frame(1000000, { rotate: true }).positions);
+  apply(reference.positions, reference.gather.frame(50, { rotate: true }).positions);
+  assert.deepEqual([...delayed.positions], [...reference.positions]);
+});
+test('drag overrides a gathered slot and release rejoins its moving orbit', () => {
+  const { gather, positions } = orbitGather();
+  gather.drag(0); positions.set([100, 150], 0);
+  const dragged = gather.frame(50, { rotate: true, dragIndex: 0 });
+  assert.equal(dragged.positions.has(0), false);
+  apply(positions, dragged.positions);
+  assert.deepEqual([...positions.slice(0, 2)], [100, 150]);
+  assert.deepEqual([...gather.canonical(positions)], [...initial]);
+  gather.release(0, positions, 50, 100);
+  apply(positions, gather.frame(50, { rotate: true }).positions);
+  assert.deepEqual([...positions.slice(0, 2)], [100, 150]);
+  apply(positions, gather.frame(100, { rotate: true }).positions);
+  assert.notDeepEqual([...positions.slice(0, 2)], [100, 150]);
+  apply(positions, gather.frame(150, { rotate: true }).positions);
+  assert.deepEqual([...positions.slice(0, 2)], [...gather.orbitPosition(0)]);
+  assert.equal(gather.transitions.size, 0);
+  const rejoined = positions.slice(0, 2);
+  apply(positions, gather.frame(200, { rotate: true }).positions);
+  assert.notDeepEqual([...positions.slice(0, 2)], [...rejoined]);
+  assert.deepEqual([...positions.slice(2, 4)], [...initial.slice(2, 4)]);
 });
 test('ungather exactly restores matches, retains live background moves and never saves comparison coordinates', () => {
   const gather = new GatherPositions(), positions = initial.slice(), filters = new FilterPositions(3);
