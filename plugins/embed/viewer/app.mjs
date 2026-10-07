@@ -637,12 +637,19 @@ function updateSearch() {
   $('search-results').hidden = !search;
   $('search-list').replaceChildren(...(search ? shown.slice(0, 30).map(albumButton) : []));
   $('phrase-results').replaceChildren();
+  $('vibe-matches').hidden = !phraseResult;
+  $('vibe-count').textContent = phraseResult ? `${matches.length} salient · top ${Math.min(10, matches.length)}` : '';
   if (phraseResult) {
     $('phrase-status').textContent = 'Ranked by cosine; map emphasis is relative to this library.';
-    for (const index of topMatches(data.albums, phraseResult.cosines, matches)) {
-      const album = data.albums[index], row = document.createElement('li'), button = document.createElement('button');
-      button.textContent = `${album.albumartist} — ${album.album} (${phraseResult.cosines[index].toFixed(3)})`;
-      button.addEventListener('click', () => focusAlbum(index));
+    for (const [rank, index] of topMatches(data.albums, phraseResult.cosines, matches).entries()) {
+      const album = data.albums[index], row = document.createElement('li'), button = albumButton(index);
+      button.querySelector('.result-arrow').remove();
+      const number = document.createElement('span'); number.className = 'vibe-rank'; number.textContent = rank + 1;
+      number.setAttribute('aria-hidden', 'true'); button.prepend(number);
+      const score = document.createElement('span'); score.className = 'vibe-score';
+      score.textContent = phraseResult.cosines[index].toFixed(3); button.append(score);
+      button.setAttribute('aria-label', `${rank + 1}. ${album.albumartist} — ${album.album}, cosine similarity ${score.textContent}`);
+      button.setAttribute('aria-pressed', String(selected === index));
       row.append(button); $('phrase-results').append(row);
     }
     if (!$('phrase-results').children.length) $('phrase-status').textContent = 'No salient matches under the current filters.';

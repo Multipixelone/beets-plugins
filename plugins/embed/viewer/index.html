@@ -24,11 +24,15 @@
       <label>Size albums by<select id="size"><option value="uniform">Equal size</option><option value="summed_plays" selected>Total plays</option><option value="mean_plays">Average plays</option><option value="track_count">Track count</option></select></label>
         <label>Color albums by<select id="group"><option value="cluster">Sound community</option><option value="genre">Genre</option><option value="albumartist">Album artist</option><option value="year">Year</option><option value="decade">Decade</option><option value="style">Top style</option><option value="mood">Top mood</option><option value="flavor">Top flavor word</option></select></label>
     </div></details>
-<details class="control-section" open><summary>Describe a sound</summary><div class="section-content">
+<details id="phrase-section" class="control-section" open><summary>Describe a sound</summary><div class="section-content">
   <label>Describe a sound<input id="phrase" type="search" maxlength="240" placeholder="Rainy night jazz piano…" disabled></label>
   <button id="clear-phrase">Clear phrase</button>
+  <p class="muted">Strong matches grow and brighten; other albums fade. Your filters still hide excluded albums.</p>
   <p id="phrase-status" class="muted" role="status" aria-live="polite"></p>
-  <ol id="phrase-results" aria-label="Top matching albums"></ol>
+  <details id="vibe-matches" hidden open><summary>Top matches <span id="vibe-count" class="count"></span></summary>
+    <p class="muted">Cosine similarity · higher scores are closer to your phrase.</p>
+    <ol id="phrase-results" aria-label="Top matching albums"></ol>
+  </details>
 </div></details>
 <details class="control-section"><summary>Sound lens and filters</summary><div class="section-content">
   <fieldset id="sound-controls" disabled><legend>Sound lens and filters</legend>
