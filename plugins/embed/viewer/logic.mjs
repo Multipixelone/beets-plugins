@@ -296,23 +296,28 @@ export function layoutParameters(albums, { spaceSize = 4096, margin = spaceSize 
     const diameter = albums[i].cover ? (images[i] * strength + 8) / 0.8 : dots[i] * strength;
     area += diameter * diameter; diameterSum += diameter;
   }
-  // Conservative square footprints leave half the seeded interior free for
-  // movement and irregular community packing. Reduce padding before artwork.
-  const collisionAreaLimit = 0.5 * (spaceSize - 2 * margin) ** 2;
+  // Reserve 45% of the seeded interior for irregular community packing. The
+  // remaining 55% supplies local cover padding without raising global repulsion.
+  // Reduce padding before artwork when a library reaches this budget.
+  const collisionAreaLimit = 0.55 * (spaceSize - 2 * margin) ** 2;
   const geometryScale = area ? Math.min(1, Math.sqrt(collisionAreaLimit / area)) : 1;
   area *= geometryScale ** 2; diameterSum *= geometryScale;
   const remaining = Math.max(0, collisionAreaLimit - area);
-  const padding = albums.length ? Math.min(40, remaining /
-    (2 * (Math.sqrt(diameterSum ** 2 + albums.length * remaining) + diameterSum))) : 40;
+  const padding = albums.length ? Math.min(12, remaining /
+    (2 * (Math.sqrt(diameterSum ** 2 + albums.length * remaining) + diameterSum))) : 12;
   const distanceScale = Math.min(1, spacing / 112);
-  // Many-body repulsion sums over the library; gravity/cluster attraction
-  // depend on distance. Normalize count and squared distance, not attraction.
-  const repulsionScale = Math.min(1, 400 / Math.max(1, albums.length)) * distanceScale ** 2;
+  // Repulsion scales with density, not count alone: doubling the simulation
+  // world supplies four times the area. Omitting that area factor suppressed
+  // the force fourfold in the 8192-unit world used by larger libraries.
+  const worldAreaScale = (spaceSize / 4096) ** 2;
+  const repulsionScale = Math.min(1, 400 * worldAreaScale / Math.max(1, albums.length)) * distanceScale ** 2;
   return { geometryScale, distanceScale, repulsionScale, collisionAreaLimit,
     collisionArea: area + 4 * padding * diameterSum + 4 * albums.length * padding ** 2,
-    forces: { simulationRepulsion: 40 * repulsionScale, simulationLinkSpring: 0.05,
+    // A little additional repulsion gives the cover padding room to resolve
+    // local contacts without a large increase in the whole library's extent.
+    forces: { simulationRepulsion: 44 * repulsionScale, simulationLinkSpring: 0.05,
       simulationLinkDistance: 150 * distanceScale, simulationCollisionPadding: padding,
-      simulationGravity: 0.008, simulationCluster: 0.001, simulationFriction: 0.5 } };
+      simulationGravity: 0.004, simulationCluster: 0.006, simulationFriction: 0.5 } };
 }
 
 export function groups(albums, mode, clusters) {

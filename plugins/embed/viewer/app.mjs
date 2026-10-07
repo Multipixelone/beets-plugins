@@ -4,8 +4,8 @@ import { validateExport, groups, pointSizes, artworkSizes, seedLayout, layoutSpa
 import { CoverLoader, decodeCover, coverPolicy, drawnCoverPixels, constrainedCovers, coverPriority, mipTier, decodeOverview } from './covers.mjs';
 import { decodeColumn, selectionState, soundSections, groupLabels, placeLabels } from './sound.mjs';
 import { atlasLayout } from './atlas.mjs';
-import { DRAG_ALPHA, dragAlpha } from './physics.mjs';
-import { FilterPositions, visibleLinks } from './visibility.mjs';
+import { DRAG_ALPHA, dragAlpha, communityLayout, communityLinkStrengths } from './physics.mjs';
+import { FilterPositions, bridgeLinks, edgeStyles } from './visibility.mjs';
 import { textVectors, phraseScores, topMatches, PhraseSearch } from './search.mjs';
 
 const $ = id => document.getElementById(id);
@@ -15,7 +15,10 @@ let coverLoader, coverTimer, atlasTimer, visibleCovers = [], atlasEntries = [], 
 let dragging = false, zooming = false, graphReady = false;
 let simulationAlpha = 1;
 let coverLimits, coverDpr = 1, overviewController, coverTiers = new Map();
-let labelTimer, labelGroups = [], labelDefinitions = [], trackedKey, hovered;
+let labelFrame, labelGroups = [], labelDefinitions = [], trackedKey, hovered;
+let labelElements = new Map(), labelOffsets = new Map(), labelObstacles = [];
+let labelFootprints = new Float32Array();
+let communityGeometry = '', communityModel;
 let groupNames = [], groupIds = new Map(), lensOptions = new Map();
 let selection = { active: false, states: [], matches: [] }, lensScores, currentLens;
 let filterPositions;
@@ -52,25 +55,51 @@ const phraseSearch = new PhraseSearch({
   }
 });
 function scheduleLabels() {
-  if (!labelTimer) labelTimer = setTimeout(() => { labelTimer = undefined; refreshLabels(); }, 250);
+  if (!labelFrame) labelFrame = requestAnimationFrame(() => { labelFrame = undefined; refreshLabels(); });
 }
 function refreshLabels() {
-  $('map-labels').replaceChildren();
-  if (!graphReady || !$('show-labels').checked || dragging) return;
+  if (!graphReady) return;
+  $('map-labels').hidden = !$('show-labels').checked;
+  if (!$('show-labels').checked) return;
   const positions = graph.getTrackedPointPositionsMap();
+  const { width, height } = $('graph').getBoundingClientRect();
   const candidates = [];
   for (const group of labelGroups) {
-    if (selection.active && !group.indices.some(i => selection.states[i]?.match)) continue;
     const points = group.tracked.map(i => positions.get(i)).filter(Boolean);
     if (!points.length) continue;
     const center = points.reduce((sum, point) => [sum[0] + point[0] / points.length, sum[1] + point[1] / points.length], [0, 0]);
     const [x, y] = graph.spaceToScreenPosition(center);
-    candidates.push({ ...group, x, y });
+    const element = labelElements.get(group.name);
+    const anchors = [], previousAnchor = labelOffsets.get(group.name)?.anchorId;
+    for (const index of group.representatives ?? group.tracked) {
+      const point = positions.get(index);
+      if (!point) continue;
+      const [ax, ay] = graph.spaceToScreenPosition(point);
+      if (ax < -120 || ay < -120 || ax > width + 120 || ay > height + 120) continue;
+      if (anchors.length < 8 || index === previousAnchor) anchors.push({ id: index, x: ax, y: ay });
+    }
+    candidates.push({ ...group, x, y, anchors, width: element.offsetWidth, height: element.offsetHeight });
   }
-  const { width, height } = $('graph').getBoundingClientRect();
-  for (const label of placeLabels(candidates, width, height, graph.getZoomLevel())) {
-    const element = document.createElement('span'); element.className = 'map-label'; element.textContent = label.text;
-    element.style.left = `${label.x}px`; element.style.top = `${label.y}px`; $('map-labels').append(element);
+  const zoom = graph.getZoomLevel();
+  const obstacles = labelObstacles.map(index => {
+    const point = positions.get(index);
+    if (!point) return null;
+    const [x, y] = graph.spaceToScreenPosition(point);
+    const half = labelFootprints[index] * zoom / 2;
+    if (x + half < 0 || y + half < 0 || x - half > width || y - half > height) return null;
+    return { left: x - half, right: x + half, top: y - half, bottom: y + half };
+  }).filter(Boolean);
+  // Reserve the search and navigation areas as well as artwork.
+  obstacles.push({ left: 0, right: Math.min(410, width), top: 0, bottom: 76 },
+    { left: 0, right: width, top: height - 88, bottom: height });
+  const placed = placeLabels(candidates, width, height, zoom, zoom < .4 ? 12 : 24,
+    { obstacles, previous: labelOffsets, minZoom: 0 });
+  const shown = new Set(placed.map(label => label.name));
+  for (const [name, element] of labelElements) element.style.visibility = shown.has(name) ? 'visible' : 'hidden';
+  for (const label of placed) {
+    const element = labelElements.get(label.name);
+    element.style.transform = `translate(${label.x - label.width / 2}px, ${label.y - label.height / 2}px)`;
+    labelOffsets.set(label.name, { anchorId: label.anchorId, dx: label.dx, dy: label.dy });
   }
 }
 function updateColors() {
@@ -83,15 +112,41 @@ function updateColors() {
 }
 function updateLabelTracking() {
   if (!graphReady) return;
-  const definitions = selection.active ? groupLabels(data.albums, groupNames, visibleAlbum) : labelDefinitions;
-  labelGroups = definitions.filter(group => !selection.active || group.indices.some(i => selection.states[i]?.match))
-    .slice(0, 96).map(group => ({ ...group,
-      tracked: group.indices.filter(i => !selection.active || selection.states[i]?.match).slice(0, 4) }));
-  const indices = labelGroups.flatMap(group => group.tracked), key = indices.join(',');
-  if (key !== trackedKey) { trackedKey = key; graph.trackPointPositionsByIndices(indices); }
+  const definitions = selection.active ? groupLabels(data.albums, groupNames, visibleAlbum, { edges }) : labelDefinitions;
+  labelGroups = definitions.filter(group => group.indices.length > 1).slice(0, 96);
+  // Track obstacles too: pan/zoom must not uncover untracked covers underneath
+  // a label. The readback is shared once per rendered frame and cached at rest.
+  labelObstacles = data.albums.flatMap((_, index) => visibleAlbum(index) ? [index] : []);
+  const names = new Set(labelGroups.map(group => group.name));
+  for (const [name, element] of labelElements) if (!names.has(name)) { element.remove(); labelElements.delete(name); labelOffsets.delete(name); }
+  for (const group of labelGroups) {
+    let element = labelElements.get(group.name);
+    if (!element) {
+      element = document.createElement('button'); element.className = 'map-label';
+      element.addEventListener('click', () => focusCommunity(element.dataset.group));
+      $('map-labels').append(element); labelElements.set(group.name, element);
+    }
+    element.dataset.group = group.name;
+    element.textContent = group.text.replace(/^Cluster /, 'Community ');
+    element.title = `${group.description} · ${group.indices.length} albums. Click to explore.`;
+    element.setAttribute('aria-label', element.title);
+  }
+  trackLabels();
   scheduleLabels();
 }
-let initialFitPending = false, strongestEdges = new Set();
+function trackLabels() {
+  const indices = $('show-labels').checked ? labelObstacles : [], key = indices.join(',');
+  if (key !== trackedKey) { trackedKey = key; graph.trackPointPositionsByIndices(indices); }
+}
+function focusCommunity(name) {
+  const group = labelGroups.find(group => group.name === name);
+  if (!group || !graphReady) return;
+  initialFitPending = false;
+  const positions = graph.getPointPositions();
+  graph.setZoomTransformByPointPositions(Float32Array.from(group.indices.flatMap(i => [positions[2 * i], positions[2 * i + 1]])),
+    reducedMotion ? 0 : 450, 1, .16, false);
+}
+let initialFitPending = false, strongestEdges = new Set(), bridgeEdges = new Set(), edgeFrame;
 let coverGeometry = '', appliedLayout = false;
 let layout = { spaceSize: 4096, margin: 409.6, spacing: 112 }, geometryScale = 1;
 const coverURL = name => new URL(`covers/${name}`, location.href).href;
@@ -162,10 +217,12 @@ function refreshCovers() {
   const requests = visibleCovers.map(i => {
     const album = data.albums[i], key = coverURL(album.cover);
     const pixels = drawnCoverPixels(sizes[i], { dpr: coverDpr, zoom: graph.getZoomLevel(),
-      scaleOnZoom: true, maxPointPixels: gl.getParameter(gl.ALIASED_POINT_SIZE_RANGE)[1] });
+      scaleOnZoom: true });
     const tier = pixels <= coverLimits.baseSize ? coverLimits.baseSize : mipTier(pixels, coverTiers.get(key) ?? coverLimits.baseSize);
     coverTiers.set(key, tier);
     return { key, tier, baseURL: coverURL(album.cover_variants?.['32'] ?? album.cover),
+      // Legacy large covers may include a matte absent from the map thumbnail.
+      // Only declared map mips are safe to swap without changing composition.
       url: coverURL(album.cover_variants?.[String(tier)] ?? album.cover) };
   });
   coverLoader.dropHidden(new Set(data.albums.flatMap((album, i) =>
@@ -197,6 +254,7 @@ function updateCoverSizes() {
   for (let index = 0; index < sizes.length; index++) if (!visibleAlbum(index)) {
     sizes[index] = imageSizes[index] = 0; indices[index] = -1;
   }
+  labelFootprints = Float32Array.from(sizes, (size, i) => shapes[i] === 1 ? size * .8 : size);
   graph.setPointImageIndices(indices);
   if (geometryChanged) {
     graph.setPointImageSizes(imageSizes); graph.setPointShapes(shapes); graph.setPointSizes(sizes);
@@ -263,6 +321,7 @@ for (const [name, key, min, max, step] of forceSpecs) {
     forceOverrides.set(key, Number(input.value) / (forceScales[key] ?? 1));
     if (!graph) return;
     graph.setConfigPartial({ [key]: key === 'simulationFriction' ? 1 - Number(input.value) : Number(input.value) });
+    if (key === 'simulationCollisionPadding') configureCommunities();
     reheat();
   });
 }
@@ -289,6 +348,29 @@ function configureLayout() {
     forces[key] = key === 'simulationFriction' ? 1 - Number(input.value) : Number(input.value);
   }
   graph.setConfigPartial(forces);
+  configureCommunities();
+}
+function configureCommunities() {
+  if (!clusters.length) return;
+  const padding = Number(forceInputs.get('simulationCollisionPadding').value);
+  const key = `${generation}:${revision}:${$('layout-mode').value}:${$('size').value}:${$('art-size').value}:${geometryScale}:${padding}`;
+  if (key === communityGeometry) return;
+  communityGeometry = key;
+  graph.setLinkStrength(communityLinkStrengths(edges, clusters, $('layout-mode').value === 'free' ? 1 : .25));
+  if ($('layout-mode').value === 'free') {
+    graph.setClusterPositions(undefined); graph.setPointClusterStrength(undefined); communityModel = undefined;
+    return;
+  }
+  communityModel = communityLayout(data.albums, edges, clusters, { ...layout,
+    metric: $('size').value, artworkScale: Number($('art-size').value), geometryScale,
+    padding });
+  graph.setClusterPositions(Array.from(communityModel.centers));
+  graph.setPointClusterStrength(communityModel.strengths);
+  if (!appliedLayout) {
+    filterPositions.seed(communityModel.positions);
+    graph.setPointPositions(Float32Array.from(communityModel.positions,
+      (coordinate, i) => visibleAlbum(Math.floor(i / 2)) ? coordinate : NaN));
+  }
 }
 function status(message, error = false) {
   $('status').textContent = message; $('status').classList.toggle('error', error);
@@ -306,10 +388,10 @@ function fitInitialView(settled = false) {
   const counts = new Map();
   for (const cluster of clusters) counts.set(cluster, (counts.get(cluster) || 0) + 1);
   const largest = [...counts].sort((a, b) => b[1] - a[1])[0]?.[0];
-  const positions = graph.getPointPositions();
-  // Open on a populated community; Fit view remains the whole-library overview.
-  const initial = positions.filter((coordinate, i) => clusters[Math.floor(i / 2)] === largest);
-  graph.setZoomTransformByPointPositions(Float32Array.from(initial), duration, scale, 0.08, false);
+  const indices = clusters.flatMap((cluster, i) => cluster === largest ? [i] : []);
+  // Begin where covers are useful; Fit view and the community labels provide
+  // the overview and drill-down without changing any album coordinates.
+  graph.fitViewByPointIndices(indices, duration, .12 * scale, false);
   if (settled || paused) initialFitPending = false;
   scheduleCovers();
 }
@@ -352,26 +434,21 @@ function focusAlbum(index) {
 function updateHighlights() {
   if (!graphReady) return;
   const query = selection.active;
-  const matching = new Set(query ? selection.matches : selected === undefined ? [] : [selected]);
-  const links = edges.flatMap((edge, i) => matching.has(edge.source) || matching.has(edge.target) ? [i] : []);
-  const points = new Set(matching);
-  if (!query) for (const i of links) { points.add(edges[i].source); points.add(edges[i].target); }
-  const focus = query || selected !== undefined;
-  const emphasized = new Set(links);
-  const mode = $('edge-view').value;
-  const visibleEdges = query ? visibleLinks(edges, selection.states.map(state => state.match), mode, selected) : undefined;
-  graph.setLinkColors(Float32Array.from(edges.flatMap((edge, i) => {
-    if (query) return visibleEdges.has(i) ? [0.39, 0.48, 0.60, 0.4] : [0, 0, 0, 0];
-    if (focus) return emphasized.has(i) ? [0.64, 0.79, 0.94, 1] : [0, 0, 0, 0];
-    return mode === 'all' || (mode === 'strongest' && strongestEdges.has(i)) ? [0.39, 0.48, 0.60, 0.4] : [0, 0, 0, 0];
-  })));
-  graph.setLinkWidths(Float32Array.from(edges, (_, i) => query ? visibleEdges.has(i) ? 1.1 : 0 : focus ? 1.65 : 1.1));
-  graph.setConfigPartial({ highlightedPointIndices: !query && focus ? [...points] : undefined,
-    highlightedLinkIndices: !query && selected !== undefined ? links : undefined,
-    linkOpacity: 1, linkDefaultWidth: !query && focus ? 1.65 : 1.1,
+  const focus = hovered ?? selected, sizes = albumImageSizes();
+  const pixels = (sizes[focus] ?? 56 * geometryScale) * graph.getZoomLevel();
+  const style = edgeStyles(edges, { clusters, mode: $('edge-view').value, selected, hovered,
+    visible: query ? selection.states.map(state => state.match) : undefined,
+    coverPixels: pixels, bridges: query ? undefined : bridgeEdges, strongest: query ? undefined : strongestEdges });
+  graph.setLinkColors(style.colors); graph.setLinkWidths(style.widths);
+  graph.setConfigPartial({ highlightedPointIndices: !query && style.focus !== undefined ? [...style.points] : undefined,
+    highlightedLinkIndices: undefined,
+    linkOpacity: 1, linkDefaultWidth: .7,
     outlinedPointIndices: undefined, focusedPointIndex: undefined });
   updateColors(); updateCoverSizes();
   graph.render();
+}
+function scheduleEdges() {
+  if (!edgeFrame) edgeFrame = requestAnimationFrame(() => { edgeFrame = undefined; updateHighlights(); });
 }
 function detailText(album) {
   return `${album.album}\n${album.albumartist}\n${album.genre || 'Unknown genre'} · ${album.year || 'Unknown year'}\n` +
@@ -417,9 +494,10 @@ function showInfo(index, center = true) {
 function hover(index, event) {
   if (zooming || dragging || !visibleAlbum(index)) index = undefined;
   $('tooltip').hidden = index === undefined;
-  if (index === undefined) { hovered = undefined; clearCard($('tooltip')); return; }
+  if (index === undefined) { if (hovered !== undefined) scheduleEdges(); hovered = undefined; clearCard($('tooltip')); return; }
   if (hovered !== index) {
     hovered = index; clearCard($('tooltip'));
+    scheduleEdges();
     appendCover($('tooltip'), data.albums[index], 80);
     const summary = document.createElement('div'); summary.style.whiteSpace = 'pre-line';
     summary.textContent = detailText(data.albums[index]); $('tooltip').append(summary);
@@ -481,7 +559,7 @@ function updateGroups() {
   const ids = new Map(unique.map((name, i) => [name, i]));
   groupNames = names; groupIds = ids;
   updateColors();
-  labelDefinitions = groupLabels(data.albums, names);
+  labelDefinitions = groupLabels(data.albums, names, () => true, { edges });
   // Bounded GPU readback, refreshed by cosmos alongside point rendering.
   updateLabelTracking();
   $('legend').replaceChildren();
@@ -553,7 +631,8 @@ async function load(exported, name) {
     coverLoader?.destroy(); clearTimeout(coverTimer); clearTimeout(atlasTimer);
     coverTimer = atlasTimer = undefined; coverLoader = coverLimits = undefined;
     graphReady = false; dragging = zooming = false;
-    clearTimeout(labelTimer); labelTimer = undefined; labelGroups = []; labelDefinitions = []; groupNames = [];
+    cancelAnimationFrame(labelFrame); labelFrame = undefined; labelGroups = []; labelDefinitions = []; groupNames = [];
+    labelElements.clear(); labelOffsets.clear(); labelObstacles = []; communityGeometry = ''; communityModel = undefined;
     trackedKey = hovered = undefined;
     $('map-labels').replaceChildren(); selection = { active: false, states: [], matches: [] };
     currentLens = lensScores = undefined; lensOptions = new Map(); $('lens').value = '';
@@ -599,11 +678,11 @@ async function load(exported, name) {
       pixelRatio: window.devicePixelRatio || 1,
       enableSimulation: !paused, enableSimulationDuringZoom: false,
       transitionDuration: 0, rescalePositions: false, scalePointsOnZoom: true,
-      pointGreyoutOpacity: 0.2, linkOpacity: 1, linkDefaultColor: '#637b99',
+      pointGreyoutOpacity: 0.45, linkOpacity: 1, linkDefaultColor: '#637b99',
       linkDefaultWidth: 1.1, scaleLinksOnZoom: false, linkGreyoutOpacity: 0,
       linkVisibilityDistanceRange: [0, 1], linkVisibilityMinTransparency: 1,
-      hoveredLinkColor: '#c3dbf2', renderHoveredPointRing: false,
-      simulationCollision: 2, simulationLinkDistRandomVariationRange: [1, 1.12],
+      hoveredLinkColor: undefined, renderHoveredPointRing: false,
+      simulationCollision: 4, simulationLinkDistRandomVariationRange: [1, 1.12],
       // Derive collision bounds from each album's size, including unloaded covers.
       simulationCollisionRadius: undefined,
       // Decay is measured in simulation ticks, not milliseconds.
@@ -622,12 +701,13 @@ async function load(exported, name) {
         if (!paused) graph.start(simulationAlpha = dragAlpha(simulationAlpha, true));
       },
       onZoomStart: event => { if (event?.sourceEvent) initialFitPending = false; zooming = true; hover(undefined); },
-      onZoom: scheduleLabels,
+      onZoom: scheduleEdges,
       onZoomEnd: () => { zooming = false; scheduleCovers(); scheduleLabels(); },
+      onRenderFrame: refreshLabels,
       onSimulationTick: alpha => {
         simulationAlpha = alpha;
         if (dragging && !paused && alpha < DRAG_ALPHA) graph.start(simulationAlpha = DRAG_ALPHA);
-        scheduleCovers(); scheduleLabels();
+        scheduleCovers();
       },
       onSimulationEnd: () => { fitInitialView(true); scheduleCovers(); scheduleLabels(); } };
     for (const [key, input] of forceInputs) config[key] = key === 'simulationFriction' ? 1 - Number(input.value) : Number(input.value);
@@ -655,6 +735,8 @@ async function load(exported, name) {
       if (response.generation !== generation || response.revision !== revision) return;
       if (response.error) { status(response.error, true); return; }
       edges = response.edges; clusters = response.clusters;
+      communityGeometry = '';
+      bridgeEdges = bridgeLinks(edges, clusters);
       strongestEdges = new Set();
       const strongest = new Map();
       edges.forEach((edge, index) => {
@@ -676,11 +758,6 @@ async function load(exported, name) {
       graph.setLinks(Float32Array.from(edges.flatMap(e => [e.source, e.target])));
       // Sound similarity determines layout even when covers use metadata colors.
       graph.setPointClusters(clusters);
-      const degrees = new Uint32Array(data.albums.length);
-      for (const edge of edges) { degrees[edge.source]++; degrees[edge.target]++; }
-      // Explicit strengths replace Cosmos's degree normalization; preserve it so
-      // hubs do not accumulate hundreds of full-strength attraction forces.
-      graph.setLinkStrength(Float32Array.from(edges, edge => edge.weight / Math.max(1, Math.min(degrees[edge.source], degrees[edge.target]))));
       updateGroups(); updateSearch(); updateCoverSizes(); graph.render();
       if (paused) graph.pause(); else graph.start(appliedLayout ? 0.3 : 1);
       $('graph').style.visibility = '';
@@ -693,6 +770,7 @@ async function load(exported, name) {
     status('Computing similarities…');
     worker.postMessage({ type: 'load', export: data, options: options(), generation, revision });
   } catch (error) {
+    console.error('Album graph load failed', error);
     status(`Cannot load graph: ${error.message}`, true);
   }
 }
@@ -729,6 +807,7 @@ function watchDpr() {
 }
 watchDpr();
 $('group').addEventListener('change', () => { if (graphReady) { updateGroups(); updateHighlights(); } });
+$('layout-mode').addEventListener('change', () => { if (graphReady) { configureCommunities(); reheat(); } });
 $('edge-view').addEventListener('change', updateHighlights);
 $('search').addEventListener('input', updateSearch);
 $('phrase').addEventListener('input', () => phraseSearch.set($('phrase').value));
@@ -740,7 +819,7 @@ for (const id of ['dance-min', 'dance-max']) $(id).addEventListener('input', () 
   $('dance-max-value').value = Number($('dance-max').value).toFixed(2); updateSearch();
 });
 $('clear-lens').addEventListener('click', () => { $('lens').value = ''; updateSearch(); });
-$('show-labels').addEventListener('change', scheduleLabels);
+$('show-labels').addEventListener('change', () => { if (graphReady) { trackLabels(); scheduleLabels(); } });
 $('fit').addEventListener('click', () => { initialFitPending = false; graph?.fitView(reducedMotion ? 0 : 350, 0.08, false); });
 for (const [id, multiplier] of [['zoom-in', 1.4], ['zoom-out', 1 / 1.4]]) $(id).addEventListener('click', () => {
   initialFitPending = false;

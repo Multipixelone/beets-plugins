@@ -160,12 +160,12 @@ test('derived physics and geometry fit the collision budget as the library and a
           assert.ok(geometryScale > 0 && geometryScale <= 1);
           assert.ok(parameters.collisionArea <= parameters.collisionAreaLimit + 1e-6);
           assert.ok(Object.values(forces).every(Number.isFinite));
-          assert.ok(forces.simulationCollisionPadding >= 0 && forces.simulationCollisionPadding <= 40);
+          assert.ok(forces.simulationCollisionPadding >= 0 && forces.simulationCollisionPadding <= 12);
           assert.equal(forces.simulationLinkDistance, 150 * distanceScale);
-          assert.equal(repulsionScale, Math.min(1, 400 / count) * distanceScale ** 2);
-          assert.equal(forces.simulationRepulsion, 40 * repulsionScale);
-          assert.equal(forces.simulationGravity, .008);
-          assert.equal(forces.simulationCluster, .001);
+          assert.equal(repulsionScale, Math.min(1, 400 / count * (spaceSize / 4096) ** 2) * distanceScale ** 2);
+          assert.equal(forces.simulationRepulsion, 44 * repulsionScale);
+          assert.equal(forces.simulationGravity, .004);
+          assert.equal(forces.simulationCluster, .006);
           // Verify the footprint independently, including the highlighted artwork
           // and selection frame rather than just checking the helper's accounting.
           const sizes = artworkSizes(albums, metric, artworkScale);
@@ -182,8 +182,8 @@ test('small layouts retain discovery defaults and custom spaces handle empty/sin
   const { albums } = libraryFixture(100);
   const small = layoutParameters(albums, { metric: 'uniform' });
   assert.equal(small.geometryScale, 1);
-  assert.equal(small.forces.simulationCollisionPadding, 40);
-  assert.equal(small.forces.simulationRepulsion, 40);
+  assert.equal(small.forces.simulationCollisionPadding, 12);
+  assert.equal(small.forces.simulationRepulsion, 44);
   assert.equal(small.forces.simulationLinkDistance, 150);
   assert.deepEqual(seedPositions([], [], [], 112, { spaceSize: 8192 }), new Float32Array());
   assert.deepEqual(seedPositions([album(1, [1])], [], [0], 112, { spaceSize: 8192 }),
@@ -194,6 +194,18 @@ test('small layouts retain discovery defaults and custom spaces handle empty/sin
   for (const options of [{ spaceSize: NaN }, { spaceSize: 0 }, { margin: -1 }, { margin: 2048 }]) {
     assert.throws(() => seedPositions(albums, [], [], 112, options));
   }
+});
+
+test('a dense cover layout gains local padding while retaining artwork and force sizes', () => {
+  const { albums } = libraryFixture(700);
+  const parameters = layoutParameters(albums, { metric: 'uniform', spaceSize: 4096 });
+  assert.equal(parameters.geometryScale, 1);
+  assert.equal(artworkSizes(albums, 'uniform')[0], 56);
+  assert.ok(parameters.forces.simulationCollisionPadding >= 5 && parameters.forces.simulationCollisionPadding <= 6);
+  assert.ok(Math.abs(parameters.forces.simulationRepulsion - 44 * 400 / 700) < 1e-10);
+  assert.equal(parameters.forces.simulationLinkDistance, 150);
+  const diameter = (56 + 8) / .8 + 2 * parameters.forces.simulationCollisionPadding;
+  assert.ok(albums.length * diameter ** 2 <= .55 * (4096 * .8) ** 2 + 1e-6);
 });
 
 test('collision budgeting includes missing-cover dots and sound emphasis', () => {

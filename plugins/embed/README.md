@@ -35,6 +35,10 @@ probabilities.
 
 ## Album similarity graph
 
+For the October 2026 readability implementation, full-library comparisons,
+known limitations and prioritized follow-up work, see the
+[agent handoff](../../docs/album-graph-readability-handoff.md).
+
 ```sh
 beet embed-graph-export -o albums.json --covers-dir covers --cache-dir graph-cache
 beet embed-graph-export artist:"Nick Drake" -o drake.json

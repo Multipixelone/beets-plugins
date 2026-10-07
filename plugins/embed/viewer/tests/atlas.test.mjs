@@ -28,6 +28,39 @@ test('pinned Cosmos adapter replaces exactly its atlas helper and rejects change
   const patched = patchCosmosAtlas(source, '3.4.2', '/tmp/atlas.mjs');
   assert.ok(patched.includes('function Ai(a, e = 16384) { return albumAtlas(a, e); }'));
   assert.ok(!patched.includes('Atlas scaling required'));
+  // All three GPU draw paths use the same unbounded geometry: visible covers,
+  // opaque cores, and picking. A partial conversion causes capped hit targets,
+  // missing art, or invalid element-index access when zoomed close.
+  for (const command of ['drawCommand', 'drawCoreCommand', 'fillPickingBufferCommand']) {
+    const model = patched.slice(patched.indexOf(`this.${command} = new k(e, {`));
+    const options = model.slice(0, model.indexOf('\n    }))'));
+    assert.match(options, /topology: "triangle-strip"/);
+    assert.match(options, /vertexCount: 4,/);
+    assert.match(options, /instanceCount: n.pointsNumber/);
+    assert.match(options, /name: "pointIndices", format: "float32x2", stepMode: "instance"/);
+    assert.match(options, /name: "albumCorner", format: "float32x2", stepMode: "vertex"/);
+    assert.match(options, /albumCorner: this.dragPointVertexCoordBuffer/);
+    assert.doesNotMatch(options, /indexBuffer:/);
+    assert.ok(patched.includes(`this.${command}.setInstanceCount(`));
+    assert.ok(!patched.includes(`this.${command}.setVertexCount(`));
+    if (command === 'fillPickingBufferCommand') {
+      // Programs are initialized before the first data set: never pass an
+      // undefined shape buffer to luma's vertex-array binding.
+      assert.match(options, /\.\.\.this.shapeBuffer && \{ shape: this.shapeBuffer \}/);
+    }
+  }
+  assert.ok(!patched.includes('return min(size * ratio * zoom, maxPointSize * ratio);'));
+  assert.ok(!patched.includes('overallSizeValue = min(overallSizeValue, maxPointSize * ratio)'));
+  assert.ok(!patched.includes('Math.min(Math.max(s, 1 / i), n) / 2'));
+  // The cosmetic border cap is shared by the visible and picking shaders,
+  // independent of artwork zoom and the world's existing collision padding.
+  assert.equal(patched.match(/shapeSizeValue = albumFrameSizePx\(shapeSizeValue, imageSizeValue, shape, hasImage, ratio\);/g).length, 2);
+  assert.ok(patched.includes('hasImage && shape == 1.0 ? min(shapeSize, (imageSize + 4.0 * ratio) / 0.8) : shapeSize'));
+  assert.ok(patched.includes('albumSquare < 0.5 && dot(fromCenter, fromCenter) > 1.0'));
+  assert.ok(patched.includes('albumPointCoord = vec2(corner.x, -corner.y)'));
+  assert.ok(patched.includes('L.end(), this.device.submit(), this.config.onRenderFrame?.();'));
+  const frame = patched.slice(patched.indexOf('  renderFrame(e) {'), patched.indexOf('\n  stopFrames()'));
+  assert.ok(frame.indexOf('C.drag()') < frame.indexOf('p.draw(L)'));
   assert.throws(() => patchCosmosAtlas(source, '3.4.3', '/tmp/atlas.mjs'), /exact pinned/);
   assert.throws(() => patchCosmosAtlas(source + '\n', '3.4.2', '/tmp/atlas.mjs'), /exact pinned/);
 });

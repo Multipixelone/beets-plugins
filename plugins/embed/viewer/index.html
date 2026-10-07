@@ -43,8 +43,8 @@
   <label class="check"><input id="show-labels" type="checkbox" checked> Show group sound labels</label>
 </div></details>
     <details class="control-section"><summary>Connections</summary><div class="section-content">
-      <label>Visible connections<select id="edge-view"><option value="strongest">Strongest per album</option><option value="all">All connections</option><option value="selected">Selected album only</option></select></label>
-      <p class="muted">Selecting an album shows all of its connections.</p>
+      <label>Visible connections<select id="edge-view"><option value="strongest">Local neighbors and bridges</option><option value="all">All connections</option><option value="selected">Focused album only</option></select></label>
+      <p class="muted">Hover or select an album to reveal its connections. Its closest neighbors stand out; quieter bridges connect sounds. Click a sound label to explore its community.</p>
       <label class="check"><input id="use-k" type="checkbox" checked> Limit nearest neighbors</label>
       <label>Neighbors <output id="k-value">8</output><input id="k" type="range" min="0" max="100" step="1" value="8"></label>
       <label class="check"><input id="use-threshold" type="checkbox" checked> Filter by similarity</label>
@@ -52,6 +52,7 @@
       <p class="muted">When both are on, similarity filters the nearest neighbors. Connections work in both directions.</p>
     </div></details>
     <details class="control-section"><summary>Motion &amp; rendering</summary><div class="section-content">
+      <label>Layout<select id="layout-mode"><option value="communities">Connected communities</option><option value="free">Album forces only</option></select></label>
       <div id="forces"></div>
       <label>Show albums as<select id="render-mode"><option value="covers">Album covers</option><option value="dots">Colored dots</option><option value="auto">Automatic</option></select></label>
       <label>Auto: minimum zoom <output id="cover-zoom-value">1.00</output><input id="cover-zoom" type="range" min="0.1" max="5" step="0.1" value="1"></label>
@@ -67,7 +68,7 @@
   </aside>
   <main>
     <div id="graph" aria-label="Interactive album similarity graph"></div>
-    <div id="map-labels" aria-hidden="true"></div>
+    <div id="map-labels" aria-label="Sound communities"></div>
     <div id="empty"><h2>No library loaded</h2><p>Open an album export to explore its connections.</p><button id="empty-load">Open album export</button></div>
     <section id="details" hidden aria-label="Selected album"><button id="clear" aria-label="Close album details">×</button><div id="info"></div></section>
     <div id="tooltip" hidden></div>

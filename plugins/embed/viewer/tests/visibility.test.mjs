@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { FilterPositions, visibleLinks } from '../visibility.mjs';
+import { FilterPositions, visibleLinks, bridgeLinks, edgeStyles } from '../visibility.mjs';
 import { selectionState, groupLabels } from '../sound.mjs';
 
 const finite = array => [...array].map(value => Number.isFinite(value));
@@ -42,4 +42,64 @@ test('unknown filter values change visibility and hidden members do not determin
   assert.deepEqual(selectionState(albums, { vocal: 'instrumental', includeUnknown: true }).matches, [0, 1]);
   const labels = groupLabels(albums, ['Community 1', 'Community 1'], i => filtered.states[i].match);
   assert.deepEqual(labels[0].indices, [0]); assert.equal(labels[0].text, 'Quiet');
+});
+
+test('bridge hierarchy retains strongest visible connection for every community pair', () => {
+  const edges = [{ source: 0, target: 1, similarity: .99 }, { source: 0, target: 2, similarity: .81 },
+    { source: 1, target: 3, similarity: .95 }, { source: 3, target: 4, similarity: .9 },
+    { source: 1, target: 4, similarity: .8 }];
+  const clusters = [0, 0, 1, 1, 2];
+  assert.deepEqual([...bridgeLinks(edges, clusters)].sort(), [2, 3, 4]);
+  assert.deepEqual([...bridgeLinks(edges, clusters, [1, 1, 1, 0, 1])].sort(), [1, 4]);
+  const styled = edgeStyles(edges, { clusters, strongest: new Set() });
+  assert.equal(styled.colors[1 * 4 + 3], 0);
+  assert.ok(styled.colors[2 * 4 + 3] > 0);
+  assert.ok(styled.colors[3 * 4 + 3] > 0);
+  assert.ok(styled.colors[4 * 4 + 3] > 0);
+});
+
+test('bridge ties stay on the same endpoints when edge order changes', () => {
+  const edges = [{ source: 2, target: 3, similarity: .8 }, { source: 0, target: 1, similarity: .8 }];
+  const clusters = [0, 1, 0, 1], reversed = [...edges].reverse();
+  assert.deepEqual([...bridgeLinks(edges, clusters)].map(i => edges[i]),
+    [...bridgeLinks(reversed, clusters)].map(i => reversed[i]));
+});
+
+test('small selected albums keep every incident edge but avoid a bright fan', () => {
+  const edges = Array.from({ length: 12 }, (_, index) => ({ source: 0, target: index + 1, similarity: .99 - index * .02 }));
+  const overview = edgeStyles(edges, { selected: 0, coverPixels: 8 });
+  const close = edgeStyles(edges, { selected: 0, coverPixels: 100 });
+  assert.equal(overview.incident.size, 12);
+  assert.equal(overview.detail.size, 6);
+  assert.equal(overview.points.size, 13);
+  assert.ok([...overview.incident].every(i => overview.colors[i * 4 + 3] > 0 && overview.widths[i] > 0));
+  assert.ok([...overview.incident].every(i => overview.colors[i * 4 + 3] <= .31 && overview.widths[i] <= .66));
+  assert.ok(overview.colors[3] > overview.colors[11 * 4 + 3]);
+  assert.ok(close.colors[3] > overview.colors[3] && close.widths[0] > overview.widths[0]);
+  assert.ok(close.colors[11 * 4 + 3] < close.colors[3]);
+});
+
+test('zoom changes edge emphasis continuously without changing the chosen edges', () => {
+  const edges = [{ source: 0, target: 1, similarity: .9 }, { source: 1, target: 2, similarity: .8 }];
+  const before = edgeStyles(edges, { selected: 0, coverPixels: 31.99 });
+  const after = edgeStyles(edges, { selected: 0, coverPixels: 32.01 });
+  assert.deepEqual(before.detail, after.detail);
+  assert.ok(after.colors.every((value, i) => Math.abs(value - before.colors[i]) < .001));
+  assert.ok(after.widths.every((value, i) => Math.abs(value - before.widths[i]) < .001));
+});
+
+test('filters override cached edge tiers and hidden hover targets', () => {
+  const edges = [{ source: 0, target: 1, similarity: .9 }, { source: 0, target: 2, similarity: .8 }];
+  const result = edgeStyles(edges, { selected: 0, hovered: 1, visible: [1, 0, 1],
+    bridges: new Set([0]), strongest: new Set([0]), mode: 'all' });
+  assert.equal(result.focus, 0);
+  assert.equal(result.colors[3], 0);
+  assert.equal(result.widths[0], 0);
+  assert.deepEqual([...result.incident], [1]);
+  assert.ok(result.colors[7] > 0);
+  const hover = edgeStyles(edges, { selected: 0, hovered: 2, mode: 'selected' });
+  assert.equal(hover.focus, 2);
+  assert.equal(hover.colors[3], 0);
+  assert.ok(hover.colors[7] > 0);
+  assert.ok(edgeStyles(edges, { mode: 'selected' }).colors.every(value => value === 0));
 });

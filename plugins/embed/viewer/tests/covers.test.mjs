@@ -23,14 +23,21 @@ test('visible candidates omit missing and offscreen art; priority combines cente
   assert.equal(coverPriority(albums, [0, 1, 2], [0, 0, 50, 0, 100, 0], [32, 32, 32], [0, 0], [2])[0], 2);
   assert.equal(coverPriority(albums, [0, 1, 2], [0, 0, 0, 0, 0, 0], [32, 64, 32], [0, 0])[0], 1);
 });
-test('DPR, geometry and GPU cap determine per-album demand; hysteresis resists tiny zoom changes', () => {
+test('DPR and continuous quad geometry determine detail demand beyond GPU point caps', () => {
   assert.equal(drawnCoverPixels(36, { dpr: 3 }), 108);
   assert.equal(drawnCoverPixels(36 * 1.75, { dpr: 3 }), 189);
-  assert.equal(drawnCoverPixels(36, { dpr: 3, zoom: 500, maxPointPixels: 192 }), 192);
+  assert.equal(drawnCoverPixels(36, { dpr: 3, zoom: 500 }), 540);
   assert.equal(drawnCoverPixels(12, { dpr: 2, zoom: 3, scaleOnZoom: true, scale: 2 }), 144);
+  assert.equal(drawnCoverPixels(36, { dpr: 2, zoom: 8, scaleOnZoom: true }), 576);
+  for (const zoom of [0.25, 1, 2, 4, 8, 16]) {
+    assert.equal(drawnCoverPixels(36, { zoom, scaleOnZoom: true }), 36 * zoom);
+  }
   assert.equal(mipTier(68, 64), 64); assert.equal(mipTier(77, 64), 128);
   assert.equal(mipTier(55, 128), 128); assert.equal(mipTier(50, 128), 64);
+  assert.equal(mipTier(300, 256), 256); assert.equal(mipTier(360, 256), 512);
+  assert.equal(mipTier(1600, 512), 512);
   assert.equal(coverPolicy(189).spriteSize, 256);
+  assert.equal(coverPolicy(900).spriteSize, 512);
 });
 test('16 MiB phone and desktop budgets support resident base tiers at library scale', () => {
   for (const constrained of [true, false]) for (const count of [400, 2719, 6400]) {
@@ -103,14 +110,15 @@ test('a missing small file falls back to legacy art and hidden albums receive no
   assert.equal(loader.best('b').width, 16); assert.equal(loader.best('a').width, 16);
   loader.destroy();
 });
-test('mixed atlas keeps thousands of base sprites when a few need 256px detail', async () => {
+for (const tier of [256, 512]) test(`mixed atlas keeps thousands of base sprites with ${tier}px detail`, () => {
   const loader = new CoverLoader(async () => {}, () => {}, { baseSize: 16 });
   const keys = Array.from({ length: 6400 }, (_, i) => String(i));
   for (const key of keys) loader.setBase(key, image(16));
-  for (const key of keys.slice(0, 32)) loader.details.set(`${key}\n256`, { key, tier: 256, image: image(256) });
-  const entries = loader.atlasEntries(keys, keys.slice(0, 32).map(key => request(key, 256)));
+  const details = keys.slice(0, loader.poolBytes / 2 / (tier ** 2 * 4));
+  for (const key of details) loader.details.set(`${key}\n${tier}`, { key, tier, image: image(tier) });
+  const entries = loader.atlasEntries(keys, details.map(key => request(key, tier)));
   assert.equal(entries.length, 6400);
-  assert.ok(entries.some(([, img]) => img.width === 256));
+  assert.ok(entries.some(([, img]) => img.width === tier));
   assert.ok(atlasLayout(entries.map(([, img]) => img)).bytes <= 16 * 1024 ** 2);
   loader.destroy();
 });
@@ -131,7 +139,7 @@ test('decode sizes and sheet extraction release bitmap and canvas staging memory
     (id, img) => tiles.push([id, img.width]));
   assert.deepEqual(tiles, [[10, 16], [20, 16]]); assert.equal(closed, 2);
   assert.ok(canvases.every(canvas => canvas.width === 0 && canvas.height === 0));
-  await assert.rejects(decodeCover('a', new AbortController().signal, 512), /Invalid sprite size/);
+  await assert.rejects(decodeCover('a', new AbortController().signal, 1024), /Invalid sprite size/);
   await assert.rejects(decodeOverview('sheet', { columns: 1, album_ids: [10] }, new AbortController().signal, 16, () => {}), /dimensions/);
   assert.equal(closed, 3);
 });

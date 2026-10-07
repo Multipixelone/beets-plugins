@@ -1,18 +1,19 @@
 import { ATLAS_BYTES, GUTTER, atlasLayout } from './atlas.mjs';
 const MIB = 1024 * 1024;
-export const SPRITE_SIZES = [32, 64, 96, 128, 192, 256];
-export const MIP_SIZES = [32, 64, 128, 256];
+export const SPRITE_SIZES = [32, 64, 96, 128, 192, 256, 512];
+export const MIP_SIZES = [32, 64, 128, 256, 512];
 const BASE_SIZES = [32, 24, 16, 12, 8, 4, 2, 1];
 
-// Match cosmos 3.4.2's pointSizePx shader and the hardware sprite cap.
+// Match the patched quad renderer's device-pixel geometry. Resolution is
+// bounded by mipTier/the atlas budget; it must not cap the visible geometry.
 export function drawnCoverPixels(size, { dpr = 1, zoom = 1, scale = 1,
-  scaleOnZoom = false, maxPointPixels = 256 } = {}) {
+  scaleOnZoom = false } = {}) {
   const zoomScale = scaleOnZoom ? zoom : Math.min(5, Math.max(1, zoom * 0.01));
-  return Math.min(size * scale * dpr * zoomScale, maxPointPixels);
+  return size * scale * dpr * zoomScale;
 }
 export function coverPolicy(pixels, { constrained = false, maxTextureSize = 4096,
   poolBytes = ATLAS_BYTES, count = 0 } = {}) {
-  const spriteSize = MIP_SIZES.find(size => size >= pixels) ?? 256;
+  const spriteSize = MIP_SIZES.find(size => size >= pixels) ?? MIP_SIZES.at(-1);
   const side = Math.min(maxTextureSize, Math.floor(Math.sqrt(poolBytes / 4)));
   const capacity = Math.floor(side / (spriteSize + 2 * GUTTER)) ** 2;
   const baseSize = BASE_SIZES.find(size =>
@@ -23,9 +24,9 @@ export function coverPolicy(pixels, { constrained = false, maxTextureSize = 4096
     poolBytes, maxTextureSize };
 }
 export function mipTier(pixels, previous = 32) {
-  if (pixels > previous * 1.2) return MIP_SIZES.find(size => size >= pixels) ?? 256;
+  if (pixels > previous * 1.2) return MIP_SIZES.find(size => size >= pixels) ?? MIP_SIZES.at(-1);
   const lower = [...MIP_SIZES].reverse().find(size => size < previous);
-  if (lower && pixels < lower * 0.8) return MIP_SIZES.find(size => size >= pixels) ?? 256;
+  if (lower && pixels < lower * 0.8) return MIP_SIZES.find(size => size >= pixels) ?? MIP_SIZES.at(-1);
   return previous;
 }
 export function constrainedCovers({ width, coarsePointer = false, deviceMemory } = {}) {
@@ -123,7 +124,7 @@ export class CoverLoader {
       }).finally(() => { this.loading.delete(id); this.pump(); });
     }
   }
-  best(key, tier = 256) {
+  best(key, tier = MIP_SIZES.at(-1)) {
     let image = this.base.get(key), bestTier = image ? this.baseSize : 0;
     for (const entry of this.details.values()) if (entry.key === key && entry.tier <= tier && entry.tier > bestTier) {
       image = entry.image; bestTier = entry.tier;
