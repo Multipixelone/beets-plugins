@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { decodeColumn, soundGroup, selectionState, soundSections, groupLabels, placeLabels, representativeLabelAnchors } from '../sound.mjs';
+import { decodeColumn, soundGroup, selectionState, soundSections, groupLabels, visibleGroupLabels, labelPresentation, placeLabels, representativeLabelAnchors } from '../sound.mjs';
 import { groups, validateExport } from '../logic.mjs';
 const albums = [
   { album: 'One', albumartist: 'Finn', sound: { style: { labels: [{ label: 'Hip Hop---Boom Bap', score: .8 }], count: 1, total: 3 },
@@ -41,25 +41,155 @@ test('Essentia filters hide unknowns unless included; missing is never zero', ()
   assert.deepEqual(selectionState(albums, { vocal: 'instrumental' }).matches, [1]);
   assert.deepEqual(selectionState(albums, { danceMax: .3 }).matches, [1]);
 });
-test('labels keep concise names separate from interaction descriptions', () => {
+test('unique primary names remain compact and preserve internal interaction keys', () => {
   const labels = groupLabels(albums, ['A', 'B', 'A']);
   assert.equal(labels[0].text, 'Boom Bap');
-  assert.equal(labels[0].description, 'Boom Bap · gritty · sample-heavy');
+  assert.equal(labels[0].description, 'Boom Bap');
+  assert.equal(labels[0].name, 'A');
+  assert.equal(labels[0].naming.qualifier, '');
   assert.equal(labels[1].text, 'B');
   const candidates = [{ text: 'Boom Bap', x: 100, y: 100 }, { text: 'gritty', x: 105, y: 100 }, { text: 'lush', x: 300, y: 100 }];
   assert.equal(placeLabels(candidates, 500, 500, .5).length, 0);
   assert.equal(placeLabels(candidates, 500, 500, 2).length, 3);
   assert.equal(placeLabels(candidates, 500, 500, 2, 1).length, 1);
 });
-test('long descriptions remain available without duplicate style or flavor words', () => {
-  const phrase = 'sparkling synth arpeggios and slowly evolving layered harmonies';
-  const album = { id: 1, sound: { style: { labels: [{ label: 'Electronic---Chiptune', score: 1 }] },
-    flavor: { labels: [{ label: 'chiptune', score: 4 }, { label: 'CHIPTUNE', score: 3 },
-      { label: phrase, score: 1.5 }, { label: 'sample-heavy', score: 2 }, { label: 'sample_heavy', score: 1.8 }] } } };
-  const [label] = groupLabels([album], ['A']);
-  assert.equal(label.text, 'Chiptune');
-  assert.equal(label.description, `Chiptune · sample-heavy · ${phrase}`);
-  assert.equal(label.description.includes('…'), false);
+const soundAlbum = (id, artist = 'Artist', style = 'Pop---K-pop', flavor = []) => ({ id,
+  album: `Album ${id}`, albumartist: artist, sound: {
+    style: { labels: [{ label: style, score: .9 }, { label: 'Electronic---House', score: .1 }] },
+    flavor: { labels: flavor } } });
+const descriptor = (label, score = 1, axis = 'production/texture') => ({ label, score, axis });
+const byKey = definitions => Object.fromEntries(definitions.map(group => [group.name, group.naming.displayName]));
+
+test('three K-pop communities with identical descriptors and artists get stable numbers', () => {
+  const library = [20, 21, 10, 11, 30, 31].map(id => soundAlbum(id, 'Same Artist', 'Pop---K-pop', [descriptor('glossy')]));
+  const names = ['A', 'A', 'B', 'B', 'C', 'C'];
+  const labels = groupLabels(library, names);
+  assert.deepEqual(byKey(labels), { A: 'K-pop · Same Artist · Community 2',
+    B: 'K-pop · Same Artist · Community 1', C: 'K-pop · Same Artist · Community 3' });
+  assert.ok(labels.every(group => group.naming.primaryText === 'K-pop'));
+  const order = [5, 1, 3, 0, 4, 2];
+  assert.deepEqual(byKey(groupLabels(order.map(i => library[i]), order.map(i => names[i]))), byKey(labels));
+});
+
+test('short style names retain family only when needed to distinguish groups', () => {
+  const library = [soundAlbum(1, 'Rock Artist', 'Rock---Gospel'), soundAlbum(2, 'Blues Artist', 'Blues---Gospel'),
+    soundAlbum(3, 'Unique Artist', 'Jazz---Swing')];
+  assert.deepEqual(byKey(groupLabels(library, ['R', 'B', 'J'])), { R: 'Gospel · Rock', B: 'Gospel · Blues', J: 'Swing' });
+});
+
+test('supported qualifiers rank by occurrence contrast, keeping flavor scores separate', () => {
+  const library = [1, 2, 3, 4].map(id => soundAlbum(id, 'First', 'Pop---K-pop',
+    [descriptor('glossy', 100), ...(id < 4 ? [descriptor('airy reverb', .01)] : [])]));
+  library.push(...[5, 6, 7, 8].map(id => soundAlbum(id, 'Other', 'Pop---K-pop', [descriptor('glossy', .1)])));
+  const labels = groupLabels(library, ['A', 'A', 'A', 'A', 'B', 'B', 'B', 'B']);
+  assert.deepEqual(byKey(labels), { A: 'K-pop · airy reverb', B: 'K-pop · Other' });
+  assert.equal(labels.find(group => group.name === 'A').naming.primaryText, 'K-pop');
+});
+
+test('duplicate equivalents within one album cannot manufacture qualifier support', () => {
+  const library = [soundAlbum(1, 'First', 'Pop---K-pop', [descriptor('sample-heavy'), descriptor('SAMPLE_HEAVY'),
+    descriptor('ＳＡＭＰＬＥ / ＨＥＡＶＹ'), descriptor('sample—heavy')]),
+    soundAlbum(2, 'First'), soundAlbum(3, 'Other', 'Pop---K-pop', [descriptor('glossy')]),
+    soundAlbum(4, 'Other', 'Pop---K-pop', [descriptor('glossy')])];
+  // Finite negative candidates provide coverage but never positive support.
+  library[1].sound.flavor.labels = [descriptor('sample-heavy', -1)];
+  assert.equal(byKey(groupLabels(library, ['A', 'A', 'B', 'B'])).A, 'K-pop · First');
+});
+
+test('weak, unknown-axis, genre and language evidence use artist fallbacks', () => {
+  const library = [1, 2, 3, 4].map(id => soundAlbum(id, 'First', 'Pop---K-pop', [descriptor('glossy'),
+    descriptor('indie pop', 20, 'genre/style flavor'), descriptor('Japanese-language singing', 20, 'vocals'),
+    descriptor('invented texture', 20, undefined)]));
+  library.forEach(album => { album.sound.flavor.labels.at(-1).axis = undefined; });
+  library.push(...[5, 6, 7, 8].map(id => soundAlbum(id, 'Other', 'Pop---K-pop',
+    id < 8 ? [descriptor('glossy')] : [descriptor('tender', 1, 'mood/energy')])));
+  assert.deepEqual(byKey(groupLabels(library, ['A', 'A', 'A', 'A', 'B', 'B', 'B', 'B'])),
+    { A: 'K-pop · glossy', B: 'K-pop · Other' });
+  library[3].sound.flavor.labels = [descriptor('tender', 1, 'mood/energy')];
+  assert.deepEqual(byKey(groupLabels(library, ['A', 'A', 'A', 'A', 'B', 'B', 'B', 'B'])),
+    { A: 'K-pop · First', B: 'K-pop · Other' });
+});
+
+test('missing sibling observations and legacy sound data do not imply zero scores', () => {
+  const library = [soundAlbum(1, 'First', 'Pop---K-pop', [descriptor('glossy')]),
+    soundAlbum(2, 'First', 'Pop---K-pop', [descriptor('glossy')]), soundAlbum(3, 'Other'), soundAlbum(4, 'Other')];
+  assert.deepEqual(byKey(groupLabels(library, ['A', 'A', 'B', 'B'])), { A: 'K-pop · First', B: 'K-pop · Other' });
+  const legacy = [{ id: 1, albumartist: 'Unknown' }, { id: 2, albumartist: 'Various Artists' }];
+  assert.deepEqual(byKey(groupLabels(legacy, ['Cluster 1', 'Cluster 2'])), { 'Cluster 1': 'Community 1', 'Cluster 2': 'Community 2' });
+});
+
+test('artist fallback skips invalid values and follows the connected core', () => {
+  const library = [' ', 'UNKNOWN', 'Various Artists', 'Core Artist', 'Bridge Artist', 'Other'].map((artist, i) => soundAlbum(i + 1, artist));
+  const edges = [{ source: 0, target: 3, weight: 1 }, { source: 1, target: 3, weight: 1 },
+    { source: 2, target: 3, weight: 1 }, { source: 4, target: 5, weight: 10 }];
+  assert.equal(byKey(groupLabels(library, ['A', 'A', 'A', 'A', 'A', 'B'], () => true, { edges })).A, 'K-pop · Core Artist');
+});
+
+test('names survive filtering, reordered edges and unchanged membership but refresh on partition changes', () => {
+  const library = [1, 2, 3, 4, 5, 6].map(id => soundAlbum(id, `Artist ${id}`));
+  const names = ['A', 'A', 'A', 'B', 'B', 'B'];
+  const edges = [{ source: 0, target: 1, weight: 1 }, { source: 1, target: 2, weight: 1 }];
+  const canonical = groupLabels(library, names, () => true, { edges });
+  const filtered = visibleGroupLabels(library, canonical, i => i !== 1, { edges });
+  assert.deepEqual(byKey(filtered), byKey(canonical));
+  assert.strictEqual(filtered[0].naming, canonical.find(group => group.name === filtered[0].name).naming);
+  assert.ok(filtered.every(group => !group.indices.includes(1) && !group.tracked.includes(1)));
+  const refreshed = groupLabels(library, names, () => true, { previous: canonical, edges: [] });
+  assert.deepEqual(byKey(refreshed), byKey(canonical));
+  assert.notDeepEqual(refreshed[0].tracked, canonical[0].tracked);
+  const order = [5, 2, 0, 4, 1, 3];
+  const reordered = groupLabels(order.map(i => library[i]), order.map(i => names[i]), () => true, { previous: canonical });
+  assert.strictEqual(reordered[0].naming, canonical[0].naming);
+  const changed = groupLabels(library, ['A', 'A', 'B', 'B', 'B', 'B'], () => true, { previous: canonical });
+  assert.notStrictEqual(changed.find(group => group.name === 'A').naming, canonical[0].naming);
+  assert.equal(byKey(changed).A, 'K-pop · Artist 1');
+});
+
+test('collision normalization and final uniqueness include untouched primary names', () => {
+  const library = [soundAlbum(1, 'Rock', 'Gospel'), soundAlbum(2, 'Rock', 'ＧＯＳＰＥＬ'),
+    soundAlbum(3, 'Other', 'Gospel · Rock')];
+  const labels = groupLabels(library, ['A', 'B', 'C']);
+  assert.equal(byKey(labels).C, 'Gospel · Rock');
+  assert.match(byKey(labels).A, /Community 1$/);
+  assert.match(byKey(labels).B, /Community 2$/);
+  assert.equal(new Set(labels.map(group => group.naming.displayName.toLowerCase())).size, 3);
+});
+
+test('descriptor collisions try core artists before deterministic numbering', () => {
+  const library = [soundAlbum(1, 'First', 'Pop---K-pop', [descriptor('glossy')]),
+    soundAlbum(2, 'First', 'Pop---K-pop', [descriptor('glossy')]), soundAlbum(3, 'glossy'), soundAlbum(4, 'glossy')];
+  // Observed, unrelated candidates keep the sibling coverage sufficient.
+  library[2].sound.flavor.labels = library[3].sound.flavor.labels = [descriptor('genre word', 1, 'genre/style flavor')];
+  assert.deepEqual(byKey(groupLabels(library, ['A', 'A', 'B', 'B'])),
+    { A: 'K-pop · glossy · First', B: 'K-pop · glossy' });
+});
+
+test('hidden siblings and communities beyond map limits participate in canonical naming', () => {
+  const library = Array.from({ length: 100 }, (_, i) => soundAlbum(i + 1, 'Unknown'));
+  const names = library.map(album => `Cluster ${album.id}`);
+  const complete = groupLabels(library, names);
+  const filtered = groupLabels(library, names, i => i === 99);
+  assert.equal(complete.length, 100);
+  assert.equal(filtered[0].naming.displayName, 'K-pop · Community 100');
+  assert.equal(filtered[0].naming.displayName, complete.find(group => group.name === 'Cluster 100').naming.displayName);
+});
+
+test('map lines, legend, tooltip and accessible names retain complete long qualifiers', () => {
+  const phrase = 'sparkling synth arpeggios and slowly evolving layered harmonies 星빛';
+  const library = [soundAlbum(1, 'First', 'Pop---K-pop', [descriptor(phrase, 1, 'instrumentation')]),
+    soundAlbum(2, 'First', 'Pop---K-pop', [descriptor(phrase, 1, 'instrumentation')]),
+    soundAlbum(3, 'Other', 'Pop---K-pop', [descriptor('glossy')]),
+    soundAlbum(4, 'Other', 'Pop---K-pop', [descriptor('glossy')])];
+  const group = groupLabels(library, ['A', 'A', 'B', 'B']).find(group => group.name === 'A');
+  const presentation = labelPresentation(group);
+  assert.equal(presentation.qualifier, phrase);
+  assert.equal(presentation.displayName, [presentation.primaryText, presentation.qualifier].join(' · '));
+  assert.ok(presentation.title.startsWith(presentation.displayName));
+  assert.equal(presentation.accessibleName, presentation.title);
+  assert.equal(presentation.title.includes('…'), false);
+  const [placed] = placeLabels([{ ...group, x: 170, y: 100, width: 300, height: 64 }], 340, 220, 2);
+  assert.equal(placed.rect.right - placed.rect.left, 300);
+  assert.equal(placed.rect.bottom - placed.rect.top, 64);
 });
 test('representative anchors favor internal connections and survive album reorder', () => {
   const library = [40, 30, 20, 10, 50].map(id => ({ id }));

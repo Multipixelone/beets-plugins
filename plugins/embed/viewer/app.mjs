@@ -2,7 +2,7 @@ import { Graph, defaultConfigValues } from '@cosmos.gl/graph';
 import { validateExport, groups, pointSizes, artworkSizes, seedLayout, layoutSpaceSize, layoutParameters, showCovers, coverCandidates } from './logic.mjs';
 
 import { CoverLoader, decodeCover, coverPolicy, drawnCoverPixels, constrainedCovers, coverPriority, mipTier, decodeOverview } from './covers.mjs';
-import { decodeColumn, selectionState, soundSections, groupLabels, placeLabels } from './sound.mjs';
+import { decodeColumn, selectionState, soundSections, groupLabels, visibleGroupLabels, labelPresentation, placeLabels } from './sound.mjs';
 import { atlasLayout } from './atlas.mjs';
 import { DRAG_ALPHA, dragAlpha, communityLayout, communityLinkStrengths } from './physics.mjs';
 import { FilterPositions, bridgeLinks, edgeStyles } from './visibility.mjs';
@@ -118,7 +118,7 @@ function updateColors() {
 }
 function updateLabelTracking() {
   if (!graphReady) return;
-  const definitions = selection.active ? groupLabels(data.albums, groupNames, visibleAlbum, { edges }) : labelDefinitions;
+  const definitions = selection.active ? visibleGroupLabels(data.albums, labelDefinitions, visibleAlbum, { edges }) : labelDefinitions;
   labelGroups = definitions.filter(group => group.indices.length > 1).slice(0, 96);
   // Track obstacles too: pan/zoom must not uncover untracked covers underneath
   // a label. The readback is shared once per rendered frame and cached at rest.
@@ -133,9 +133,16 @@ function updateLabelTracking() {
       $('map-labels').append(element); labelElements.set(group.name, element);
     }
     element.dataset.group = group.name;
-    element.textContent = group.text.replace(/^Cluster /, 'Community ');
-    element.title = `${group.description} · ${group.indices.length} albums. Click to explore.`;
-    element.setAttribute('aria-label', element.title);
+    const presentation = labelPresentation(group);
+    const primary = document.createElement('span'); primary.className = 'map-label-primary';
+    primary.textContent = presentation.primaryText;
+    element.replaceChildren(primary);
+    if (presentation.qualifier) {
+      const qualifier = document.createElement('span'); qualifier.className = 'map-label-qualifier';
+      qualifier.textContent = presentation.qualifier; element.append(qualifier);
+    }
+    element.title = presentation.title;
+    element.setAttribute('aria-label', presentation.accessibleName);
   }
   trackLabels();
   scheduleLabels();
@@ -661,7 +668,8 @@ function updateGroups() {
   const ids = new Map(unique.map((name, i) => [name, i]));
   groupNames = names; groupIds = ids;
   updateColors();
-  labelDefinitions = groupLabels(data.albums, names, () => true, { edges });
+  labelDefinitions = groupLabels(data.albums, names, () => true, { edges, previous: labelDefinitions, mode: $('group').value });
+  const definitions = new Map(labelDefinitions.map(group => [group.name, group]));
   // Bounded GPU readback, refreshed by cosmos alongside point rendering.
   updateLabelTracking();
   $('legend').replaceChildren();
@@ -669,10 +677,13 @@ function updateGroups() {
   for (const name of names) counts.set(name, (counts.get(name) || 0) + 1);
   $('group-count').textContent = unique.length;
   for (const name of unique) {
-    const row = document.createElement('div'); row.className = 'legend-row';
+    const row = document.createElement('div'); row.className = 'legend-row'; row.dataset.group = name;
     const swatch = document.createElement('span'); swatch.className = 'swatch';
     swatch.style.backgroundColor = `rgb(${color(ids.get(name)).slice(0, 3).map(x => Math.round(x * 255)).join(' ')})`;
-    const text = document.createElement('span'); text.textContent = name.replace(/^Cluster /, 'Community ');
+    const text = document.createElement('span');
+    text.textContent = labelPresentation(definitions.get(name)).displayName;
+    text.title = definitions.get(name).naming.description;
+    text.setAttribute('aria-label', text.textContent);
     const count = document.createElement('span'); count.className = 'legend-count'; count.textContent = counts.get(name);
     row.append(swatch, text, count); $('legend').append(row);
   }
@@ -927,6 +938,7 @@ $('cover-zoom').addEventListener('input', () => {
   $('cover-zoom-value').value = Number($('cover-zoom').value).toFixed(2); refreshCovers();
 });
 window.addEventListener('resize', () => { scheduleCovers(); scheduleLabels(); if (gatherEnabled) layoutGather(); });
+document.fonts?.addEventListener('loadingdone', scheduleLabels);
 let dprQuery;
 function watchDpr() {
   dprQuery?.removeEventListener('change', watchDpr);

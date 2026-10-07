@@ -33,7 +33,7 @@ test('visible links exclude either hidden endpoint and choose strongest among re
   assert.deepEqual([...visibleLinks(edges, [1, 0, 1, 1], 'selected', 0)], [1, 3]);
   assert.equal(visibleLinks(edges, [0, 0, 0, 0], 'all').size, 0);
 });
-test('unknown filter values change visibility and hidden members do not determine group labels', () => {
+test('unknown filter values change visible members while canonical group labels stay stable', () => {
   const albums = [{ album: 'Known', albumartist: 'Finn', essentia: { voice_instrumental: { value: 'instrumental' } }, sound: {
     style: { labels: [{ label: 'Quiet', score: .6 }] } } },
   { album: 'Unknown', albumartist: 'Finn', sound: { style: { labels: [{ label: 'Loud', score: 1 }] } } }];
@@ -41,7 +41,7 @@ test('unknown filter values change visibility and hidden members do not determin
   assert.deepEqual(filtered.matches, [0]); assert.equal(filtered.states[1].opacity, 0);
   assert.deepEqual(selectionState(albums, { vocal: 'instrumental', includeUnknown: true }).matches, [0, 1]);
   const labels = groupLabels(albums, ['Community 1', 'Community 1'], i => filtered.states[i].match);
-  assert.deepEqual(labels[0].indices, [0]); assert.equal(labels[0].text, 'Quiet');
+  assert.deepEqual(labels[0].indices, [0]); assert.equal(labels[0].text, 'Loud');
 });
 
 test('bridge hierarchy retains strongest visible connection for every community pair', () => {

@@ -121,37 +121,158 @@ export function representativeLabelAnchors(albums, indices, edges = [], limit = 
     .slice(0, Math.max(0, limit));
 }
 
-const labelKey = text => shortLabel(text).normalize('NFKC').toLocaleLowerCase()
-  .replace(/[_\s-]+/g, ' ').trim();
-export function groupLabels(albums, names, visible = () => true, { edges = [], anchorCount = 4 } = {}) {
+const compareText = (a, b) => a < b ? -1 : a > b ? 1 : 0;
+const labelKey = text => text.normalize('NFKC').toLowerCase()
+  .replace(/[\s\p{Dash_Punctuation}_·/|]+/gu, ' ').trim();
+const cleanText = text => shortLabel(text).normalize('NFKC').replace(/\s+/g, ' ').trim();
+const qualifierAxes = new Set(['production/texture', 'instrumentation', 'mood/energy', 'tempo-feel']);
+export const qualifierRules = Object.freeze({ minAlbums: 2, minSupport: .25, minAdvantage: .15, minCoverage: .5 });
+
+function labelMembers(albums, names) {
   const members = new Map();
   names.forEach((name, index) => {
-    if (!visible(index)) return;
     if (!members.has(name)) members.set(name, []); members.get(name).push(index);
   });
   return [...members].map(([name, indices]) => {
-    const scores = new Map(), flavor = new Map();
-    for (const i of indices) {
-      const album = albums[i];
-      const main = album.sound?.style?.labels?.length ? album.sound.style :
-        album.sound?.mood?.labels?.length ? album.sound.mood : album.sound?.instruments;
-      for (const label of main?.labels || []) scores.set(label.label, (scores.get(label.label) || 0) + label.score);
-      for (const label of album.sound?.flavor?.labels || []) flavor.set(label.label, (flavor.get(label.label) || 0) + label.score);
+    indices.sort((a, b) => (albums[a].id ?? a) - (albums[b].id ?? b));
+    return { name, indices, membershipKey: indices.map(i => albums[i].id ?? i).join(',') };
+  });
+}
+
+function summarizeLabel(albums, group, edges) {
+  const scores = new Map(), descriptors = new Map();
+  const source = ['style', 'mood', 'instruments'].find(key =>
+    group.indices.some(i => albums[i].sound?.[key]?.labels?.length));
+  let coverage = 0;
+  for (const i of group.indices) {
+    const album = albums[i], main = new Map();
+    for (const label of album.sound?.[source]?.labels || []) {
+      if (!Number.isFinite(label.score) || label.score <= 0 || !label.label?.trim()) continue;
+      const key = labelKey(label.label), previous = main.get(key);
+      if (!previous || label.score > previous.score) main.set(key, label);
     }
-    const ranked = map => [...map].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
-    const main = ranked(scores)[0]?.[0];
-    const text = main ? shortLabel(main) : name, seen = new Set([labelKey(text)]), words = [];
-    for (const [word, score] of ranked(flavor)) {
-      const key = labelKey(word);
-      if (score / indices.length < 0.25 || seen.has(key)) continue;
-      seen.add(key); words.push(shortLabel(word));
-      if (words.length === 2) break;
+    for (const [key, label] of main) {
+      const row = scores.get(key) || { label: label.label, score: 0 };
+      row.score += label.score; scores.set(key, row);
     }
-    const representatives = representativeLabelAnchors(albums, indices, edges,
-      Math.max(anchorCount, Math.ceil(indices.length * .6)));
-    return { name, indices, text, description: [text, ...words].join(' · '),
-      tracked: representatives.slice(0, anchorCount), representatives };
-  }).sort((a, b) => b.indices.length - a.indices.length || a.name.localeCompare(b.name));
+    const flavor = album.sound?.flavor?.labels || [], seen = new Set();
+    if (flavor.some(label => Number.isFinite(label.score))) coverage++;
+    for (const label of flavor) {
+      if (!qualifierAxes.has(label.axis) || !Number.isFinite(label.score) || label.score <= 0 || !label.label?.trim()) continue;
+      const text = cleanText(label.label), key = labelKey(text);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      const row = descriptors.get(key) || { text, count: 0 };
+      row.count++; descriptors.set(key, row);
+    }
+  }
+  const main = [...scores.values()].sort((a, b) => b.score - a.score || compareText(a.label, b.label))[0]?.label;
+  const primaryText = main ? cleanText(main) : cleanText(group.name.replace(/^Cluster /, 'Community '));
+  const family = source === 'style' && main?.includes('---') ? cleanText(main.split('---')[0]) : '';
+  const anchors = representativeLabelAnchors(albums, group.indices, edges, group.indices.length);
+  const artist = anchors.map(i => albums[i].albumartist?.trim()).find(text =>
+    text && !['unknown', 'unknown artist', 'various artists'].includes(labelKey(text))) || '';
+  return { ...group, primaryText, family, descriptors, coverage, artist, qualifier: '' };
+}
+
+function buckets(groups, key) {
+  const result = new Map();
+  for (const group of groups) {
+    const value = key(group);
+    if (!result.has(value)) result.set(value, []);
+    result.get(value).push(group);
+  }
+  return [...result.values()];
+}
+const fullName = group => [group.primaryText, group.qualifier].filter(Boolean).join(' · ');
+
+function descriptorQualifier(group, siblings, rules) {
+  if (siblings.some(other => other.coverage / other.indices.length < rules.minCoverage)) return '';
+  // Count top-list occurrences, not measured probabilities. An omitted candidate
+  // has no z-score observation; never average it as zero or mix it with style.
+  return [...group.descriptors].map(([key, row]) => {
+    const support = row.count / group.indices.length;
+    const siblingSupport = Math.max(...siblings.filter(other => other !== group)
+      .map(other => (other.descriptors.get(key)?.count || 0) / other.indices.length));
+    return { ...row, support, advantage: support - siblingSupport, score: support * (support - siblingSupport) };
+  }).filter(row => row.count >= rules.minAlbums && row.support >= rules.minSupport &&
+    row.advantage >= rules.minAdvantage && labelKey(row.text) !== labelKey(group.primaryText))
+    .sort((a, b) => b.score - a.score || b.support - a.support || a.text.length - b.text.length ||
+      compareText(labelKey(a.text), labelKey(b.text)))[0]?.text || '';
+}
+
+function resolveLabelNames(summaries, rules) {
+  const protectedNames = new Set();
+  for (const siblings of buckets(summaries, group => labelKey(group.primaryText))) {
+    if (siblings.length === 1) { protectedNames.add(labelKey(fullName(siblings[0]))); continue; }
+    const families = new Set(siblings.map(group => labelKey(group.family)));
+    if (families.size > 1) for (const group of siblings) group.qualifier = group.family;
+    for (const repeated of buckets(siblings, group => labelKey(fullName(group)))) {
+      if (repeated.length < 2) continue;
+      for (const group of repeated) {
+        const descriptor = descriptorQualifier(group, siblings, rules);
+        group.usedDescriptor = !!descriptor;
+        const qualifier = descriptor || group.artist;
+        group.qualifier = [group.qualifier, qualifier].filter(Boolean).join(' · ');
+      }
+    }
+  }
+  for (const groups of buckets(summaries, group => labelKey(fullName(group)))) {
+    if (groups.length < 2) continue;
+    for (const group of groups) if (group.usedDescriptor && group.artist) group.qualifier += ` · ${group.artist}`;
+  }
+  // Reserve unique originals and unique qualified names before assigning numbers.
+  const collisions = buckets(summaries, group => labelKey(fullName(group)));
+  const numbered = new Set();
+  for (const groups of collisions) {
+    if (groups.length === 1) { protectedNames.add(labelKey(fullName(groups[0]))); continue; }
+    for (const group of groups) if (group.qualifier || !protectedNames.has(labelKey(fullName(group)))) numbered.add(group);
+  }
+  const ordered = [...summaries].sort((a, b) => compareMembership(a, b));
+  for (const [rank, group] of ordered.entries()) {
+    if (!numbered.has(group)) continue;
+    const qualifier = group.qualifier;
+    let number = rank + 1;
+    do { group.qualifier = [qualifier, `Community ${number++}`].filter(Boolean).join(' · '); }
+    while (protectedNames.has(labelKey(fullName(group))));
+    protectedNames.add(labelKey(fullName(group)));
+  }
+  const names = summaries.map(group => labelKey(fullName(group)));
+  if (new Set(names).size !== names.length) throw new Error('Community names must be unique.');
+  return summaries.map(group => ({ name: group.name, membershipKey: group.membershipKey, indices: group.indices,
+    naming: Object.freeze({ primaryText: group.primaryText, qualifier: group.qualifier,
+      displayName: fullName(group), description: fullName(group) }) }));
+}
+
+const compareMembership = (a, b) => Number(a.membershipKey.split(',')[0]) - Number(b.membershipKey.split(',')[0]) ||
+  compareText(a.membershipKey, b.membershipKey);
+
+// Canonical names cover the complete partition. Visibility and screen-label
+// limits are applied only afterwards. Previous definitions cache the partition,
+// so changed edge weights refresh anchors without changing artist qualifiers.
+export function groupLabels(albums, names, visible = () => true,
+    { edges = [], anchorCount = 4, previous = [], mode = 'cluster', rules = qualifierRules } = {}) {
+  const members = labelMembers(albums, names), cached = new Map(previous.map(group => [group.membershipKey, group]));
+  const unchanged = members.length === previous.length && members.every(group => cached.get(group.membershipKey)?.mode === mode);
+  const definitions = unchanged ? members.map(group => ({ ...group, naming: cached.get(group.membershipKey).naming })) :
+    resolveLabelNames(members.map(group => summarizeLabel(albums, group, edges)), rules);
+  return visibleGroupLabels(albums, definitions.map(group => ({ ...group, mode })), visible, { edges, anchorCount });
+}
+
+export function visibleGroupLabels(albums, definitions, visible = () => true, { edges = [], anchorCount = 4 } = {}) {
+  return definitions.flatMap(group => {
+    const indices = group.indices.filter(visible);
+    if (!indices.length) return [];
+    const representatives = representativeLabelAnchors(albums, indices, edges, Math.max(anchorCount, Math.ceil(indices.length * .6)));
+    return [{ ...group, indices, text: group.naming.primaryText, description: group.naming.description,
+      tracked: representatives.slice(0, anchorCount), representatives }];
+  }).sort((a, b) => b.indices.length - a.indices.length || compareMembership(a, b));
+}
+
+export function labelPresentation(group) {
+  const { primaryText, qualifier, displayName, description } = group.naming;
+  const title = `${description} · ${group.indices.length} albums. Click to explore.`;
+  return { primaryText, qualifier, displayName, title, accessibleName: title };
 }
 
 function intersects(a, b, gap) {
