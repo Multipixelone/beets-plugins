@@ -17,6 +17,52 @@ spec.loader.exec_module(server_module)
 
 
 class ServerTests(unittest.TestCase):
+    def test_branding_assets_are_served_only_at_allowlisted_paths(self):
+        with tempfile.TemporaryDirectory() as directory:
+            assets = Path(directory)
+            fixtures = {'favicon.ico': (b'icon fixture', 'image/x-icon'),
+                        'social-card.png': (b'png fixture', 'image/png')}
+            for name, (body, _) in fixtures.items():
+                (assets / name).write_bytes(body)
+            (assets / 'other.png').write_bytes(b'not allowlisted')
+            (assets / 'static').mkdir()
+            (assets / 'static' / 'favicon.ico').write_bytes(b'not allowlisted')
+            with server_module.Server(('127.0.0.1', 0), partial(server_module.Handler,
+                                     directory=str(assets))) as server:
+                thread = threading.Thread(target=server.serve_forever)
+                thread.start()
+                try:
+                    url = f'http://127.0.0.1:{server.server_port}'
+                    for name, (body, content_type) in fixtures.items():
+                        with self.subTest(asset=name):
+                            with urlopen(url + '/' + name + '?v=fixture') as response:
+                                self.assertEqual(response.status, 200)
+                                self.assertEqual(response.read(), body)
+                                self.assertEqual(response.headers['Content-Type'], content_type)
+                                self.assertEqual(response.headers['Content-Length'], str(len(body)))
+                                self.assertEqual(response.headers['X-Content-Type-Options'], 'nosniff')
+                            with urlopen(Request(url + '/' + name, method='HEAD')) as response:
+                                self.assertEqual(response.headers['Content-Type'], content_type)
+                                self.assertEqual(response.headers['Content-Length'], str(len(body)))
+                                self.assertEqual(response.read(), b'')
+                    for path in ['/other.png', '/static/favicon.ico', '/static/social-card.png',
+                                 '/../favicon.ico', '/%2e%2e/social-card.png',
+                                 '/static/../favicon.ico', '/%66avicon.ico',
+                                 '/social-card.png/extra']:
+                        with self.subTest(path=path):
+                            with self.assertRaises(HTTPError) as error:
+                                urlopen(url + path)
+                            self.assertEqual(error.exception.code, 404)
+                            error.exception.close()
+                    (assets / 'favicon.ico').unlink()
+                    with self.assertRaises(HTTPError) as error:
+                        urlopen(url + '/favicon.ico')
+                    self.assertEqual(error.exception.code, 404)
+                    error.exception.close()
+                finally:
+                    server.shutdown()
+                    thread.join()
+
     def test_only_assets_and_selected_json_are_served(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

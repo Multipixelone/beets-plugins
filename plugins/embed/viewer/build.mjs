@@ -8,6 +8,8 @@ await build({ entryPoints: { app: 'app.mjs', worker: 'worker.mjs' }, outdir: 'di
   format: 'esm', platform: 'browser', target: 'es2022', minify: true, legalComments: 'eof',
   plugins: [cosmosAtlasPlugin] });
 await copyFile('style.css', 'dist/style.css');
+await copyFile('static/favicon.ico', 'dist/favicon.ico');
+await copyFile('static/social-card.png', 'dist/social-card.png');
 // Version all viewer assets together so a cached script cannot outlive its UI.
 const assets = await Promise.all(['app.js', 'worker.js', 'style.css'].map(name => readFile(`dist/${name}`)));
 const version = createHash('sha256');

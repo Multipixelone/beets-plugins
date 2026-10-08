@@ -54,6 +54,36 @@ is loaded from the file picker or a different URL. For frontend development,
 run `npm ci` and `npm run build` in `plugins/embed/viewer`, then
 `python server.py --data /path/to/albums.json --covers /path/to/covers`.
 
+### Publishing the viewer
+
+The viewer ships ready for a public instance behind a proxy, as on
+<https://albums.finnrut.is/>: `index.html` declares description, canonical,
+robots, Open Graph and Twitter card metadata with absolute URLs, and links
+`/favicon.ico` and `/social-card.png`, which `npm run build` copies from
+`viewer/static/` into `dist/` for the server to publish. The favicon and the
+card design (dark paper, accent band, Cooper faces, hostname wordmark) come
+from [the author's blog](https://blog.finnrut.is); the card adds a quiet
+constellation in the viewer's community palette and contains no album artwork
+or library data. Regenerate it after palette or copy changes with any Python 3
+that has Pillow installed:
+
+```sh
+python3 scripts/gen_social_card.py   # from plugins/embed/viewer
+```
+
+The script is deterministic and uses only the committed SIL-OFL Cooper faces
+under `scripts/fonts/cooper/`; re-run it and commit the result rather than
+editing the PNG by hand. When deploying your own instance, point the
+metadata's absolute URLs at your origin and either keep the card or render
+one with your own title and hostname.
+
+For a public deployment, the privacy story visitors see in the sidebar is:
+the library JSON and covers load from the same origin; the page itself has no
+analytics; opening a file from the file picker stays in the browser tab; and
+phrase search sends the phrase text to the server for embedding (`POST
+/api/embed-text`, offline CPU model) while matching runs client-side. Keep
+that wording honest if you front the API differently.
+
 Track queries select whole albums. Every track contributes to track count and
 play statistics, using `lastfm_play_count`, then legacy `play_count`, then zero.
 Vectors use the existing mean pooling over currently embedded tracks only.

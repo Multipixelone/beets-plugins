@@ -1,85 +1,410 @@
 <!doctype html>
 <html lang="en">
-<head>
-  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-  <meta name="theme-color" content="#1c1915">
-  <title>Album graph</title><link rel="stylesheet" href="style.css">
-</head>
-<body>
-<header class="topbar">
-  <div class="search-wrap">
-    <label class="search-label" for="search"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 4 4"/></svg><span class="sr-only">Find album or artist</span></label>
-    <input id="search" type="search" placeholder="Find an album or artist…" autocomplete="off" disabled aria-controls="search-results">
-    <div id="search-results" hidden><p id="matches" role="status"></p><div id="search-list"></div></div>
-  </div>
-  <button id="settings-toggle" title="Map settings" aria-expanded="false" aria-controls="controls"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 17h16"/><circle cx="9" cy="7" r="3"/><circle cx="15" cy="17" r="3"/></svg>Map settings</button>
-</header>
-<div class="workspace">
-  <button id="settings-backdrop" hidden aria-label="Close map settings"></button>
-  <aside id="controls" aria-label="Map settings">
-    <div class="sidebar-intro"><h1>Album graph</h1><p id="library-count" role="status">No library loaded</p></div>
-    <button id="surprise" class="primary" disabled>Random album</button>
-    <details class="control-section" open><summary>Map appearance</summary><div class="section-content">
-      <label>Album artwork <output id="art-size-value">100%</output><input id="art-size" type="range" min="0.6" max="1.8" step="0.1" value="1"></label>
-      <label>Size albums by<select id="size"><option value="uniform">Equal size</option><option value="summed_plays" selected>Total plays</option><option value="mean_plays">Average plays</option><option value="track_count">Track count</option></select></label>
-        <label>Color albums by<select id="group"><option value="cluster">Sound community</option><option value="genre">Genre</option><option value="albumartist">Album artist</option><option value="year">Year</option><option value="decade">Decade</option><option value="style">Top style</option><option value="mood">Top mood</option><option value="flavor">Top flavor word</option></select></label>
-    </div></details>
-<details id="phrase-section" class="control-section" open><summary>Describe a sound</summary><div class="section-content">
-  <label>Describe a sound<input id="phrase" type="search" maxlength="240" placeholder="Rainy night jazz piano…" disabled></label>
-  <div class="phrase-actions"><button id="clear-phrase">Clear phrase</button><button id="gather" hidden aria-pressed="false">Gather matches</button></div>
-  <p class="muted">Strong matches grow and brighten; other albums fade. Your filters still hide excluded albums.</p>
-  <p id="phrase-status" class="muted" role="status" aria-live="polite"></p>
-  <details id="vibe-matches" hidden open><summary>Top matches <span id="vibe-count" class="count"></span></summary>
-    <p class="muted">Cosine similarity · higher scores are closer to your phrase.</p>
-    <ol id="phrase-results" aria-label="Top matching albums"></ol>
-  </details>
-</div></details>
-<details class="control-section"><summary>Sound lens and filters</summary><div class="section-content">
-  <fieldset id="sound-controls" disabled><legend>Sound lens and filters</legend>
-    <label>Find a label<input id="lens" type="search" list="sound-labels" placeholder="Style, mood, texture…"><datalist id="sound-labels"></datalist></label>
-    <button id="clear-lens">Clear lens</button>
-    <label>Danceable: minimum <output id="dance-min-value">0.00</output><input id="dance-min" type="range" min="0" max="1" step="0.01" value="0"></label>
-    <label>Danceable: maximum <output id="dance-max-value">1.00</output><input id="dance-max" type="range" min="0" max="1" step="0.01" value="1"></label>
-    <label>Vocals<select id="vocal"><option value="any">Any</option><option value="voice">Vocal</option><option value="instrumental">Instrumental</option></select></label>
-    <label class="check"><input id="include-unknown" type="checkbox"> Include unknown filter values</label>
-    <p class="muted">Danceable is the Essentia classifier probability. Non-matches are hidden and frozen; visible albums keep moving.</p>
-  </fieldset>
-  <label class="check"><input id="show-labels" type="checkbox" checked> Show group labels</label>
-</div></details>
-    <details class="control-section"><summary>Connections</summary><div class="section-content">
-      <label>Visible connections<select id="edge-view"><option value="strongest">Local neighbors and bridges</option><option value="all">All connections</option><option value="selected">Focused album only</option></select></label>
-      <p class="muted">Hover or select an album to reveal its connections. Its closest neighbors stand out; quieter bridges connect sounds. Click a group label to explore its albums.</p>
-      <label class="check"><input id="use-k" type="checkbox" checked> Limit nearest neighbors</label>
-      <label>Neighbors <output id="k-value">8</output><input id="k" type="range" min="0" max="100" step="1" value="8"></label>
-      <label class="check"><input id="use-threshold" type="checkbox" checked> Filter by similarity</label>
-      <label>Minimum similarity <output id="threshold-value">0.70</output><input id="threshold" type="range" min="-1" max="1" step="0.01" value="0.7"></label>
-      <p class="muted">When both are on, similarity filters the nearest neighbors. Connections work in both directions.</p>
-    </div></details>
-    <details class="control-section"><summary>Motion &amp; rendering</summary><div class="section-content">
-      <label>Layout<select id="layout-mode"><option value="communities">Connected communities</option><option value="free">Album forces only</option></select></label>
-      <div id="forces"></div>
-      <label>Show albums as<select id="render-mode"><option value="covers">Album covers</option><option value="dots">Colored dots</option><option value="auto">Automatic</option></select></label>
-      <label>Auto: minimum zoom <output id="cover-zoom-value">1.00</output><input id="cover-zoom" type="range" min="0.1" max="5" step="0.1" value="1"></label>
-      <p class="muted">Small covers stay cached; visible albums gain detail as you zoom in.</p>
-      <p id="cover-status" class="muted">Loading overview covers.</p>
-    </div></details>
-    <details class="control-section" open><summary>Color key <span id="group-count" class="count"></span></summary><p class="muted">The frame around each cover shows its group.</p><div id="legend" aria-label="Group legend"></div></details>
-    <details class="control-section library-section"><summary>Your library</summary><div class="section-content">
-      <p id="source" class="muted">Choose an exported album library to begin.</p>
-      <label class="file">Open album export<input id="file" type="file" accept=".json,application/json"></label>
-    </div></details>
-    <div class="sidebar-footer"><a href="THIRD_PARTY_LICENSES.txt">Open-source licenses</a></div>
-  </aside>
-  <main>
-    <div id="graph" aria-label="Interactive album similarity graph"></div>
-    <div id="map-labels" aria-label="Sound communities"></div>
-    <div id="empty"><h2>No library loaded</h2><p>Open an album export to explore its connections.</p><button id="empty-load">Open album export</button></div>
-    <section id="details" hidden aria-label="Selected album"><button id="clear" aria-label="Close album details">×</button><div id="info"></div></section>
-    <div id="tooltip" hidden></div>
-    <button id="gather-map" hidden aria-pressed="false">Ungather</button>
-    <div class="map-footer"><p id="status" role="status" aria-live="polite">Waiting for your library.</p><p class="map-hint">Drag to explore <span>·</span> Scroll to zoom <span>·</span> Select an album</p></div>
-    <div class="map-toolbar" aria-label="Graph navigation"><button id="zoom-out" aria-label="Zoom out">−</button><button id="zoom-in" aria-label="Zoom in">+</button><span class="toolbar-divider"></span><button id="fit" title="Fit all albums in view"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 4H4v5m11-5h5v5M4 15v5h5m11-5v5h-5"/></svg>Fit view</button><span class="toolbar-divider"></span><button id="pause" aria-pressed="false">Live physics</button></div>
-  </main>
-</div>
-<script type="module" src="app.js"></script>
-</body></html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <meta name="theme-color" content="#1c1915" />
+    <title>Finn's Library</title>
+    <meta
+      name="description"
+      content="Explore my music collection as an interactive map — albums grouped by how they sound, with covers, communities, filters, and phrase search."
+    />
+    <link rel="canonical" href="https://albums.finnrut.is/" />
+    <meta
+      name="robots"
+      content="index, follow, max-image-preview:large, max-snippet:-1"
+    />
+    <meta name="author" content="Finn Rutis" />
+    <meta property="og:title" content="Finn's Library" />
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://albums.finnrut.is/" />
+    <meta
+      property="og:description"
+      content="Explore my music collection as an interactive map — albums grouped by how they sound, with covers, communities, filters, and phrase search."
+    />
+    <meta property="og:site_name" content="Finn's Library" />
+    <meta property="og:locale" content="en_US" />
+    <meta
+      property="og:image"
+      content="https://albums.finnrut.is/social-card.png"
+    />
+    <meta property="og:image:width" content="2400" />
+    <meta property="og:image:height" content="1260" />
+    <meta property="og:image:type" content="image/png" />
+    <meta
+      property="og:image:alt"
+      content="Finn's Library — Explore my music collection · albums.finnrut.is"
+    />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:site" content="@Multipixelone" />
+    <meta name="twitter:creator" content="@Multipixelone" />
+    <meta name="twitter:title" content="Finn's Library" />
+    <meta
+      name="twitter:description"
+      content="Explore my music collection as an interactive map — albums grouped by how they sound, with covers, communities, filters, and phrase search."
+    />
+    <meta
+      name="twitter:image"
+      content="https://albums.finnrut.is/social-card.png"
+    />
+    <meta
+      name="twitter:image:alt"
+      content="Finn's Library — Explore my music collection · albums.finnrut.is"
+    />
+    <link rel="icon" href="/favicon.ico" />
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="search-wrap">
+        <label class="search-label" for="search"
+          ><svg viewBox="0 0 24 24" aria-hidden="true">
+            <circle cx="10.5" cy="10.5" r="6.5" />
+            <path d="m16 16 4 4" /></svg
+          ><span class="sr-only">Find album or artist</span></label
+        >
+        <input
+          id="search"
+          type="search"
+          placeholder="Find an album or artist…"
+          autocomplete="off"
+          disabled
+          aria-controls="search-results"
+        />
+        <div id="search-results" hidden>
+          <p id="matches" role="status"></p>
+          <div id="search-list"></div>
+        </div>
+      </div>
+      <button
+        id="settings-toggle"
+        title="Map settings"
+        aria-expanded="false"
+        aria-controls="controls"
+      >
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M4 7h16M4 17h16" />
+          <circle cx="9" cy="7" r="3" />
+          <circle cx="15" cy="17" r="3" /></svg
+        >Map settings
+      </button>
+    </header>
+    <div class="workspace">
+      <button
+        id="settings-backdrop"
+        hidden
+        aria-label="Close map settings"
+      ></button>
+      <aside id="controls" aria-label="Map settings">
+        <div class="sidebar-intro">
+          <h1>Finn's Library</h1>
+          <p id="library-count" role="status">No library loaded</p>
+        </div>
+        <button id="surprise" class="primary" disabled>Random album</button>
+        <details class="control-section">
+          <summary>About this map</summary>
+          <div class="section-content">
+            <p class="muted">
+              Albums from my beets library, placed by how they sound. An audio
+              model (Discogs-EffNet) analyzed each album and converted their
+              sound into high level vectors. Similar-sounding albums sit close
+              together, and lines connect the closest matches.
+            </p>
+            <p class="muted">
+              Select an album to see the calculated numbers. Try the natural
+              language tool to describe a sound to highlight matches. It's neat.
+              Hit the gather button :-)
+            </p>
+            <p class="muted">
+              Phrase search runs locally on my desktop, turning your query into
+              the vectors. Matching against the library happens in your browser.
+            </p>
+          </div>
+        </details>
+        <details class="control-section" open>
+          <summary>Map appearance</summary>
+          <div class="section-content">
+            <label
+              >Album artwork <output id="art-size-value">100%</output
+              ><input
+                id="art-size"
+                type="range"
+                min="0.6"
+                max="1.8"
+                step="0.1"
+                value="1"
+            /></label>
+            <label
+              >Size albums by<select id="size">
+                <option value="uniform">Equal size</option>
+                <option value="summed_plays" selected>Total plays</option>
+                <option value="mean_plays">Average plays</option>
+                <option value="track_count">Track count</option>
+              </select></label
+            >
+            <label
+              >Color albums by<select id="group">
+                <option value="cluster">Sound community</option>
+                <option value="genre">Genre</option>
+                <option value="albumartist">Album artist</option>
+                <option value="year">Year</option>
+                <option value="decade">Decade</option>
+                <option value="style">Top style</option>
+                <option value="mood">Top mood</option>
+                <option value="flavor">Top flavor word</option>
+              </select></label
+            >
+          </div>
+        </details>
+        <details id="phrase-section" class="control-section" open>
+          <summary>Describe a sound</summary>
+          <div class="section-content">
+            <label
+              >Describe a sound<input
+                id="phrase"
+                type="search"
+                maxlength="240"
+                placeholder="Rainy night jazz piano…"
+                disabled
+            /></label>
+            <div class="phrase-actions">
+              <button id="clear-phrase">Clear phrase</button
+              ><button id="gather" hidden aria-pressed="false">
+                Gather matches
+              </button>
+            </div>
+            <p class="muted">
+              Strong matches grow and brighten; other albums fade. Your filters
+              still hide excluded albums.
+            </p>
+            <p class="muted">
+              Your phrase goes to this server to be turned into numbers; the
+              matching happens in your browser.
+            </p>
+            <p
+              id="phrase-status"
+              class="muted"
+              role="status"
+              aria-live="polite"
+            ></p>
+            <details id="vibe-matches" hidden open>
+              <summary>
+                Top matches <span id="vibe-count" class="count"></span>
+              </summary>
+              <p class="muted">
+                Cosine similarity · higher scores are closer to your phrase.
+              </p>
+              <ol id="phrase-results" aria-label="Top matching albums"></ol>
+            </details>
+          </div>
+        </details>
+        <details class="control-section">
+          <summary>Sound lens and filters</summary>
+          <div class="section-content">
+            <fieldset id="sound-controls" disabled>
+              <legend>Sound lens and filters</legend>
+              <label
+                >Find a label<input
+                  id="lens"
+                  type="search"
+                  list="sound-labels"
+                  placeholder="Style, mood, texture…" /><datalist
+                  id="sound-labels"
+                ></datalist
+              ></label>
+              <button id="clear-lens">Clear lens</button>
+              <label
+                >Danceable: minimum <output id="dance-min-value">0.00</output
+                ><input
+                  id="dance-min"
+                  type="range"
+                  min="0"
+                  max="1"
+                  step="0.01"
+                  value="0"
+              /></label>
+              <label
+                >Danceable: maximum <output id="dance-max-value">1.00</output
+                ><input
+                  id="dance-max"
+                  type="range"
+                  min="0"
+                  max="1"
+                  step="0.01"
+                  value="1"
+              /></label>
+              <label
+                >Vocals<select id="vocal">
+                  <option value="any">Any</option>
+                  <option value="voice">Vocal</option>
+                  <option value="instrumental">Instrumental</option>
+                </select></label
+              >
+              <label class="check"
+                ><input id="include-unknown" type="checkbox" /> Include unknown
+                filter values</label
+              >
+              <p class="muted">
+                Danceable is the Essentia classifier probability. Non-matches
+                are hidden and frozen; visible albums keep moving.
+              </p>
+            </fieldset>
+            <label class="check"
+              ><input id="show-labels" type="checkbox" checked /> Show group
+              labels</label
+            >
+          </div>
+        </details>
+        <details class="control-section">
+          <summary>Connections</summary>
+          <div class="section-content">
+            <label
+              >Visible connections<select id="edge-view">
+                <option value="strongest">Local neighbors and bridges</option>
+                <option value="all">All connections</option>
+                <option value="selected">Focused album only</option>
+              </select></label
+            >
+            <p class="muted">
+              Hover or select an album to reveal its connections. Its closest
+              neighbors stand out; quieter bridges connect sounds. Click a group
+              label to explore its albums.
+            </p>
+            <label class="check"
+              ><input id="use-k" type="checkbox" checked /> Limit nearest
+              neighbors</label
+            >
+            <label
+              >Neighbors <output id="k-value">8</output
+              ><input id="k" type="range" min="0" max="100" step="1" value="8"
+            /></label>
+            <label class="check"
+              ><input id="use-threshold" type="checkbox" checked /> Filter by
+              similarity</label
+            >
+            <label
+              >Minimum similarity <output id="threshold-value">0.70</output
+              ><input
+                id="threshold"
+                type="range"
+                min="-1"
+                max="1"
+                step="0.01"
+                value="0.7"
+            /></label>
+            <p class="muted">
+              When both are on, similarity filters the nearest neighbors.
+              Connections work in both directions.
+            </p>
+          </div>
+        </details>
+        <details class="control-section">
+          <summary>Motion &amp; rendering</summary>
+          <div class="section-content">
+            <label
+              >Layout<select id="layout-mode">
+                <option value="communities">Connected communities</option>
+                <option value="free">Album forces only</option>
+              </select></label
+            >
+            <div id="forces"></div>
+            <label
+              >Show albums as<select id="render-mode">
+                <option value="covers">Album covers</option>
+                <option value="dots">Colored dots</option>
+                <option value="auto">Automatic</option>
+              </select></label
+            >
+            <label
+              >Auto: minimum zoom <output id="cover-zoom-value">1.00</output
+              ><input
+                id="cover-zoom"
+                type="range"
+                min="0.1"
+                max="5"
+                step="0.1"
+                value="1"
+            /></label>
+            <p class="muted">
+              Small covers stay cached; visible albums gain detail as you zoom
+              in.
+            </p>
+            <p id="cover-status" class="muted">Loading overview covers.</p>
+          </div>
+        </details>
+        <details class="control-section" open>
+          <summary>
+            Color key <span id="group-count" class="count"></span>
+          </summary>
+          <p class="muted">The frame around each cover shows its group.</p>
+          <div id="legend" aria-label="Group legend"></div>
+        </details>
+        <details class="control-section library-section">
+          <summary>Your library</summary>
+          <div class="section-content">
+            <p id="source" class="muted">
+              On the public site this is the host's published library. Open your
+              own export to replace it — files you open stay in this browser
+              tab.
+            </p>
+            <label class="file"
+              >Open album export<input
+                id="file"
+                type="file"
+                accept=".json,application/json"
+            /></label>
+          </div>
+        </details>
+        <div class="sidebar-footer">
+          <a href="https://blog.finnrut.is/">Made by Finn Rutis</a>
+          <a
+            href="https://github.com/Multipixelone/beets-plugins/tree/main/plugins/embed/viewer"
+            >View source code</a
+          >
+          <a href="THIRD_PARTY_LICENSES.txt">Open-source licenses</a>
+        </div>
+      </aside>
+      <main>
+        <div id="graph" aria-label="Interactive album similarity graph"></div>
+        <div id="map-labels" aria-label="Sound communities"></div>
+        <div id="empty">
+          <h2 id="empty-title">No library loaded</h2>
+          <p id="empty-message">
+            Open an album export to explore its connections.
+          </p>
+          <button id="empty-load">Open album export</button>
+        </div>
+        <section id="details" hidden aria-label="Selected album">
+          <button id="clear" aria-label="Close album details">×</button>
+          <div id="info"></div>
+        </section>
+        <div id="tooltip" hidden></div>
+        <button id="gather-map" hidden aria-pressed="false">Ungather</button>
+        <div class="map-footer">
+          <p id="status" role="status" aria-live="polite">
+            Waiting for your library.
+          </p>
+          <p class="map-hint">
+            Drag to explore <span>·</span> Scroll to zoom <span>·</span> Select
+            an album
+          </p>
+          <p class="map-hint map-hint-touch">
+            Drag to pan <span>·</span> Pinch to zoom <span>·</span> Tap an album
+          </p>
+        </div>
+        <div class="map-toolbar" aria-label="Graph navigation">
+          <button id="zoom-out" aria-label="Zoom out">−</button
+          ><button id="zoom-in" aria-label="Zoom in">+</button
+          ><span class="toolbar-divider"></span
+          ><button id="fit" title="Fit all albums in view">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M9 4H4v5m11-5h5v5M4 15v5h5m11-5v5h-5" /></svg
+            >Fit view</button
+          ><span class="toolbar-divider"></span
+          ><button id="pause" aria-pressed="false">Live physics</button>
+        </div>
+      </main>
+    </div>
+    <script type="module" src="app.js"></script>
+  </body>
+</html>

@@ -18,10 +18,14 @@ from text_query import QueryError, TextQuery
 
 COVER_PATH = re.compile(r"/covers/cover-[0-9a-f]{64}\.jpg\Z")
 
-ASSETS = {"/", "/index.html", "/app.js", "/worker.js", "/style.css", "/THIRD_PARTY_LICENSES.txt"}
+ASSETS = {"/", "/index.html", "/app.js", "/worker.js", "/style.css", "/THIRD_PARTY_LICENSES.txt",
+          "/favicon.ico", "/social-card.png"}
 
 
 class Handler(SimpleHTTPRequestHandler):
+    extensions_map = {**SimpleHTTPRequestHandler.extensions_map,
+                      '.ico': 'image/x-icon', '.png': 'image/png'}
+
     def __init__(self, *args, data=None, covers=None, **kwargs):
         self.data = data
         self.covers = covers

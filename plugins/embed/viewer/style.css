@@ -164,3 +164,12 @@ button[aria-pressed=true] { background: var(--selection-bg); border-color: var(-
 #phrase-results .album-result[aria-pressed=true] .vibe-rank { color: var(--ink); }
 summary:hover, a { color: var(--accent); }
 a:hover, .sidebar-footer a:hover { color: var(--accent-hover); }
+
+/* Touch screens have no scroll wheel or hover; swap the hint for honest
+   gestures. Narrow layouts already hide hints entirely, so only wide
+   coarse-pointer screens (touchscreen laptops, large tablets) see this. */
+.map-hint-touch { display: none; }
+@media (min-width: 1101px) and (pointer: coarse) {
+  .map-hint { display: none; }
+  .map-hint.map-hint-touch { display: block; }
+}

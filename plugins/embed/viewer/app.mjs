@@ -426,6 +426,20 @@ function configureCommunities() {
 function status(message, error = false) {
   $('status').textContent = message; $('status').classList.toggle('error', error);
 }
+// The graph renders through cosmos.gl, which needs WebGL 2. Check once up
+// front so an unsupported browser gets a clear explanation instead of a
+// half-initialized page and a console error.
+const webgl2Supported = !!document.createElement('canvas').getContext('webgl2');
+function showEmpty(title, message) {
+  $('empty').hidden = false;
+  $('empty-title').textContent = title;
+  $('empty-message').textContent = message;
+}
+function showWebGLError() {
+  showEmpty('WebGL 2 is unavailable',
+    'This map draws albums with WebGL 2, which is missing or turned off in this browser. Enable hardware acceleration or try a current browser, then reload.');
+  status('WebGL 2 is unavailable in this browser.', true);
+}
 function options() {
   return { useK: $('use-k').checked, k: Number($('k').value),
     useThreshold: $('use-threshold').checked, threshold: Number($('threshold').value) };
@@ -795,7 +809,8 @@ function updateSearch() {
   updateGatherControls();
   if (gatherEnabled) layoutGather(); else fitVibeMatches();
 }
-async function load(exported, name) {
+async function load(exported, name, label = name) {
+  if (!webgl2Supported) { showWebGLError(); return; }
   try {
     validateExport(exported);
     phraseSearch.set(''); $('phrase').value = ''; $('phrase-results').replaceChildren();
@@ -839,7 +854,7 @@ async function load(exported, name) {
     $('search').value = ''; $('matches').textContent = ''; $('legend').replaceChildren();
     $('search-results').hidden = true; $('search-list').replaceChildren();
     const skipped = data.summary?.skipped_albums ?? 0;
-    $('source').textContent = `${name}\n${data.albums.length} albums · ${skipped.toLocaleString()} skipped\nExported ${new Date(data.exported_at).toLocaleDateString()}`;
+    $('source').textContent = `${label}\n${data.albums.length} albums · ${skipped.toLocaleString()} skipped\nExported ${new Date(data.exported_at).toLocaleDateString()}`;
     $('source').title = `Embedding model: ${data.model_id}`;
     $('source').style.whiteSpace = 'pre-line';
     $('search').disabled = true;
@@ -849,7 +864,7 @@ async function load(exported, name) {
     $('k').value = Math.min(8, Number($('k').max));
     $('k-value').value = $('k').value;
     $('empty').hidden = !!data.albums.length;
-    if (!data.albums.length) { $('empty').textContent = 'No albums with current embeddings in this export.'; status('Empty export loaded.'); return; }
+    if (!data.albums.length) { showEmpty('Empty export', 'No albums with current embeddings in this export.'); status('Empty export loaded.'); return; }
     const config = { backgroundColor: theme.background, pointDefaultColor: themeValue('--point-default'),
       spaceSize: 4096, enableDrag: true, fitViewOnInit: false,
       pixelRatio: window.devicePixelRatio || 1,
@@ -1071,8 +1086,18 @@ document.addEventListener('keydown', event => {
 for (const event of ['pointerdown', 'wheel', 'touchstart']) $('graph').addEventListener(event, () => { initialFitPending = false; }, { passive: true });
 window.matchMedia('(min-width: 761px)').addEventListener('change', event => { if (event.matches) setSettingsOpen(false); });
 const url = new URLSearchParams(location.search).get('data');
-if (url) {
+if (url && !webgl2Supported) showWebGLError();
+else if (url) {
+  showEmpty('Loading library…', 'Fetching the published export from this site.');
   status('Loading export…');
+  // A same-origin path is this site's published library; anything else keeps
+  // its URL so the source line stays honest about where data came from.
+  const label = url.startsWith('http') ? url : `This site's library (${url})`;
   fetch(url).then(response => { if (!response.ok) throw new Error(`HTTP ${response.status}`); return response.json(); })
-    .then(exported => load(exported, url)).catch(error => status(`Cannot fetch export: ${error.message}`, true));
+    .then(exported => load(exported, url, label))
+    .catch(error => {
+      status(`Cannot fetch export: ${error.message}`, true);
+      showEmpty('Cannot load the library',
+        `Fetching the published export failed (${error.message}). Try reloading, or open an album export file instead.`);
+    });
 }
