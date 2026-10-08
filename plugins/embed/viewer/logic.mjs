@@ -331,6 +331,15 @@ export function groups(albums, mode, clusters) {
   });
 }
 
+// Keep exact palette anchors for the first groups, then spread additional
+// groups across lighter variants. Labels remain the identity of each group.
+export function communityColor(index, palette, ink) {
+  const anchor = palette[index % palette.length];
+  const amount = 0.4 * ((Math.floor(index / palette.length) * 0.61803398875) % 1);
+  return [...anchor.map((value, channel) =>
+    Math.round(255 * (value * (1 - amount) + ink[channel] * amount)) / 255), 1];
+}
+
 export function pointSizes(albums, metric) {
   if (metric === 'uniform') return new Float32Array(albums.length).fill(12);
   const values = albums.map(a => a[metric]);

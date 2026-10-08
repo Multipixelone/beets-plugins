@@ -1,5 +1,5 @@
 import { Graph, defaultConfigValues } from '@cosmos.gl/graph';
-import { validateExport, groups, pointSizes, artworkSizes, seedLayout, layoutSpaceSize, layoutParameters, showCovers, coverCandidates } from './logic.mjs';
+import { validateExport, groups, communityColor, pointSizes, artworkSizes, seedLayout, layoutSpaceSize, layoutParameters, showCovers, coverCandidates } from './logic.mjs';
 
 import { CoverLoader, decodeCover, coverPolicy, drawnCoverPixels, constrainedCovers, coverPriority, mipTier, decodeOverview } from './covers.mjs';
 import { decodeColumn, selectionState, soundSections, groupLabels, visibleGroupLabels, labelPresentation, placeLabels } from './sound.mjs';
@@ -13,6 +13,17 @@ import { GatherPositions, gatherRings } from './gather.mjs';
 
 const $ = id => document.getElementById(id);
 const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+// CSS is the single palette source for both DOM chrome and the GPU renderer.
+const themeStyle = getComputedStyle(document.documentElement);
+const themeValue = name => themeStyle.getPropertyValue(name).trim();
+const themeRgb = name => themeValue(name).slice(1).match(/../g).map(value => parseInt(value, 16) / 255);
+const theme = {
+  background: themeValue('--paper'), ink: themeRgb('--ink'),
+  pointDefault: themeRgb('--point-default'), pointSelected: themeRgb('--point-selected'),
+  palette: ['orange', 'blue', 'purple', 'green', 'red', 'aqua', 'yellow'].map(name => themeRgb(`--community-${name}`)),
+  edges: { base: themeRgb('--edge-base'), bridge: themeRgb('--edge-bridge'),
+    focus: themeRgb('--edge-focus'), secondary: themeRgb('--edge-secondary') }
+};
 let graph, worker, data, clusters = [], edges = [], selected, paused = false;
 let coverLoader, coverTimer, atlasTimer, visibleCovers = [], atlasEntries = [], coverActive = false;
 let dragging = false, zooming = false, graphReady = false;
@@ -111,7 +122,7 @@ function refreshLabels() {
 function updateColors() {
   if (!graphReady) return;
   graph.setPointColors(Float32Array.from(groupNames.flatMap((name, i) => {
-    const rgba = i === selected ? [0.88, 0.94, 1, 1] : color(groupIds.get(name));
+    const rgba = i === selected ? [...theme.pointSelected, 1] : color(groupIds.get(name));
     rgba[3] = gatherAppearance.opacity(selection.states[i], selection.vibeActive);
     return rgba;
   })));
@@ -575,6 +586,7 @@ function updateHighlights() {
   const focus = hovered ?? selected, sizes = albumImageSizes();
   const pixels = (sizes[focus] ?? 56 * geometryScale) * graph.getZoomLevel();
   const style = edgeStyles(edges, { clusters, mode: $('edge-view').value, selected, hovered,
+    palette: theme.edges,
     visible: query ? selection.states.map(state => state.visible) : undefined,
     coverPixels: pixels, bridges: query ? undefined : bridgeEdges, strongest: query ? undefined : strongestEdges });
   // Vibe search keeps every visible link but grades alpha by endpoint salience.
@@ -691,12 +703,7 @@ function appendSounds(container, album) {
   }
 }
 function color(index) {
-  const h = (index * 0.61803398875) % 1;
-  const rgb = [0, 8, 4].map(offset => {
-    const k = (offset + h * 12) % 12;
-    return 0.62 - 0.22 * Math.max(-1, Math.min(k - 3, 9 - k, 1));
-  });
-  return [...rgb, 1];
+  return index === undefined ? [...theme.pointDefault, 1] : communityColor(index, theme.palette, theme.ink);
 }
 function updateGroups() {
   if (!graph || !data) return;
@@ -843,11 +850,12 @@ async function load(exported, name) {
     $('k-value').value = $('k').value;
     $('empty').hidden = !!data.albums.length;
     if (!data.albums.length) { $('empty').textContent = 'No albums with current embeddings in this export.'; status('Empty export loaded.'); return; }
-    const config = { backgroundColor: '#0d1117', spaceSize: 4096, enableDrag: true, fitViewOnInit: false,
+    const config = { backgroundColor: theme.background, pointDefaultColor: themeValue('--point-default'),
+      spaceSize: 4096, enableDrag: true, fitViewOnInit: false,
       pixelRatio: window.devicePixelRatio || 1,
       enableSimulation: !paused, enableSimulationDuringZoom: false,
       transitionDuration: 0, rescalePositions: false, scalePointsOnZoom: true,
-      pointGreyoutOpacity: 0.45, linkOpacity: 1, linkDefaultColor: '#637b99',
+      pointGreyoutOpacity: 0.45, linkOpacity: 1, linkDefaultColor: themeValue('--edge-base'),
       linkDefaultWidth: 1.1, scaleLinksOnZoom: false, linkGreyoutOpacity: 0,
       linkVisibilityDistanceRange: [0, 1], linkVisibilityMinTransparency: 1,
       hoveredLinkColor: undefined, renderHoveredPointRing: false,

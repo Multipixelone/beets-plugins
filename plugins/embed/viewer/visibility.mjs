@@ -53,7 +53,7 @@ export function bridgeLinks(edges, clusters, visible) {
 // Sizes are CSS pixels, independent of display DPR. Only visual emphasis changes
 // with zoom; every focus-incident link remains available, including weak ones.
 export function edgeStyles(edges, { clusters = [], visible, mode = 'strongest', selected, hovered,
-    coverPixels = 16, bridges = bridgeLinks(edges, clusters, visible), strongest, detailLimit = 6 } = {}) {
+    coverPixels = 16, bridges = bridgeLinks(edges, clusters, visible), strongest, detailLimit = 6, palette } = {}) {
   const colors = new Float32Array(edges.length * 4), widths = new Float32Array(edges.length);
   const focus = Number.isInteger(hovered) && (!visible || visible[hovered]) ? hovered :
     Number.isInteger(selected) && (!visible || visible[selected]) ? selected : undefined;
@@ -83,16 +83,16 @@ export function edgeStyles(edges, { clusters = [], visible, mode = 'strongest', 
   const close = amount * amount * (3 - 2 * amount);
   edges.forEach((edge, index) => {
     if (!eligibleLink(edge, visible)) return;
-    let rgb = [0.36, 0.45, 0.54], opacity, width;
+    let rgb = palette.base, opacity, width;
     if (incident.has(index)) {
       if (detail.has(index)) {
-        rgb = [0.62, 0.73, 0.82]; opacity = 0.3 + 0.4 * close; width = 0.65 + 0.65 * close;
+        rgb = palette.focus; opacity = 0.3 + 0.4 * close; width = 0.65 + 0.65 * close;
       } else {
-        rgb = [0.43, 0.53, 0.62]; opacity = 0.09 + 0.12 * close; width = 0.45 + 0.3 * close;
+        rgb = palette.secondary; opacity = 0.09 + 0.12 * close; width = 0.45 + 0.3 * close;
       }
     } else if (mode === 'selected') return;
     else if (bridges.has(index)) {
-      rgb = [0.47, 0.58, 0.66]; opacity = 0.23 + 0.1 * close; width = 0.65 + 0.2 * close;
+      rgb = palette.bridge; opacity = 0.23 + 0.1 * close; width = 0.65 + 0.2 * close;
     } else if (strongest.has(index)) {
       opacity = 0.1 + 0.12 * close; width = 0.5 + 0.2 * close;
     } else if (mode === 'all') {

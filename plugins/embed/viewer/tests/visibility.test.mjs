@@ -1,9 +1,26 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { FilterPositions, visibleLinks, bridgeLinks, edgeStyles } from '../visibility.mjs';
+import { FilterPositions, visibleLinks, bridgeLinks, edgeStyles as themedEdgeStyles } from '../visibility.mjs';
 import { selectionState, groupLabels } from '../sound.mjs';
 
+const palette = { base: [.6, .5, .4], bridge: [.5, .7, .4], focus: [1, .6, .2], secondary: [.7, .6, .5] };
+const edgeStyles = (edges, options) => themedEdgeStyles(edges, { palette, ...options });
+
 const finite = array => [...array].map(value => Number.isFinite(value));
+test('edge tiers use the supplied theme without losing opacity or width hierarchy', () => {
+  const edges = [{ source: 0, target: 1, similarity: .99 }, { source: 0, target: 2, similarity: .9 },
+    { source: 2, target: 3, similarity: .8 }, { source: 3, target: 4, similarity: .7 },
+    { source: 4, target: 5, similarity: .6 }];
+  const result = edgeStyles(edges, { selected: 0, detailLimit: 1, mode: 'all', coverPixels: 100,
+    bridges: new Set([2]), strongest: new Set([3]) });
+  [palette.focus, palette.secondary, palette.bridge, palette.base, palette.base].forEach((rgb, index) => {
+    const actual = result.colors.slice(index * 4, index * 4 + 3);
+    assert.ok(rgb.every((channel, i) => Math.abs(channel - actual[i]) < 1e-6));
+  });
+  assert.ok(result.colors[3] > result.colors[7]);
+  assert.ok(result.colors[11] > result.colors[15] && result.colors[15] > result.colors[19]);
+  assert.ok(result.widths[0] > result.widths[1]);
+});
 test('hidden positions freeze in saved coordinates while visible points continue moving', () => {
   const state = new FilterPositions(3);
   state.seed([10, 20, 30, 40, 50, 60]);
