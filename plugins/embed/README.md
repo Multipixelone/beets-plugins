@@ -724,6 +724,21 @@ time. Periodic statistics cover the latest interval; final statistics cover the
 whole run. ONNX session threads block while idle, and Torch uses the configured
 intra-op count with one inter-op thread.
 
+For an on-demand Python stack dump, find the Python inference worker in the
+service's process tree (`systemctl status beets-embed-backfill.service`), then run
+`kill -USR1 <worker-pid>` as its user. All threads' Python stacks go to stderr;
+for the nightly service, read them with
+`journalctl -u beets-embed-backfill.service -n 200 --no-pager`. Signal the Python
+worker, not the service MainPID (the deployed MainPID is a timeout wrapper), the
+backfill runner, or a process group. SIGUSR1 dumps stacks and processing continues;
+SIGTERM/SIGINT still perform the existing graceful stop with completed families
+committed. Registration precedes model loading, so initialization can also be
+inspected. These are Python stacks: a native inference call may appear only at
+its Python caller. On `link`, `kernel.yama.ptrace_scope=1` prevents an unrelated
+same-user py-spy attach; native/sampling profiling requires root or applicable
+ptrace permission, or starting the worker under the profiler. SIGUSR1 needs no
+ptrace access or system configuration change.
+
 The external SQLite store uses WAL and per-family commits. Mean/std blobs are
 little-endian float16, head scores float32; labels and full model provenance
 are shared in the `models` table. A vector key includes beets ID, absolute

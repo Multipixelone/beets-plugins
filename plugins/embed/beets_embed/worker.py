@@ -1,6 +1,7 @@
 """Persistent inference process with per-track commits and graceful termination."""
 
 import argparse
+import faulthandler
 import json
 import os
 import signal
@@ -12,6 +13,12 @@ from pathlib import Path
 from .store import Store, fingerprint, model_ids
 from .devices import DEVICES, probe_rocm, probe_worker, select_worker
 from .profiling import Profile
+
+
+def register_stack_dumps():
+    """Dump Python stacks to the journal without ptrace or termination."""
+    if hasattr(signal, "SIGUSR1"):
+        faulthandler.register(signal.SIGUSR1, file=sys.stderr, all_threads=True)
 
 
 def process(tracks, store, models, engine, prepare, batch_size=8, stopping=lambda: False,
@@ -125,6 +132,7 @@ def main():
     parser.add_argument("--albums", action="store_true")
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args()
+    register_stack_dumps()
     if args.style_backend not in ("onnx", "torch"):
         parser.error("Invalid BEETS_EMBED_STYLE_BACKEND")
     if args.mode == "probe-rocm":
