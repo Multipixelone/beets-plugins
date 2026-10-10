@@ -11,6 +11,7 @@ import { readFile, writeFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { build } from 'esbuild';
 import { cosmosAtlasPlugin } from '../cosmos-atlas-patch.mjs';
+import { TIMELINE_DOCK_KEY } from '../timeline.mjs';
 
 const url = process.env.TIMELINE_BROWSER_URL;
 const cdp = process.env.TIMELINE_CDP_URL;
@@ -18,7 +19,8 @@ if (!url || !cdp) throw new Error('Set TIMELINE_BROWSER_URL and TIMELINE_CDP_URL
 const target = await (await fetch(`${cdp}/json/new?about:blank`, { method: 'PUT' })).json();
 const socket = new WebSocket(target.webSocketDebuggerUrl);
 await new Promise((resolve, reject) => { socket.onopen = resolve; socket.onerror = reject; });
-let sequence = 0, intercepted;
+let sequence = 0, intercepted, previousDockPreference;
+const dockKey = JSON.stringify(TIMELINE_DOCK_KEY);
 const pending = new Map(), exceptions = [], checks = [];
 const call = (method, params = {}) => new Promise((resolve, reject) => {
   const id = ++sequence; pending.set(id, { resolve, reject });
@@ -59,10 +61,17 @@ async function input(id, value, event = 'input') {
   await evaluate(`(() => { const element = document.getElementById(${JSON.stringify(id)});
     element.value = ${JSON.stringify(value)}; element.dispatchEvent(new Event(${JSON.stringify(event)}, { bubbles: true })); })()`);
 }
-async function key(value) {
-  await evaluate(`document.getElementById('timeline-playhead').focus()`);
-  await call('Input.dispatchKeyEvent', { type: 'keyDown', key: value, code: value });
-  await call('Input.dispatchKeyEvent', { type: 'keyUp', key: value, code: value });
+async function key(value, id = 'timeline-playhead') {
+  await evaluate(`document.getElementById(${JSON.stringify(id)}).focus()`);
+  const windowsVirtualKeyCode = { Enter:13, ' ':32, Tab:9, Escape:27, Home:36, End:35, ArrowLeft:37, ArrowRight:39 }[value];
+  const text = value === 'Enter' ? '\r' : value === ' ' ? ' ' : undefined;
+  const fields = { key:value, code:value === ' ' ? 'Space' : value, windowsVirtualKeyCode, nativeVirtualKeyCode:windowsVirtualKeyCode };
+  await call('Input.dispatchKeyEvent', { type:'keyDown', ...fields, text, unmodifiedText:text });
+  await call('Input.dispatchKeyEvent', { type:'keyUp', ...fields });
+}
+async function reload() {
+  await call('Page.reload', { ignoreCache: true });
+  await wait(`!!document.querySelector('#graph canvas') && !document.getElementById('timeline').hidden && !document.getElementById('search').disabled`);
 }
 async function screenshot(name) {
   if (!process.env.TIMELINE_SCREENSHOT_DIR) return;
@@ -75,6 +84,11 @@ try {
   await call('Emulation.setDeviceMetricsOverride', { width: 1440, height: 1000, deviceScaleFactor: 1, mobile: false });
   await call('Page.navigate', { url });
   await wait(`!!document.querySelector('#graph canvas') && !document.getElementById('timeline').hidden && !document.getElementById('search').disabled`);
+  previousDockPreference = await evaluate(`localStorage.getItem(${dockKey})`);
+  await evaluate(`localStorage.removeItem(${dockKey})`);
+  await reload();
+  await check(`document.getElementById('timeline-toggle').getAttribute('aria-expanded') === 'true' &&
+    !document.getElementById('timeline-content').hidden`, 'desktop defaults to an expanded timeline');
   await check(`(() => { const gl = document.querySelector('#graph canvas').getContext('webgl2');
     const info = gl.getExtension('WEBGL_debug_renderer_info');
     return !!info && !/swiftshader|llvmpipe|software/i.test(gl.getParameter(info.UNMASKED_RENDERER_WEBGL)); })()`, 'packaged viewer uses hardware WebGL 2');
@@ -90,6 +104,40 @@ try {
   await check(`document.getElementById('timeline-readout').textContent.startsWith('Latest') &&
     !document.getElementById('group').disabled`, 'packaged Escape restores Latest');
   await screenshot('packaged-desktop');
+
+  await call('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
+  await reload();
+  await check(`document.getElementById('timeline-content').hidden &&
+    document.getElementById('timeline-compact').textContent === 'Latest' &&
+    document.getElementById('timeline-toggle').getAttribute('aria-label') === 'Show timeline' &&
+    localStorage.getItem(${dockKey}) === null`, '390px defaults to a docked pill without persisting the default');
+  await key('Enter', 'timeline-toggle');
+  await wait(`!document.getElementById('timeline-content').hidden`);
+  await key('Home'); await key('ArrowRight');
+  await evaluate(`globalThis.packagedCutoff = document.getElementById('timeline-playhead').value;
+    globalThis.packagedReadout = document.getElementById('timeline-readout').textContent;
+    globalThis.packagedHeight = parseFloat(document.querySelector('main').style.getPropertyValue('--timeline-height'));
+    document.getElementById('timeline-toggle').click();`);
+  await wait(`parseFloat(document.querySelector('main').style.getPropertyValue('--timeline-height')) < packagedHeight`);
+  await check(`document.getElementById('timeline-playhead').value === packagedCutoff &&
+    document.getElementById('timeline-readout').textContent === packagedReadout && document.getElementById('group').disabled &&
+    document.getElementById('timeline-compact').textContent.startsWith('Snapshot:') &&
+    document.activeElement.id === 'timeline-toggle' && document.getElementById('timeline-content').hidden &&
+    document.getElementById('timeline-toggle').getAttribute('aria-controls') === 'timeline-content'`, 'packaged docking preserves history, exposes the compact date and rescues playhead focus');
+  await key('Escape', 'timeline-toggle');
+  await check(`document.getElementById('timeline-compact').textContent === 'Latest' &&
+    document.getElementById('timeline-content').hidden && document.activeElement.id === 'timeline-toggle'`, 'Escape on the docked toggle restores Latest and keeps the pill docked');
+  await reload();
+  await check(`document.getElementById('timeline-content').hidden`, 'docked choice survives a mobile reload');
+  await call('Emulation.setDeviceMetricsOverride', { width: 1440, height: 1000, deviceScaleFactor: 1, mobile: false });
+  await reload();
+  await check(`document.getElementById('timeline-content').hidden`, 'saved docked choice overrides the desktop default');
+  await key(' ', 'timeline-toggle'); await reload();
+  await check(`!document.getElementById('timeline-content').hidden`, 'expanded choice survives a desktop reload');
+  await call('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
+  await reload();
+  await check(`!document.getElementById('timeline-content').hidden`, 'saved expanded choice overrides the mobile default');
+  await call('Emulation.setDeviceMetricsOverride', { width: 1440, height: 1000, deviceScaleFactor: 1, mobile: false });
 
   const directory = fileURLToPath(new URL('../', import.meta.url));
   const source = await readFile(new URL('../app.mjs', import.meta.url), 'utf8');
@@ -216,7 +264,7 @@ try {
         const rect = document.querySelector(selector).getBoundingClientRect();
         return rect.bottom <= tray.top && rect.left >= 0 && rect.right <= innerWidth && rect.top >= 0;
       }) && tray.bottom <= innerHeight; })()`, `tray and navigation remain reachable at ${width}×${height}`);
-    await evaluate(`t.showInfo(t.selection.visibleIndices[0],false)`); await sleep(150);
+    await evaluate(`t.setPosition(t.timeline.bins.length - 1); t.showInfo(t.selection.visibleIndices[0],false)`); await sleep(150);
     await check(`(() => { const main=document.querySelector('main').getBoundingClientRect(),
       card=document.getElementById('details').getBoundingClientRect(), close=document.getElementById('clear').getBoundingClientRect(),
       tray=document.getElementById('timeline').getBoundingClientRect();
@@ -233,6 +281,42 @@ try {
       return rect.width === 42 && rect.height === 42 && svg.width === 20 && svg.height === 20 &&
         toggle.querySelector('path').getAttribute('d') === 'M4 7h1.5M10.5 7H20M4 17h9.5M18.5 17H20';
     })()`, `updated map settings icon stays intact at ${width}×${height}`);
+    await evaluate(`globalThis.dockBefore = { position:t.position, snapshot:t.snapshot(), calls:{...calls},
+      height:parseFloat(document.querySelector('main').style.getPropertyValue('--timeline-height')),
+      footer:document.querySelector('.map-footer').getBoundingClientRect().bottom,
+      toolbar:document.querySelector('.map-toolbar').getBoundingClientRect().bottom,
+      details:document.getElementById('details').getBoundingClientRect() };
+      document.getElementById('timeline-playhead').focus(); document.getElementById('timeline-toggle').click();`);
+    await sleep(150);
+    await check(`(() => { const tray=document.getElementById('timeline').getBoundingClientRect(),
+      reserved=parseFloat(document.querySelector('main').style.getPropertyValue('--timeline-height')),
+      reclaimed=dockBefore.height-reserved, card=document.getElementById('details').getBoundingClientRect();
+      return reclaimed>60 && reserved===Math.ceil(tray.height+parseFloat(getComputedStyle(document.getElementById('timeline')).bottom)+8) &&
+        Math.abs(document.querySelector('.map-footer').getBoundingClientRect().bottom-dockBefore.footer-reclaimed)<1 &&
+        Math.abs(document.querySelector('.map-toolbar').getBoundingClientRect().bottom-dockBefore.toolbar-reclaimed)<1 &&
+        tray.width<innerWidth-16 && tray.left>=0 && tray.right<=innerWidth && tray.bottom<=innerHeight &&
+        card.height>=dockBefore.details.height && card.bottom<=tray.top &&
+        (innerWidth>760 || Math.abs(card.bottom-dockBefore.details.bottom-reclaimed)<1);
+    })()`, `docking reclaims measured space for navigation and details at ${width}×${height}`);
+    await check(`(() => { const obstacles=['#timeline','.map-toolbar','.map-footer'].map(selector=>document.querySelector(selector).getBoundingClientRect());
+      return [...document.querySelectorAll('.map-label')].filter(label=>getComputedStyle(label).visibility==='visible').every(label=> {
+        const rect=label.getBoundingClientRect(); return obstacles.every(obstacle=>rect.bottom<=obstacle.top ||
+          rect.top>=obstacle.bottom || rect.right<=obstacle.left || rect.left>=obstacle.right);
+      });
+    })()`, `labels avoid the docked pill and repositioned navigation at ${width}×${height}`);
+    await check(`t.position===dockBefore.position && t.historical && !t.graph.isSimulationRunning &&
+      JSON.stringify(t.snapshot().visible)===JSON.stringify(dockBefore.snapshot.visible) &&
+      JSON.stringify(t.snapshot().positions)===JSON.stringify(dockBefore.snapshot.positions) &&
+      JSON.stringify(calls)===JSON.stringify(dockBefore.calls) &&
+      document.activeElement.id==='timeline-toggle' && document.getElementById('timeline-content').hidden`,
+    `docking preserves cutoff, world positions, visibility and physics at ${width}×${height}`);
+    await key('Tab', 'timeline-toggle');
+    await check(`!document.getElementById('timeline-content').contains(document.activeElement) &&
+      document.activeElement.getBoundingClientRect().height>0`, `Tab skips hidden timeline controls at ${width}×${height}`);
+    await key('Enter', 'timeline-toggle'); await sleep(150);
+    await check(`!document.getElementById('timeline-content').hidden && t.position===dockBefore.position &&
+      parseFloat(document.querySelector('main').style.getPropertyValue('--timeline-height'))===dockBefore.height &&
+      document.activeElement.id==='timeline-toggle'`, `keyboard undocking restores layout and keeps focus at ${width}×${height}`);
     await screenshot(`width-${width}`);
     await evaluate(`t.showInfo(undefined,false)`);
   }
@@ -241,14 +325,18 @@ try {
   // Closing the compact card and changing the readout can resize the canvas.
   // Finish those deliberate layout changes before measuring touch isolation.
   await sleep(200);
-  await evaluate(`globalThis.touchPose = t.snapshot();
+  await evaluate(`document.getElementById('timeline-playhead').focus(); globalThis.touchPose = t.snapshot();
     globalThis.announcementPosts = 0; globalThis.announcementObserver = new MutationObserver(() => announcementPosts++);
     announcementObserver.observe(document.getElementById('timeline-announcement'), { childList: true });`);
   const rect = await evaluate(`(() => { const r = document.getElementById('timeline-histogram').getBoundingClientRect();
     return { left:r.left, width:r.width, y:r.top+r.height/2 }; })()`);
   await call('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: rect.left + rect.width * .75, y: rect.y }] });
-  for (let i = 0; i < 12; i++) await call('Input.dispatchTouchEvent', { type: 'touchMove',
-    touchPoints: [{ x: rect.left + rect.width * (.7 - i * .05), y: rect.y }] });
+  // Sample across frames so Chromium can finish its native gesture recognition.
+  for (let i = 0; i < 12; i++) {
+    await call('Input.dispatchTouchEvent', { type: 'touchMove',
+      touchPoints: [{ x: rect.left + rect.width * (.7 - i * .05), y: rect.y }] });
+    await sleep(30);
+  }
   await call('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
   await sleep(200);
   const touchState = await evaluate(`({ before:touchPose.camera, after:t.snapshot().camera,
@@ -258,6 +346,22 @@ try {
   await check(`JSON.stringify(t.snapshot().camera) === JSON.stringify(touchPose.camera) &&
     t.graph.getZoomLevel() === touchPose.zoom && announcementPosts <= 3 &&
     t.position !== t.timeline.bins.length-1 && document.activeElement.id === 'timeline-playhead'`, 'touch scrubbing isolates the camera, retains focus and bounds announcements');
+  for (const docked of [true, false]) {
+    await evaluate(`globalThis.togglePose=t.snapshot(); globalThis.togglePosition=t.position`);
+    const toggle = await evaluate(`(() => { const r=document.getElementById('timeline-toggle').getBoundingClientRect();
+      return { x:r.left+r.width/2, y:r.top+r.height/2, width:r.width, height:r.height }; })()`);
+    assert.equal(toggle.width, 44); assert.equal(toggle.height, 44);
+    await call('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x:toggle.x, y:toggle.y }] });
+    await sleep(60);
+    await call('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+    await wait(`document.getElementById('timeline-content').hidden===${docked}`);
+    console.log('Touch toggle isolation:', JSON.stringify(await evaluate(`({ docked:document.getElementById('timeline-content').hidden,
+      position:t.position, beforePosition:togglePosition, before:togglePose.camera, after:t.snapshot().camera,
+      beforeZoom:togglePose.zoom, afterZoom:t.graph.getZoomLevel() })`)));
+    await check(`document.getElementById('timeline-content').hidden===${docked} && t.position===togglePosition &&
+      JSON.stringify(t.snapshot().camera)===JSON.stringify(togglePose.camera) && t.graph.getZoomLevel()===togglePose.zoom`,
+    `touch ${docked ? 'docking' : 'undocking'} isolates the graph camera`);
+  }
   await call('Emulation.setTouchEmulationEnabled', { enabled: false });
   await call('Emulation.setDeviceMetricsOverride', { width: 1440, height: 1000, deviceScaleFactor: 1, mobile: false });
   await evaluate(`t.setPosition(t.timeline.bins.length - 1); t.clearPhrase();
@@ -288,6 +392,10 @@ try {
   }
   await call('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] });
   await check(`getComputedStyle(document.getElementById('timeline-latest')).transitionDuration === '0s'`, 'reduced motion suppresses control transitions');
+  await evaluate(`document.getElementById('timeline-toggle').click()`);
+  await check(`document.getElementById('timeline-content').hidden &&
+    getComputedStyle(document.getElementById('timeline')).transitionDuration==='0s'`, 'reduced motion docks immediately');
+  await evaluate(`document.getElementById('timeline-toggle').click()`);
   await evaluate(`announcementObserver.disconnect(); t.setPosition(null); t.clearPhrase();
     globalThis.originalExport = structuredClone(t.data); globalThis.legacyExport = structuredClone(t.data);
     legacyExport.albums.forEach(album => delete album.added);
@@ -297,9 +405,13 @@ try {
   await wait(`!document.getElementById('search').disabled && t.timeline.bins.length === 0`);
   await check(`t.position === null && !t.historical && !document.getElementById('timeline-empty').hidden &&
     t.selection.visibleIndices.length === t.data.albums.length && !document.getElementById('group').disabled`, 'reload clears history and legacy exports leave the graph unrestricted');
+  await evaluate(`document.getElementById('timeline-toggle').click()`);
+  await check(`document.getElementById('timeline-content').hidden && document.getElementById('timeline-compact').textContent==='Latest'`, 'legacy exports keep a safe compact Latest readout when docked');
   await evaluate(`t.load(originalExport, 'Dated fixture')`);
   await wait(`!document.getElementById('timeline-playhead').disabled`);
   await check(`t.position === null && t.timeline.bins.length > 0 && !t.historical`, 'dated reload rebuilds bins and resets pending state');
+  await check(`document.getElementById('timeline-content').hidden`, 'loading a new export preserves the docking choice');
+  await evaluate(`document.getElementById('timeline-toggle').click()`);
   await evaluate(`globalThis.lensExport=structuredClone(t.data);
     lensExport.labels.push({id:'timeline:test',label:'Timeline test lens',source:'essentia',kind:'probability',min:0,max:1,
       scores:btoa(lensExport.albums.map((_,i)=>String.fromCharCode(i%2?1:255)).join(''))});
@@ -316,6 +428,8 @@ try {
   assert.deepEqual(exceptions, [], 'no browser exceptions or console errors');
   console.log(JSON.stringify({ result: 'PASS', checks }, null, 2));
 } finally {
+  if (previousDockPreference !== undefined) await evaluate(previousDockPreference === null ?
+    `localStorage.removeItem(${dockKey})` : `localStorage.setItem(${dockKey}, ${JSON.stringify(previousDockPreference)})`).catch(() => {});
   clearTimeout(deadline); socket.close();
   await fetch(`${cdp}/json/close/${target.id}`);
 }

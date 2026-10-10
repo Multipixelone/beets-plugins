@@ -11,10 +11,16 @@ import { vibeLinkOpacity, matchBounds, GatherAppearance, GATHER_SIZE_MULTIPLIER,
 import { VibeGraph } from './cosmos-vibe.mjs';
 import { GatherPositions, gatherRings } from './gather.mjs';
 import { renderLibraryStats, appendAlbumMetadata, appendAlbumTitle, appendAlbumSubline } from './library-stats.mjs';
-import { buildTimeline, timelineCutoff, timelineMembership, applyTimeline, timelineStacks, timelinePositionForKey } from './timeline.mjs';
+import { buildTimeline, timelineCutoff, timelineMembership, applyTimeline, timelineStacks, timelinePositionForKey,
+  readTimelineDockPreference, saveTimelineDockPreference, timelineDocked, timelineReservedHeight } from './timeline.mjs';
 
 const $ = id => document.getElementById(id);
 const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+const timelineMobile = window.matchMedia('(max-width: 760px)');
+function timelineStorage() {
+  try { return window.localStorage; } catch { return undefined; }
+}
+let timelineDockPreference = readTimelineDockPreference(timelineStorage());
 // CSS is the single palette source for both DOM chrome and the GPU renderer.
 const themeStyle = getComputedStyle(document.documentElement);
 const themeValue = name => themeStyle.getPropertyValue(name).trim();
@@ -152,6 +158,8 @@ function updateTimelineReadout() {
   playhead.disabled = !graphReady || !bins.length; playhead.max = bins.length;
   playhead.value = timelinePosition ?? bins.length;
   $('timeline-scope').textContent = `Of the ${count.toLocaleString()} albums in this export · ${timeline.undated.toLocaleString()} undated · Current metadata and similarities`;
+  $('timeline-compact').textContent = timelinePosition === null || !bins.length ? 'Latest' : timelinePosition < 0 ?
+    `Snapshot: Before ${utcMonth.format(timeline.first)}` : `Snapshot: ${utcDate.format(timelineCutoff(timeline, timelinePosition) - 1)}`;
   if (!bins.length) return;
   const cutoff = timelineCutoff(timeline, timelinePosition);
   const snapshot = timelinePosition === null ? count : timelinePosition < 0 ? 0 : bins[timelinePosition].cumulative;
@@ -248,12 +256,13 @@ function refreshLabels() {
     return { left: x - half, right: x + half, top: y - half, bottom: y + half };
   }).filter(Boolean);
   // Reserve the search and navigation areas as well as artwork.
-  obstacles.push({ left: 0, right: Math.min(410, width), top: 0, bottom: 76 },
-    { left: 0, right: width, top: height - 88, bottom: height });
-  if (!$('timeline').hidden) {
-    const chart = $('timeline').getBoundingClientRect(), map = $('graph').getBoundingClientRect();
-    obstacles.push({ left: chart.left - map.left, right: chart.right - map.left,
-      top: chart.top - map.top - 80, bottom: chart.bottom - map.top });
+  obstacles.push({ left: 0, right: Math.min(410, width), top: 0, bottom: 76 });
+  const map = $('graph').getBoundingClientRect();
+  for (const element of [$('timeline'), document.querySelector('.map-toolbar'), document.querySelector('.map-footer')]) {
+    if (element.hidden) continue;
+    const rect = element.getBoundingClientRect();
+    obstacles.push({ left: rect.left - map.left - 8, right: rect.right - map.left + 8,
+      top: rect.top - map.top - 8, bottom: rect.bottom - map.top + 8 });
   }
   const placed = placeLabels(candidates, width, height, zoom, zoom < .4 ? 12 : 24,
     { obstacles, previous: labelOffsets, minZoom: 0 });
@@ -1259,12 +1268,31 @@ $('timeline-histogram').addEventListener('pointercancel', event => {
   if ($('timeline-histogram').hasPointerCapture(event.pointerId)) $('timeline-histogram').releasePointerCapture(event.pointerId);
   announceTimeline(true);
 });
-new ResizeObserver(() => {
+function measureTimeline() {
   const tray = $('timeline'), main = document.querySelector('main');
-  main.style.setProperty('--timeline-height', tray.hidden ? '0px' :
-    `${Math.ceil(tray.getBoundingClientRect().height + parseFloat(getComputedStyle(tray).bottom) + 8)}px`);
+  main.style.setProperty('--timeline-height', `${timelineReservedHeight(tray.hidden,
+    tray.getBoundingClientRect().height, parseFloat(getComputedStyle(tray).bottom))}px`);
   drawTimeline(); scheduleLabels();
-}).observe($('timeline'));
+}
+function updateTimelineDocking() {
+  const docked = timelineDocked(timelineDockPreference, timelineMobile.matches);
+  const content = $('timeline-content'), toggle = $('timeline-toggle');
+  if (docked && content.contains(document.activeElement)) toggle.focus({ preventScroll: true });
+  content.hidden = docked; $('timeline-compact').hidden = !docked;
+  $('timeline').classList.toggle('docked', docked);
+  toggle.setAttribute('aria-expanded', String(!docked));
+  const label = docked ? 'Show timeline' : 'Hide timeline';
+  toggle.setAttribute('aria-label', label); toggle.title = label;
+  measureTimeline();
+}
+$('timeline-toggle').addEventListener('click', () => {
+  timelineDockPreference = !timelineDocked(timelineDockPreference, timelineMobile.matches);
+  saveTimelineDockPreference(timelineStorage(), timelineDockPreference);
+  updateTimelineDocking();
+});
+timelineMobile.addEventListener('change', () => { if (timelineDockPreference === null) updateTimelineDocking(); });
+updateTimelineDocking();
+new ResizeObserver(measureTimeline).observe($('timeline'));
 $('clear').addEventListener('click', () => { showInfo(undefined); $('search').focus({ preventScroll: true }); });
 $('surprise').addEventListener('click', () => {
   if (selection.matches.length) focusAlbum(selection.matches[Math.floor(Math.random() * selection.matches.length)]);

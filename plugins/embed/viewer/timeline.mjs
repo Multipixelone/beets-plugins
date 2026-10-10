@@ -103,3 +103,25 @@ export function timelinePositionForKey(key, position, count) {
   if (key === 'ArrowRight') return position === null || position === count - 1 ? null : position + 1;
   return undefined;
 }
+
+export const TIMELINE_DOCK_KEY = 'beets-album-graph.timeline-docked';
+
+// null means no explicit choice: follow the viewer's mobile breakpoint.
+export function readTimelineDockPreference(storage) {
+  try {
+    const value = storage?.getItem(TIMELINE_DOCK_KEY);
+    return value === 'true' ? true : value === 'false' ? false : null;
+  } catch { return null; }
+}
+
+export function saveTimelineDockPreference(storage, docked) {
+  try { storage?.setItem(TIMELINE_DOCK_KEY, String(docked)); } catch { /* Keep the session choice. */ }
+}
+
+export function timelineDocked(preference, narrow) {
+  return preference ?? narrow;
+}
+
+export function timelineReservedHeight(hidden, height, bottom) {
+  return hidden ? 0 : Math.ceil(height + bottom + 8);
+}
