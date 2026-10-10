@@ -169,6 +169,23 @@ test('album metadata keeps inline fact groups and footer pairs complete without 
   assert.ok(!container.children.flatMap(flat).some(child => child.tagName === 'img'));
 });
 
+test('album facts omit empty groups and keep Added in the footer', () => {
+  for (const [album, expected] of [
+    [{}, []],
+    [{ track_count: 14, summed_plays: 49 }, [['14 tracks', '49 plays']]],
+    [{ format: 'FLAC', bitdepth: 16, samplerate_hz: 44100, size_bytes: 270500000 }, [['FLAC', '16-bit / 44.1 kHz', '270.5 MB']]],
+    [{ track_count: 0, summed_plays: 0, size_bytes: 0 }, [['0 tracks', '0 plays'], ['0 B']]],
+    [{ track_count: null, summed_plays: -1, size_bytes: null }, []],
+  ]) {
+    const container = doc.createElement('div');
+    appendAlbumMetadata(container, { ...album, added: '2023-11-06T00:00:00Z' });
+    const groups = container.querySelector('.album-facts');
+    assert.deepEqual(groups?.children.map(group => group.children.map(fact => fact.textContent)) ?? [], expected);
+    const footer = container.querySelector('.album-footer');
+    assert.deepEqual(footer.children.map(pair => [pair.querySelector('.fact-label').textContent, pair.querySelector('.fact-value').textContent]), [['Added', 'Nov 6, 2023']]);
+  }
+});
+
 test('album title glues the MusicBrainz link to the final word with a fixed destination', () => {
   const plain = doc.createElement('h2');
   appendAlbumTitle(plain, fixture.albums[1]);

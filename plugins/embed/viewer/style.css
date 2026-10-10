@@ -56,8 +56,8 @@ body { margin: 0; height: 100dvh; overflow: hidden; display: flex; flex-directio
 .library-secondary { color: var(--muted); font-size: 11px; line-height: 1.7; }
 .library-secondary small { display: block; font: inherit; }
 #library-totals .section-content > :last-child { margin-bottom: 0; }
-.album-facts { display: flex; flex-wrap: wrap; gap: 6px 18px; margin: 12px 0 0; padding-top: 10px; border-top: 1px solid var(--line); }
-.fact-group { flex: 1 1 106px; min-width: 0; display: flex; flex-wrap: wrap; gap: 2px 10px; margin: 0; font: 12px/1.5 var(--font-mono); }
+.album-facts { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 6px 12px; margin: 12px 0 0; padding-top: 10px; border-top: 1px solid var(--line); }
+.fact-group { flex: 0 1 auto; min-width: 0; display: flex; flex-wrap: wrap; gap: 2px 10px; margin: 0; font: 12px/1.5 var(--font-mono); }
 .fact-group > span { min-width: 0; overflow-wrap: anywhere; }
 .album-footer { display: flex; flex-wrap: wrap; gap: 4px 14px; margin: 10px 0 0; font: 12px/1.6 var(--font-mono); }
 .fact-pair { min-width: 0; overflow-wrap: anywhere; }
@@ -157,6 +157,7 @@ main { --timeline-height: 0px; }
   #tooltip { display: none; }
   .has-selection #graph { height: calc(100% - min(55%, 365px) - 107px); min-height: 120px; }
 }
+@media (max-width: 420px) { .fact-group { font-size: 11px; column-gap: 6px; } }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { transition: none !important; } }
 
 .card-cover { display: block; object-fit: contain; max-width: 100%; margin-bottom: 10px; border-radius: var(--radius); }
