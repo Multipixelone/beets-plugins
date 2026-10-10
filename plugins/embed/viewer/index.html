@@ -397,6 +397,11 @@
             <button id="timeline-latest" type="button">Latest</button>
             <p id="timeline-empty" hidden>No albums in this export have an added date.</p>
             <div id="timeline-controls">
+              <div id="timeline-bookmarks" hidden>
+                <span class="sr-only">Life-event bookmarks. Activate an event to select its starting interval.</span>
+                <p id="timeline-bookmark-label" role="tooltip" hidden></p>
+                <div class="timeline-bookmark-scroll"><div class="timeline-bookmark-track"></div></div>
+              </div>
               <canvas id="timeline-histogram" height="56" aria-hidden="true"></canvas>
               <label class="sr-only" for="timeline-playhead">Library snapshot date</label>
               <input id="timeline-playhead" type="range" min="-1" max="0" step="1" value="0"

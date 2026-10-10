@@ -19,15 +19,56 @@ export function parseAdded(value) {
   return date.getTime();
 }
 
-export function buildTimeline(albums) {
+export const BOOKMARK_CATEGORIES = {
+  move: ['house', 'blue'], school: ['book', 'yellow'], job: ['case', 'orange'],
+  show: ['stage', 'purple'], concert: ['ticket', 'red'], travel: ['compass', 'aqua'],
+  health: ['cross', 'green'], relationship: ['heart', 'purple'], music: ['note', 'aqua'],
+  milestone: ['flag', 'yellow'], other: ['circle', 'blue']
+};
+const PRECISIONS = new Set(['day', 'month', 'season', 'year', 'approximate']);
+
+export function parseBookmarkDate(value) {
+  return typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value) ?
+    parseAdded(`${value}T00:00:00Z`) : NaN;
+}
+
+export function normalizeBookmarks(value) {
+  if (!Array.isArray(value)) return [];
+  const ids = new Set(), bookmarks = [];
+  for (const entry of value) {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry) ||
+        typeof entry.id !== 'string' || !entry.id.trim() || ids.has(entry.id) ||
+        typeof entry.title !== 'string' || !entry.title.trim() ||
+        !PRECISIONS.has(entry.precision) || typeof entry.category !== 'string' ||
+        !Object.hasOwn(BOOKMARK_CATEGORIES, entry.category)) continue;
+    const start = parseBookmarkDate(entry.date);
+    const end = entry.end_date === null ? null : parseBookmarkDate(entry.end_date);
+    if (!Number.isFinite(start) || end !== null && (!Number.isFinite(end) || end < start)) continue;
+    ids.add(entry.id);
+    bookmarks.push({ id: entry.id, date: entry.date, end_date: entry.end_date,
+      precision: entry.precision, title: entry.title, category: entry.category, start, end });
+  }
+  return bookmarks.sort((a, b) => a.start - b.start);
+}
+
+export function bookmarkLabel(bookmark) {
+  const dates = bookmark.end_date === null ? bookmark.date : `${bookmark.date}–${bookmark.end_date}`;
+  const precision = bookmark.precision === 'day' ? '' : ` · ${bookmark.precision} precision (approximate)`;
+  return `${bookmark.title} · ${dates} UTC${precision} · ${bookmark.category}`;
+}
+
+export function buildTimeline(albums, bookmarks) {
   const dates = Float64Array.from(albums, album => parseAdded(album.added));
   let first = Infinity, last = -Infinity, undated = 0;
   for (const date of dates) {
     if (!Number.isFinite(date)) undated++;
     else { first = Math.min(first, date); last = Math.max(last, date); }
   }
-  const model = { dates, bins: [], undated, total: albums.length, maxCount: 0,
+  const model = { dates, bins: [], undated, total: albums.length, maxCount: 0, bookmarks: normalizeBookmarks(bookmarks),
     albumBins: new Int32Array(albums.length).fill(-1), first: Number.isFinite(first) ? first : null };
+  for (const bookmark of model.bookmarks) {
+    first = Math.min(first, bookmark.start); last = Math.max(last, bookmark.end ?? bookmark.start);
+  }
   if (!Number.isFinite(first)) return model;
   const earliest = new Date(first), latest = new Date(last);
   const firstDay = utc(earliest.getUTCFullYear(), earliest.getUTCMonth(), earliest.getUTCDate());
@@ -60,6 +101,33 @@ export function buildTimeline(albums) {
     model.maxCount = Math.max(model.maxCount, bin.count);
   }
   return model;
+}
+
+export function timelinePositionForDate(model, date) {
+  return model.bins.findIndex(bin => date >= bin.start && date < bin.end);
+}
+
+// Match the histogram's calendar-bin spacing, including its separate Latest slot.
+export function bookmarkLayout(model, width) {
+  if (!model.bins.length || width < 44) return { markers: [], height: 0 };
+  const pitch = width / (model.bins.length + 1), laneEnds = [];
+  const x = date => {
+    const index = timelinePositionForDate(model, date);
+    if (index < 0) return model.bins.length * pitch;
+    const bin = model.bins[index];
+    return (index + (date - bin.start) / (bin.end - bin.start)) * pitch;
+  };
+  const markers = model.bookmarks.map(bookmark => {
+    const start = x(bookmark.start), left = Math.max(0, Math.min(width - 44, start - 22));
+    const rangeEnd = bookmark.end === null ? start : x(bookmark.end + DAY);
+    const footprintStart = Math.min(left, start), footprintEnd = Math.max(left + 44, rangeEnd);
+    let lane = laneEnds.findIndex(end => footprintStart >= end + 4);
+    if (lane < 0) lane = laneEnds.length;
+    laneEnds[lane] = footprintEnd;
+    return { bookmark, position: timelinePositionForDate(model, bookmark.start), lane, left,
+      rangeLeft: start, rangeWidth: Math.max(2, rangeEnd - start) };
+  });
+  return { markers, height: laneEnds.length * 44 };
 }
 
 // Position -1 is before the first bin; null is unbounded, even at the last bin.

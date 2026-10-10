@@ -120,6 +120,17 @@ main { --timeline-height: 0px; }
 #timeline.docked #timeline-toggle { position: static; border-radius: 50%; }
 #timeline.docked #timeline-toggle svg { transform: rotate(180deg); }
 #timeline-histogram { display: block; width: 100%; height: 56px; touch-action: none; cursor: ew-resize; }
+#timeline-bookmarks { margin-bottom: 4px; }
+.timeline-bookmark-scroll { max-height: 88px; overflow-y: auto; overflow-x: hidden; scrollbar-width: thin; }
+.timeline-bookmark-track { position: relative; min-height: 44px; }
+.timeline-bookmark { position: absolute; width: 44px; height: 44px; padding: 0; display: grid; place-items: center; border: 0; background: transparent; color: var(--bookmark-color); z-index: 1; }
+.timeline-bookmark svg { width: 22px; height: 22px; padding: 3px; border: 1px solid currentColor; border-radius: 50%; background: var(--panel); }
+.timeline-bookmark.approximate svg { border-style: dashed; opacity: .8; }
+.timeline-bookmark[aria-current=date] svg { background: var(--selection-bg); box-shadow: 0 0 0 1px var(--ink); }
+.timeline-bookmark:focus-visible { outline-offset: -3px; }
+.timeline-bookmark-range { position: absolute; height: 3px; background: var(--bookmark-color); opacity: .55; pointer-events: none; }
+.timeline-bookmark-range.approximate { height: 0; border-top: 3px dashed var(--bookmark-color); background: none; }
+#timeline #timeline-bookmark-label { position: absolute; bottom: calc(100% + 4px); left: 12px; right: 12px; z-index: 3; margin: 0 0 4px; padding: 8px; overflow-wrap: anywhere; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--card-shadow); pointer-events: none; font-size: 11px; }
 #timeline-playhead { margin: 0; height: 24px; touch-action: none; }
 .timeline-axis { display: flex; justify-content: space-between; color: var(--muted); }
 #timeline p { margin: 3px 0; }

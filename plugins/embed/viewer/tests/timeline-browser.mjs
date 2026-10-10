@@ -62,7 +62,7 @@ async function input(id, value, event = 'input') {
     element.value = ${JSON.stringify(value)}; element.dispatchEvent(new Event(${JSON.stringify(event)}, { bubbles: true })); })()`);
 }
 async function key(value, id = 'timeline-playhead') {
-  await evaluate(`document.getElementById(${JSON.stringify(id)}).focus()`);
+  if (id !== null) await evaluate(`document.getElementById(${JSON.stringify(id)}).focus()`);
   const windowsVirtualKeyCode = { Enter:13, ' ':32, Tab:9, Escape:27, Home:36, End:35, ArrowLeft:37, ArrowRight:39 }[value];
   const text = value === 'Enter' ? '\r' : value === ' ' ? ' ' : undefined;
   const fields = { key:value, code:value === ' ' ? 'Space' : value, windowsVirtualKeyCode, nativeVirtualKeyCode:windowsVirtualKeyCode };
@@ -425,6 +425,104 @@ try {
   await check(`t.historical && t.selection.visibleIndices.length===t.timeline.total-t.timeline.undated`, 'clearing the lens preserves the cutoff');
   await input('vocal', 'voice');
   await check(`t.selection.visibleIndices.every(i=>t.data.albums[i].essentia?.voice_instrumental?.value==='voice'&&Number.isFinite(t.timeline.dates[i]))`, 'sound filters cannot reveal future or undated albums');
+
+  const bookmarkFixture = JSON.parse(await readFile(new URL('./fixtures/timeline-bookmarks.json', import.meta.url), 'utf8'));
+  await evaluate(`t.load(originalExport, 'No bookmarks fixture')`);
+  await wait(`!document.getElementById('search').disabled && !document.getElementById('timeline-playhead').disabled`);
+  await sleep(150);
+  await check(`document.getElementById('timeline-bookmarks').hidden && !document.querySelector('.timeline-bookmark')`,
+    'exports without bookmarks retain an empty hidden bookmark strip');
+  await evaluate(`globalThis.noBookmarkHeight=document.getElementById('timeline').getBoundingClientRect().height;
+    t.load({...structuredClone(originalExport), ...${JSON.stringify(bookmarkFixture)}}, 'Life-event fixture');`);
+  await wait(`!document.getElementById('search').disabled && !document.getElementById('timeline-playhead').disabled && t.timeline.bookmarks.length===11`);
+  await sleep(150);
+  await check(`document.querySelectorAll('.timeline-bookmark').length===11 &&
+    document.querySelectorAll('.timeline-bookmark-range').length===2 &&
+    document.querySelectorAll('.timeline-bookmark.approximate').length===6`,
+    'valid fixture events, ranges and approximate precisions render while malformed entries are ignored');
+  await check(`t.timeline.bins[0].start===Date.parse('2023-09-01T00:00:00Z') &&
+    t.timeline.bins.at(-1).end>Date.parse('2027-01-01T00:00:00Z')`, 'life events extend both ends of the album timeline');
+  await evaluate(`globalThis.focusedBookmark=document.querySelectorAll('.timeline-bookmark')[6]; focusedBookmark.focus()`);
+  await call('Emulation.setDeviceMetricsOverride', { width:390, height:844, deviceScaleFactor:1, mobile:true });
+  await sleep(200);
+  await check(`(() => { const rect=focusedBookmark.getBoundingClientRect(),
+    scroll=document.querySelector('.timeline-bookmark-scroll').getBoundingClientRect();
+    return document.activeElement===focusedBookmark && rect.top>=scroll.top-.5 && rect.bottom<=scroll.bottom+.5;
+  })()`, 'resizing to mobile keeps the same bookmark focused and scrolls its new lane into view');
+
+  for (const [width, height] of [[1440,1000], [390,844]]) {
+    await call('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor:1, mobile:width<761 });
+    await sleep(200);
+    await evaluate(`t.setPosition(null); t.graph.pause(); globalThis.bookmarkPose=t.snapshot();
+      globalThis.importIndex=t.timeline.bookmarks.findIndex(b=>b.id==='beets-library-import');
+      document.querySelectorAll('.timeline-bookmark')[importIndex].focus();`);
+    await key('Enter', null);
+    await check(`t.position===t.timeline.bins.findIndex(bin=>Date.parse('2024-02-29T00:00:00Z')>=bin.start&&Date.parse('2024-02-29T00:00:00Z')<bin.end) &&
+      document.activeElement===document.querySelectorAll('.timeline-bookmark')[importIndex] &&
+      t.selection.visibleIndices.length===1 && !t.graph.isSimulationRunning &&
+      JSON.stringify(t.snapshot().camera)===JSON.stringify(bookmarkPose.camera) &&
+      t.selection.visibleIndices.every(i=>t.snapshot().positions[i*2]===bookmarkPose.positions[i*2]&&
+        t.snapshot().positions[i*2+1]===bookmarkPose.positions[i*2+1]) &&
+      document.getElementById('timeline-announcement').textContent.includes('Library imported into beets')`,
+      `bookmark Enter selects its snapshot, preserves focus and freezes the map at ${width}px`);
+    await evaluate(`globalThis.escapedIndex=t.timeline.bookmarks.findIndex(b=>b.id==='escaped');
+      document.querySelectorAll('.timeline-bookmark')[escapedIndex].focus();`);
+    await key(' ', null);
+    await check(`document.getElementById('timeline-bookmark-label').textContent===
+      document.querySelectorAll('.timeline-bookmark')[escapedIndex].getAttribute('aria-label') &&
+      document.getElementById('timeline-bookmark-label').textContent.includes('<img src=x') &&
+      !document.getElementById('timeline-bookmark-label').children.length &&
+      !document.querySelector('#timeline-bookmarks img') && !globalThis.bookmarkInjected`,
+      `Space activation and hostile titles remain accessible literal text at ${width}px`);
+    await check(`(() => {
+      const scroll=document.querySelector('.timeline-bookmark-scroll').getBoundingClientRect(),
+        tooltip=document.getElementById('timeline-bookmark-label').getBoundingClientRect();
+      return scroll.height<=88 && tooltip.left>=0 && tooltip.right<=innerWidth &&
+        tooltip.bottom<=document.getElementById('timeline').getBoundingClientRect().top &&
+        document.documentElement.scrollWidth<=innerWidth && [...document.querySelectorAll('.timeline-bookmark')].every(marker=> {
+          marker.focus(); const rect=marker.getBoundingClientRect();
+          return rect.width===44 && rect.height===44 && rect.left>=scroll.left && rect.right<=scroll.right+.5 &&
+            rect.top>=scroll.top-.5 && rect.bottom<=scroll.bottom+.5;
+        }); })()`, `overlapping bookmark targets scroll into reach without horizontal overflow at ${width}px`);
+    await check(`(() => { const markers=[...document.querySelectorAll('.timeline-bookmark')];
+      return markers.every((marker,i)=>markers.slice(i+1).every(other=> {
+        const a=marker.getBoundingClientRect(),b=other.getBoundingClientRect();
+        return a.right<=b.left||b.right<=a.left||a.bottom<=b.top||b.bottom<=a.top;
+      })); })()`, `bookmark hit areas never overlap at ${width}px`);
+    await evaluate(`document.querySelectorAll('.timeline-bookmark')[escapedIndex].focus()`);
+    await screenshot(`bookmarks-${width}`);
+    await key('Escape', null);
+    await check(`t.position===null && document.getElementById('timeline-bookmark-label').hidden`,
+      `bookmark Escape restores Latest and dismisses the tooltip at ${width}px`);
+    await evaluate(`document.querySelectorAll('.timeline-bookmark')[0].focus()`);
+    await key(' ', 'timeline-toggle');
+    await check(`document.getElementById('timeline-content').hidden && document.getElementById('timeline-bookmark-label').hidden`,
+      `docking hides bookmark controls and labels at ${width}px`);
+    await key('Tab', 'timeline-toggle');
+    await check(`!document.getElementById('timeline-bookmarks').contains(document.activeElement)`,
+      `Tab skips docked bookmarks at ${width}px`);
+    await key('Enter', 'timeline-toggle');
+  }
+
+  await call('Emulation.setDeviceMetricsOverride', { width:1440, height:1000, deviceScaleFactor:1, mobile:false });
+  for (const value of [[], [null, {id:'malformed'}]]) {
+    await evaluate(`t.load({...structuredClone(originalExport), bookmarks:${JSON.stringify(value)}}, 'Empty bookmarks fixture')`);
+    await wait(`!document.getElementById('search').disabled && !document.getElementById('timeline-playhead').disabled`); await sleep(150);
+    await check(`document.getElementById('timeline-bookmarks').hidden && !document.querySelector('.timeline-bookmark') &&
+      document.getElementById('timeline-bookmark-label').hidden &&
+      document.getElementById('timeline').getBoundingClientRect().height===noBookmarkHeight`,
+      'empty or malformed bookmarks restore the exact original tray height and clear old controls');
+  }
+  await evaluate(`globalThis.bookmarkOnlyExport=structuredClone(originalExport);
+    bookmarkOnlyExport.albums.forEach(album=>delete album.added);
+    bookmarkOnlyExport.bookmarks=${JSON.stringify(bookmarkFixture.bookmarks)};
+    t.load(bookmarkOnlyExport,'Events with undated albums');`);
+  await wait(`!document.getElementById('search').disabled && !document.getElementById('timeline-playhead').disabled && t.timeline.bookmarks.length===11`);
+  await evaluate(`document.querySelectorAll('.timeline-bookmark')[0].focus()`);
+  await key('Enter', null);
+  await check(`t.timeline.maxCount===0 && t.selection.visibleIndices.length===0 &&
+    document.getElementById('timeline-readout').textContent.includes('Snapshot 0 /')`,
+    'bookmark-only dates render safely and historical snapshots exclude undated albums');
   assert.deepEqual(exceptions, [], 'no browser exceptions or console errors');
   console.log(JSON.stringify({ result: 'PASS', checks }, null, 2));
 } finally {

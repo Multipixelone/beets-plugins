@@ -1,0 +1,19 @@
+{
+  "bookmarks": [
+    { "id": "move", "date": "2023-09-01", "end_date": null, "precision": "month", "title": "Moved to a new city", "category": "move" },
+    { "id": "school", "date": "2023-09-01", "end_date": "2024-06-30", "precision": "season", "title": "A year at school", "category": "school" },
+    { "id": "beets-library-import", "date": "2024-02-29", "end_date": null, "precision": "day", "title": "Library imported into beets", "category": "milestone" },
+    { "id": "music", "date": "2024-02-29", "end_date": null, "precision": "approximate", "title": "Started making music", "category": "music" },
+    { "id": "concert", "date": "2024-03-01", "end_date": null, "precision": "day", "title": "A concert with friends", "category": "concert" },
+    { "id": "escaped", "date": "2024-03-01", "end_date": null, "precision": "day", "title": "<img src=x onerror=\"globalThis.bookmarkInjected=true\"> & \"friends\"", "category": "other" },
+    { "id": "travel", "date": "2025-07-01", "end_date": "2025-07-31", "precision": "month", "title": "A summer trip", "category": "travel" },
+    { "id": "job", "date": "2027-01-01", "end_date": null, "precision": "year", "title": "A new job", "category": "job" },
+    { "id": "health", "date": "2025-07-14", "end_date": null, "precision": "approximate", "title": "Feeling better", "category": "health" },
+    { "id": "relationship", "date": "2025-07-14", "end_date": null, "precision": "day", "title": "Met someone", "category": "relationship" },
+    { "id": "show", "date": "2025-07-15", "end_date": null, "precision": "day", "title": "Opening night", "category": "show" },
+    null,
+    { "id": "invalid-date", "date": "2023-02-29", "end_date": null, "precision": "day", "title": "Invalid calendar", "category": "other" },
+    { "id": "invalid-range", "date": "2024-02-29", "end_date": "2023-01-01", "precision": "day", "title": "Reversed range", "category": "other" },
+    { "id": "invalid-category", "date": "2024-02-29", "end_date": null, "precision": "day", "title": "Unknown category", "category": "unknown" }
+  ]
+}

@@ -12,7 +12,9 @@ import { VibeGraph } from './cosmos-vibe.mjs';
 import { GatherPositions, gatherRings } from './gather.mjs';
 import { renderLibraryStats, appendAlbumMetadata, appendAlbumTitle, appendAlbumSubline } from './library-stats.mjs';
 import { buildTimeline, timelineCutoff, timelineMembership, applyTimeline, timelineStacks, timelinePositionForKey,
-  readTimelineDockPreference, saveTimelineDockPreference, timelineDocked, timelineReservedHeight } from './timeline.mjs';
+  readTimelineDockPreference, saveTimelineDockPreference, timelineDocked, timelineReservedHeight,
+  timelinePositionForDate, bookmarkLabel } from './timeline.mjs';
+import { TimelineBookmarks } from './timeline-bookmarks.mjs';
 
 const $ = id => document.getElementById(id);
 const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -52,6 +54,10 @@ let timelinePartition, timelineFrame, timelinePending, timelineAnnouncementTimer
 const utcDate = new Intl.DateTimeFormat(undefined, { year: 'numeric', month: 'short', day: 'numeric', timeZone: 'UTC' });
 const utcMonth = new Intl.DateTimeFormat(undefined, { year: 'numeric', month: 'short', timeZone: 'UTC' });
 const sortedGroupNames = names => [...new Set(names)].sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+const timelineBookmarks = new TimelineBookmarks($('timeline-bookmarks'), bookmark => {
+  setTimelinePosition(timelinePositionForDate(timeline, bookmark.start));
+  announceTimeline(true, bookmark);
+});
 
 function resetTimeline() {
   cancelAnimationFrame(timelineFrame); timelineFrame = undefined; timelinePending = undefined;
@@ -63,6 +69,7 @@ function resetTimeline() {
   $('group').disabled = false; $('pause').disabled = false;
   $('timeline').hidden = true; $('timeline-breakdown').open = false;
   $('timeline-announcement').textContent = '';
+  timelineBookmarks.reset();
   for (const id of ['library-count', 'matches']) $(id).setAttribute('aria-live', 'polite');
   document.querySelector('main').style.setProperty('--timeline-height', '0px');
 }
@@ -132,7 +139,7 @@ function drawTimeline() {
   timelineSegments.forEach((segments, index) => {
     let bottom = height;
     for (const segment of segments) {
-      const size = segment.count / timeline.maxCount * chartHeight;
+      const size = segment.count / Math.max(1, timeline.maxCount) * chartHeight;
       context.fillStyle = timelineColors.get(segment.name);
       context.fillRect(index * pitch + 1, bottom - size, Math.max(.5, pitch - 2), size);
       bottom -= size;
@@ -141,9 +148,9 @@ function drawTimeline() {
   const x = timelinePosition === null ? width - 1 : (timelinePosition + 1) * pitch;
   context.fillStyle = themeValue('--ink'); context.fillRect(Math.max(0, x - 1), 0, 2, height);
 }
-function announceTimeline(immediate = false) {
+function announceTimeline(immediate = false, bookmark) {
   clearTimeout(timelineAnnouncementTimer);
-  const message = $('timeline-readout').textContent;
+  const message = `${bookmark ? `${bookmarkLabel(bookmark)}. ` : ''}${$('timeline-readout').textContent}`;
   const announce = () => { timelineAnnouncementTimer = undefined; $('timeline-announcement').textContent = message; };
   if (immediate) announce(); else timelineAnnouncementTimer = setTimeout(announce, 150);
 }
@@ -157,14 +164,15 @@ function updateTimelineReadout() {
   const playhead = $('timeline-playhead');
   playhead.disabled = !graphReady || !bins.length; playhead.max = bins.length;
   playhead.value = timelinePosition ?? bins.length;
+  timelineBookmarks.update(timelinePosition, graphReady);
   $('timeline-scope').textContent = `Of the ${count.toLocaleString()} albums in this export · ${timeline.undated.toLocaleString()} undated · Current metadata and similarities`;
   $('timeline-compact').textContent = timelinePosition === null || !bins.length ? 'Latest' : timelinePosition < 0 ?
-    `Snapshot: Before ${utcMonth.format(timeline.first)}` : `Snapshot: ${utcDate.format(timelineCutoff(timeline, timelinePosition) - 1)}`;
+    `Snapshot: Before ${utcMonth.format(bins[0].start)}` : `Snapshot: ${utcDate.format(timelineCutoff(timeline, timelinePosition) - 1)}`;
   if (!bins.length) return;
   const cutoff = timelineCutoff(timeline, timelinePosition);
   const snapshot = timelinePosition === null ? count : timelinePosition < 0 ? 0 : bins[timelinePosition].cumulative;
   const date = timelinePosition === null ? 'Latest' : timelinePosition < 0 ?
-    `No albums yet — before ${utcDate.format(cutoff)} UTC; first addition ${utcMonth.format(timeline.first)}` : `Through ${utcDate.format(cutoff - 1)} UTC`;
+    `No albums yet — before ${utcDate.format(cutoff)} UTC${timeline.first === null ? '' : `; first addition ${utcMonth.format(timeline.first)}`}` : `Through ${utcDate.format(cutoff - 1)} UTC`;
   const readout = `${date} · Snapshot ${snapshot.toLocaleString()} / ${count.toLocaleString()} · Shown on map ${selection.visibleIndices.length.toLocaleString()} / ${count.toLocaleString()}`;
   const changed = $('timeline-readout').textContent !== readout;
   $('timeline-readout').textContent = readout; playhead.setAttribute('aria-valuetext', readout);
@@ -1000,7 +1008,8 @@ async function load(exported, name, label = name) {
     geometryScale = 1; simulationAlpha = 1;
     worker?.terminate(); worker = undefined; vibeGraph?.destroy(); graph?.destroy(); graph = undefined;
     data = exported;
-    timeline = buildTimeline(data.albums);
+    timeline = buildTimeline(data.albums, data.bookmarks);
+    timelineBookmarks.reset(timeline);
     renderLibraryStats($('library-totals'), data.library);
     filterPositions = new FilterPositions(data.albums.length);
     queryVectors = textVectors(data.albums);
@@ -1239,6 +1248,7 @@ $('timeline-playhead').addEventListener('keydown', event => {
 });
 $('timeline').addEventListener('keydown', event => {
   if (event.key !== 'Escape') return;
+  timelineBookmarks.hideLabel();
   event.preventDefault(); event.stopPropagation(); setTimelinePosition(null); announceTimeline(true);
 });
 for (const type of ['pointerdown', 'pointermove', 'pointerup', 'click', 'wheel', 'touchstart', 'touchmove', 'touchend']) {
@@ -1273,12 +1283,14 @@ function measureTimeline() {
   main.style.setProperty('--timeline-height', `${timelineReservedHeight(tray.hidden,
     tray.getBoundingClientRect().height, parseFloat(getComputedStyle(tray).bottom))}px`);
   drawTimeline(); scheduleLabels();
+  timelineBookmarks.layout();
 }
 function updateTimelineDocking() {
   const docked = timelineDocked(timelineDockPreference, timelineMobile.matches);
   const content = $('timeline-content'), toggle = $('timeline-toggle');
   if (docked && content.contains(document.activeElement)) toggle.focus({ preventScroll: true });
   content.hidden = docked; $('timeline-compact').hidden = !docked;
+  if (docked) timelineBookmarks.hideLabel();
   $('timeline').classList.toggle('docked', docked);
   toggle.setAttribute('aria-expanded', String(!docked));
   const label = docked ? 'Show timeline' : 'Hide timeline';
