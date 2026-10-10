@@ -8,7 +8,7 @@ from unittest.mock import patch
 
 import numpy as np
 
-from beets_embed.inference import Models
+from beets_embed.inference import Models, onnx_options
 from beets_embed.store import model_ids
 
 
@@ -79,9 +79,7 @@ class ConversionTests(unittest.TestCase):
             "input", TensorProto.FLOAT, [None, 2, 8, 6])], [helper.make_tensor_value_info(
             "out", TensorProto.FLOAT, [None, 3])], weights)
         model = helper.make_model(graph, opset_imports=[helper.make_opsetid("", 11)], ir_version=8)
-        options = ort.SessionOptions()
-        options.intra_op_num_threads = 2
-        options.inter_op_num_threads = 1
+        options = onnx_options(2)
         with tempfile.TemporaryDirectory() as temp:
             path = Path(temp) / "fixture.onnx"
             onnx.save(model, path)

@@ -13,6 +13,18 @@ from .audio import amclap_windows, batches, effnet_patches
 from .retrieval import unit
 
 
+def onnx_options(threads):
+    """Bound session pools and let idle inference threads sleep."""
+    import onnxruntime as ort
+    options = ort.SessionOptions()
+    options.intra_op_num_threads = threads
+    options.inter_op_num_threads = 1
+    options.execution_mode = ort.ExecutionMode.ORT_SEQUENTIAL
+    options.add_session_config_entry("session.intra_op.allow_spinning", "0")
+    options.add_session_config_entry("session.inter_op.allow_spinning", "0")
+    return options
+
+
 class Moments:
     def __init__(self):
         self.count = 0
@@ -74,10 +86,7 @@ class Models:
             self.heads = self._torch_style.heads
         elif not text_only:
             import onnxruntime as ort
-            options = ort.SessionOptions()
-            options.intra_op_num_threads = threads
-            options.inter_op_num_threads = 1
-            options.execution_mode = ort.ExecutionMode.ORT_SEQUENTIAL
+            options = onnx_options(threads)
             def session(name):
                 return ort.InferenceSession(str(self.assets / f"{name}.onnx"), options,
                                             providers=["CPUExecutionProvider"])

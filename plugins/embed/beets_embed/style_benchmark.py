@@ -20,7 +20,7 @@ from pathlib import Path
 import numpy as np
 
 from .audio import PreparedAudio, batches, effnet_patches
-from .inference import Models, Moments
+from .inference import Models, Moments, onnx_options
 from .store import Store, fingerprint, model_ids
 
 
@@ -117,10 +117,7 @@ class Logits:
         graph = onnx.load(str(path))
         graph.graph.output.append(onnx.helper.make_tensor_value_info(
             name, onnx.TensorProto.FLOAT, [None, 400]))
-        options = ort.SessionOptions()
-        options.intra_op_num_threads = threads
-        options.inter_op_num_threads = 1
-        options.execution_mode = ort.ExecutionMode.ORT_SEQUENTIAL
+        options = onnx_options(threads)
         self.onnx = ort.InferenceSession(graph.SerializeToString(), options,
                                         providers=["CPUExecutionProvider"])
         self.name = name
