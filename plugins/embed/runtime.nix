@@ -1,5 +1,5 @@
 # Keep AMCLAP's checkpoint-compatible text stack separate from beets' Python.
-{ pkgs, lib, fetchurl, fetchzip, models, rocmSupport ? false }:
+{ pkgs, lib, fetchurl, fetchzip, models, rocmSupport ? false, benchmark ? false }:
 let
   python = pkgs.python313.override {
     packageOverrides = self: super: (lib.optionalAttrs rocmSupport {
@@ -113,7 +113,8 @@ let
   };
   runtime = python.withPackages (ps: with ps; [ beets-embed-core amclap onnx onnxruntime numpy scipy ]);
 in
-pkgs.writeShellScriptBin (if rocmSupport then "beets-embed-worker-rocm" else "beets-embed-worker") ''
+pkgs.writeShellScriptBin (if benchmark then "beets-embed-style-benchmark"
+                         else if rocmSupport then "beets-embed-worker-rocm" else "beets-embed-worker") ''
   unset PYTHONPATH PYTHONHOME
   export PYTHONNOUSERSITE=1
   export HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 TOKENIZERS_PARALLELISM=false
@@ -121,5 +122,5 @@ pkgs.writeShellScriptBin (if rocmSupport then "beets-embed-worker-rocm" else "be
   export BEETS_EMBED_MODELS=${models}
   export BEETS_EMBED_FFMPEG=${pkgs.ffmpeg}/bin/ffmpeg
   ${lib.optionalString rocmSupport "export BEETS_EMBED_BACKEND=rocm"}
-  exec ${runtime}/bin/python -s -m beets_embed.worker "$@"
+  exec ${runtime}/bin/python -s -m beets_embed.${if benchmark then "style_benchmark" else "worker"} "$@"
 ''

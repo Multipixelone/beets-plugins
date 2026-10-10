@@ -83,6 +83,11 @@
           models = embed-models;
           rocmSupport = true;
         };
+        beets-embed-style-benchmark = pkgs.callPackage ./plugins/embed/runtime.nix {
+          models = embed-models;
+          rocmSupport = true;
+          benchmark = true;
+        };
         beets-album-graph = pkgs.callPackage ./plugins/embed/viewer {
           worker = if system == "x86_64-linux" then embed-worker else null;
         };
@@ -189,7 +194,7 @@
 
           default = beets-plugins;
         } // pkgs.lib.optionalAttrs (system == "x86_64-linux") {
-          inherit embed embed-worker beets-embed-worker-rocm;
+          inherit embed embed-worker beets-embed-worker-rocm beets-embed-style-benchmark;
         };
         devShells.default = env;
       }
