@@ -2,6 +2,7 @@
 
 import subprocess
 import tempfile
+import time
 from pathlib import Path
 
 import numpy as np
@@ -28,17 +29,22 @@ class PreparedAudio:
     def __init__(self, path, ffmpeg="ffmpeg"):
         self.temp = tempfile.TemporaryDirectory(prefix="beets-embed-audio-")
         self.root = Path(self.temp.name)
+        self.timings = {}
         try:
             decoded = self.root / "48k.f32"
+            started = time.perf_counter()
             with decoded.open("wb") as output:
                 subprocess.run([ffmpeg, "-nostdin", "-v", "error", "-threads", "1",
                                 "-i", path, "-vn", "-ac", "1", "-ar", "48000",
                                 "-f", "f32le", "pipe:1"], stdout=output,
                                stderr=subprocess.PIPE, check=True)
+            self.timings["decode"] = time.perf_counter() - started
             if decoded.stat().st_size == 0:
                 raise ValueError("Decoded audio is empty")
+            started = time.perf_counter()
             resample_file(decoded, self.root / "16k.f32", 3)
             resample_file(decoded, self.root / "24k.f32", 2)
+            self.timings["resample"] = time.perf_counter() - started
             decoded.unlink()
         except BaseException:
             self.close()

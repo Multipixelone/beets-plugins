@@ -694,6 +694,36 @@ EOF; boundary frames are zero-padded. All recording audio is covered. Track vect
 mean and std; AMCLAP windows are normalized before pooling. Heads store means.
 One preparation overlaps one inference, with at most two prepared tracks.
 
+Worker stage profiling is always enabled. Every 100 computed tracks, stderr
+receives a compact JSON line with `event: "embed_profile"` and `scope: "interval"`.
+Use `--profile-every N` on the worker, or `BEETS_EMBED_PROFILE_EVERY=N` through a
+launcher, to change this interval. Existing per-track progress lines are unchanged.
+The final counts JSON on stdout contains `profiling` for the whole `process()` run,
+including short, empty, failed and gracefully interrupted runs.
+
+`stages_seconds` reports `n`, `mean`, `p50` and `p95` in wall-clock seconds:
+`prep_wait` is the inference loop's wait for its prepared track; `prep` is total
+audio preparation measured in its thread; `decode` is FFmpeg and `resample` is
+both 16/24 kHz resamples; `style` and `text` cover their complete inference calls,
+including frontend work and output transfers; `store` sums the track's family
+commits. Decode and resample are components of prep, and prep overlaps inference,
+so do not add every stage mean to estimate elapsed time. Samples cover successful
+computed tracks; family stages count only tracks that needed that family. Zero
+samples have zero statistics. Timing samples use seven compact numeric arrays
+(at most 56 bytes per computed track, plus allocation overhead); percentiles are
+exact and computed only at summary boundaries.
+
+`tracks_per_second` is computed tracks divided by reporting-period elapsed time.
+`prep_wait_fraction` divides all preparation waits, including unsuccessful attempts,
+by `loop_seconds`, the time spent in inference-loop iterations. A high fraction
+indicates preparation cannot keep up; high Style/Text times with low wait indicate
+inference dominates. A high p95 reveals stalls or unusually long recordings. Lazy
+AMCLAP initialization is included in the first Text timing; model construction
+before `process()` is excluded. Skips and shutdown cleanup contribute to elapsed
+time. Periodic statistics cover the latest interval; final statistics cover the
+whole run. ONNX session threads block while idle, and Torch uses the configured
+intra-op count with one inter-op thread.
+
 The external SQLite store uses WAL and per-family commits. Mean/std blobs are
 little-endian float16, head scores float32; labels and full model provenance
 are shared in the `models` table. A vector key includes beets ID, absolute

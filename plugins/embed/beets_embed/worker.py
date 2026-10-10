@@ -11,10 +11,13 @@ from pathlib import Path
 
 from .store import Store, fingerprint, model_ids
 from .devices import DEVICES, probe_rocm, probe_worker, select_worker
+from .profiling import Profile
 
 
-def process(tracks, store, models, engine, prepare, batch_size=8, stopping=lambda: False):
+def process(tracks, store, models, engine, prepare, batch_size=8, stopping=lambda: False,
+            profile_every=100):
     counts = {"selected": 0, "computed": 0, "skipped": 0, "failed": 0}
+    profile = Profile(profile_every)
 
     def pending():
         for track in tracks:
@@ -35,10 +38,12 @@ def process(tracks, store, models, engine, prepare, batch_size=8, stopping=lambd
             yield track, content, missing
 
     def preparation(job):
+        started = time.perf_counter()
         try:
-            return prepare(job[0]["path"]), None
+            prepared, error = prepare(job[0]["path"]), None
         except Exception as exc:
-            return None, exc
+            prepared, error = None, exc
+        return prepared, error, time.perf_counter() - started
 
     # One preparation overlaps one inference. At most two tracks' temporary
     # audio exists; inference itself always has a single writer/model instance.
@@ -47,7 +52,12 @@ def process(tracks, store, models, engine, prepare, batch_size=8, stopping=lambd
         job = next(jobs, None)
         future = pool.submit(preparation, job) if job is not None else None
         while job is not None:
-            prepared, error = future.result()
+            iteration_started = time.perf_counter()
+            prepared, error, prep_seconds = future.result()
+            waited = time.perf_counter() - iteration_started
+            stages = {"prep_wait": waited, "prep": prep_seconds, "store": 0.0}
+            stages.update(getattr(prepared, "timings", {}))
+            computed = False
             following = next(jobs, None) if not stopping() else None
             next_future = pool.submit(preparation, following) if following is not None else None
             track, content, missing = job
@@ -60,12 +70,17 @@ def process(tracks, store, models, engine, prepare, batch_size=8, stopping=lambd
                     if stopping():
                         break
                     method = engine.style if family == "style" else engine.audio_text
+                    started = time.perf_counter()
                     mean, std, heads, windows = method(prepared, batch_size)
+                    stages[family] = time.perf_counter() - started
                     if fingerprint(track["path"]) != content:
                         raise ValueError("File changed during inference; retry on the next run")
+                    started = time.perf_counter()
                     store.put(track["id"], content, models[family], mean, std, heads, windows)
+                    stages["store"] += time.perf_counter() - started
                 if not stopping():
                     counts["computed"] += 1
+                    computed = True
                     print(f"Embedded item {track['id']} ({counts['computed']} computed)", file=sys.stderr)
             except Exception as exc:
                 counts["failed"] += 1
@@ -75,12 +90,16 @@ def process(tracks, store, models, engine, prepare, batch_size=8, stopping=lambd
                     prepared.close()
                 # On termination clean an already scheduled preparation too.
                 if stopping() and next_future is not None:
-                    extra, _ = next_future.result()
+                    extra, _, _ = next_future.result()
                     if extra is not None:
                         extra.close()
+                profile.iteration(time.perf_counter() - iteration_started, waited)
+                if computed:
+                    profile.computed_track(stages)
             job, future = following, next_future
             if stopping():
                 break
+    counts["profiling"] = profile.summary()
     return counts
 
 
@@ -93,6 +112,9 @@ def main():
     parser.add_argument("--ffmpeg", default=os.environ.get("BEETS_EMBED_FFMPEG", "ffmpeg"))
     parser.add_argument("--threads", type=int, default=2)
     parser.add_argument("--batch-size", type=int, default=8)
+    parser.add_argument("--profile-every", type=int,
+                        default=os.environ.get("BEETS_EMBED_PROFILE_EVERY", "100"),
+                        help="emit stage timing JSON every this many computed tracks (default: 100)")
     parser.add_argument("--device", choices=DEVICES, default="auto")
     parser.add_argument("--style-backend", choices=("onnx", "torch"),
                         default=os.environ.get("BEETS_EMBED_STYLE_BACKEND", "onnx"))
@@ -110,7 +132,8 @@ def main():
         return 0
     if not args.assets:
         parser.error("The packaged model assets are required")
-    if not 1 <= args.threads <= 16 or not 1 <= args.batch_size <= 128 or args.top_k < 1:
+    if (not 1 <= args.threads <= 16 or not 1 <= args.batch_size <= 128 or
+            args.top_k < 1 or args.profile_every < 1):
         parser.error("Invalid processing bounds")
     if args.mode == "serve-text":
         if args.device != "cpu" or args.threads != 2:
@@ -207,7 +230,7 @@ def main():
         with Store(args.store) as store, open(args.manifest) as rows:
             counts = process((json.loads(row) for row in rows), store, models, engine,
                              lambda path: PreparedAudio(path, args.ffmpeg),
-                             args.batch_size, lambda: stopped)
+                             args.batch_size, lambda: stopped, args.profile_every)
         counts.update(seconds=round(time.monotonic() - started, 3), device=device,
                       interrupted=stopped)
         if device == "rocm":
