@@ -56,15 +56,23 @@ def strict_checkpoint(module, checkpoint):
 
 
 class Models:
-    def __init__(self, assets, threads=2, device="cpu", text_only=False):
+    def __init__(self, assets, threads=2, device="cpu", text_only=False, style_backend="onnx"):
+        if style_backend not in ("onnx", "torch"):
+            raise ValueError(f"Unknown Style backend: {style_backend}")
         self.assets = Path(assets)
         self.threads = threads
         self.device = device
         self.text_only = text_only
+        self.style_backend = style_backend
+        self._torch_style = None
         self.effnet = None
         self.heads = {}
         self.amclap = None
-        if not text_only:
+        if not text_only and style_backend == "torch":
+            from .torch_style import TorchStyle
+            self._torch_style = TorchStyle(self.assets, device, threads)
+            self.heads = self._torch_style.heads
+        elif not text_only:
             import onnxruntime as ort
             options = ort.SessionOptions()
             options.intra_op_num_threads = threads
@@ -135,20 +143,30 @@ class Models:
         with torch.inference_mode():
             return unit(self.amclap.forward_text(texts).cpu().numpy())
 
+    def style_batch(self, batch):
+        """Unaggregated patch outputs shared by inference and parity tooling."""
+        if self._torch_style is not None:
+            return self._torch_style.batch(batch)
+        outputs = self.effnet.run(None, {self.effnet.get_inputs()[0].name: batch})
+        vectors = next(value for value in outputs if value.shape[-1] == 1280)
+        styles = next(value for value in outputs if value.shape[-1] == 400)
+        values = {"embeddings": vectors, "discogs400": styles}
+        for name, session in self.heads.items():
+            output = session.run(None, {session.get_inputs()[0].name: vectors})[0]
+            values[name] = output.reshape(len(vectors), -1)
+        return values
+
     def style(self, prepared, batch_size):
+        return self.style_batches(batches(effnet_patches(prepared.samples(16000)), batch_size))
+
+    def style_batches(self, prepared_batches):
         moments = Moments()
         head_moments = {name: Moments() for name in ("discogs400", *self.heads)}
-        samples = prepared.samples(16000)
-        for batch in batches(effnet_patches(samples), batch_size):
-            outputs = self.effnet.run(None, {self.effnet.get_inputs()[0].name: batch})
-            vectors = next(value for value in outputs if value.shape[-1] == 1280)
-            styles = next(value for value in outputs if value.shape[-1] == 400)
-            moments.add(vectors)
-            head_moments["discogs400"].add(styles)
-            for name, session in self.heads.items():
-                outputs = session.run(None, {session.get_inputs()[0].name: vectors})
-                output = outputs[0]
-                head_moments[name].add(output.reshape(len(vectors), -1))
+        for batch in prepared_batches:
+            values = self.style_batch(batch)
+            moments.add(values["embeddings"])
+            for name, stats in head_moments.items():
+                stats.add(values[name])
         heads = {}
         for name, stats in head_moments.items():
             meta_name = "effnet" if name == "discogs400" else name

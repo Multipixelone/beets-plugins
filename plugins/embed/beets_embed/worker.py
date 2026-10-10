@@ -94,6 +94,8 @@ def main():
     parser.add_argument("--threads", type=int, default=2)
     parser.add_argument("--batch-size", type=int, default=8)
     parser.add_argument("--device", choices=DEVICES, default="auto")
+    parser.add_argument("--style-backend", choices=("onnx", "torch"),
+                        default=os.environ.get("BEETS_EMBED_STYLE_BACKEND", "onnx"))
     parser.add_argument("--probe-passed", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--top-k", type=int, default=20)
     parser.add_argument("--text")
@@ -101,6 +103,8 @@ def main():
     parser.add_argument("--albums", action="store_true")
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args()
+    if args.style_backend not in ("onnx", "torch"):
+        parser.error("Invalid BEETS_EMBED_STYLE_BACKEND")
     if args.mode == "probe-rocm":
         print(json.dumps(probe_rocm()))
         return 0
@@ -160,7 +164,7 @@ def main():
     from .audio import PreparedAudio
     from .retrieval import available, album_vectors, rank, similar
     engine = Models(args.assets, args.threads, "cuda:0" if device == "rocm" else "cpu",
-                    text_only=args.mode in ("search", "similar"))
+                    text_only=args.mode in ("search", "similar"), style_backend=args.style_backend)
     if args.mode == "smoke":
         import numpy as np
         import tempfile

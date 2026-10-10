@@ -111,7 +111,7 @@ let
       };
     };
   };
-  runtime = python.withPackages (ps: with ps; [ beets-embed-core amclap onnxruntime numpy scipy ]);
+  runtime = python.withPackages (ps: with ps; [ beets-embed-core amclap onnx onnxruntime numpy scipy ]);
 in
 pkgs.writeShellScriptBin (if rocmSupport then "beets-embed-worker-rocm" else "beets-embed-worker") ''
   unset PYTHONPATH PYTHONHOME

@@ -86,6 +86,8 @@ class EmbedPlugin(BeetsPlugin):
         embed = ui.Subcommand("embed", help="compute offline music embeddings")
         embed.parser.add_option("--count-only", action="store_true", default=False)
         embed.parser.add_option("--limit", type="int", help="process at most N matching tracks")
+        embed.parser.add_option("--style-backend", type="choice", choices=["onnx", "torch"],
+                                help="opt-in Style inference backend (default: onnx)")
         search = ui.Subcommand("embed-search", help="search tracks with an audio description")
         search.parser.add_option("--albums", action="store_true", default=False)
         similar = ui.Subcommand("embed-similar", help="nearest albums to a beets seed query")
@@ -167,6 +169,8 @@ class EmbedPlugin(BeetsPlugin):
             command = [worker, mode, "--manifest", str(manifest), "--store", store_path,
                        "--threads", str(threads), "--batch-size", str(batch)]
             command.extend(["--device", device])
+            if mode == "embed" and getattr(opts, "style_backend", None):
+                command.extend(["--style-backend", opts.style_backend])
             if device == "rocm":
                 command.append("--probe-passed")
             if mode == "search":
