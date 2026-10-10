@@ -61,6 +61,8 @@ test('pinned Cosmos adapter replaces exactly its atlas helper and rejects change
   assert.ok(patched.includes('L.end(), this.device.submit(), this.config.onRenderFrame?.();'));
   const frame = patched.slice(patched.indexOf('  renderFrame(e) {'), patched.indexOf('\n  stopFrames()'));
   assert.ok(frame.indexOf('C.drag()') < frame.indexOf('p.draw(L)'));
+  const dragShader = patched.slice(patched.indexOf(', Di = `'), patched.indexOf('`;\nfunction Ai('));
+  assert.match(dragShader, /uniform highp sampler2D positionsTexture;/);
   assert.ok(patched.includes('finalImageColor.a * shapeColor.a'));
   assert.ok(patched.includes('albumVibeActive: i.albumVibeActive ? 1 : 0'));
   assert.ok(patched.includes('i.albumCollisionSizes?.[p] ?? i.getResolvedPointSize(p)'));

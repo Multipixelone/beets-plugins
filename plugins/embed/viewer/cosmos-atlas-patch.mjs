@@ -217,6 +217,11 @@ export function patchCosmosAtlas(source, version, atlasPath) {
     'this.calculateCentermassCommand.setBindings({\n      positionsTexture: i.albumAttractionPositions?.() ?? i.previousPositionTexture,');
   replace('clusterTexture: this.clusterTexture,\n      positionsTexture: t.previousPositionTexture,',
     'clusterTexture: this.clusterTexture,\n      positionsTexture: t.albumAttractionPositions?.() ?? t.previousPositionTexture,');
+  // Drag copies every position texel, including albums that aren't dragged.
+  // The default sampler precision quantizes their float coordinates on real
+  // GPUs even while physics is paused. Preserve the frozen timeline baseline.
+  patched = patchSection(patched, ', Di = `', '`;', shader =>
+    replaceOnce(shader, 'uniform sampler2D positionsTexture;', 'uniform highp sampler2D positionsTexture;'));
   return `import { createAtlasDataFromImageData as albumAtlas } from ${JSON.stringify(atlasPath)};\n` +
     patchAlbumQuads(patchAlbumOrbit(patched));
 }
