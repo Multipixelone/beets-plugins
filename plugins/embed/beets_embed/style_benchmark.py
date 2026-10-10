@@ -1,12 +1,15 @@
 """Read-only feasibility tool: nix run .#beets-embed-style-benchmark -- --help.
 
 For real audio, pass --worker-config /path/to/beets-embed-backfill.json. Reports
-are JSON on stdout, with progress on stderr; no files or store rows are saved.
+are JSON on stdout, with progress on stderr. Worker mode writes only temporary
+stores; parity mode writes no store rows. Temporary files are cleaned on exit.
 """
 
 import argparse
 import json
 import os
+import resource
+import signal
 import sqlite3
 import statistics
 import subprocess
@@ -15,6 +18,8 @@ import tempfile
 import time
 from collections import Counter, defaultdict
 from contextlib import closing
+from datetime import datetime
+from itertools import islice
 from pathlib import Path
 
 import numpy as np
@@ -292,8 +297,86 @@ def run(args):
                             "discogs_outputs": "published sigmoid scores and pre-sigmoid logits"}}
 
 
+def cpu_seconds():
+    return sum(usage.ru_utime + usage.ru_stime for usage in
+               (resource.getrusage(resource.RUSAGE_SELF), resource.getrusage(resource.RUSAGE_CHILDREN)))
+
+
+def run_worker(args, root):
+    """One warmed process-path measurement with exclusively temporary stores."""
+    from .threads import configure_torch_threads
+    from .worker import process
+    configure_torch_threads(args.threads)
+    import torch
+    if not torch.version.hip or not torch.cuda.is_available():
+        raise ValueError("Worker benchmark requires HIP-backed Torch and an accessible AMD GPU")
+    tracks = list(islice(sample_candidates(args.library, args.directory, args.seed), args.count))
+    if len(tracks) != args.count:
+        raise ValueError(f"Only {len(tracks)} readable tracks; requested {args.count}")
+    stopped = False
+    def stop(*_):
+        nonlocal stopped
+        stopped = True
+    previous = {signum: signal.signal(signum, stop) for signum in (signal.SIGTERM, signal.SIGINT)}
+    try:
+        started = time.perf_counter()
+        engine = Models(args.assets, args.threads, "cuda:0", style_backend=args.style_backend)
+        engine.configure_threads()
+        engine.load_text()
+        torch.cuda.synchronize()
+        initialization_seconds = time.perf_counter() - started
+        models = model_ids()
+        prepare = lambda path: PreparedAudio(path, args.ffmpeg)
+        started = time.perf_counter()
+        with Store(Path(root) / "warmup.sqlite3") as store:
+            warmup = process(tracks[:1], store, models, engine, prepare, args.batch_size,
+                             lambda: stopped)
+        torch.cuda.synchronize()
+        warmup_seconds = time.perf_counter() - started
+        if warmup["failed"]:
+            raise ValueError("Warmup failed; no measurement performed")
+        torch.cuda.reset_peak_memory_stats()
+        timestamp = datetime.now().astimezone().isoformat()
+        load_start = os.getloadavg()
+        with Store(Path(root) / "measurement.sqlite3") as store:
+            cpu_started = cpu_seconds()
+            started = time.perf_counter()
+            counts = process(tracks, store, models, engine, prepare, args.batch_size,
+                             lambda: stopped, args.profile_every)
+            torch.cuda.synchronize()
+            seconds = time.perf_counter() - started
+            cpu = cpu_seconds() - cpu_started
+        counts.update(interrupted=stopped)
+        return {"mode": "worker", "counts": counts,
+                "measurement": {"seconds": seconds, "cpu_seconds": cpu,
+                                "cpu_percent": 100 * cpu / seconds if seconds else 0.0,
+                                "tracks_per_second": counts["computed"] / seconds if seconds else 0.0},
+                "tracks": tracks,
+                "environment": {"started_at": timestamp,
+                                "finished_at": datetime.now().astimezone().isoformat(),
+                                "load_start": load_start, "load_end": os.getloadavg(),
+                                "nice": os.getpriority(os.PRIO_PROCESS, 0),
+                                "torch": torch.__version__, "hip": torch.version.hip,
+                                "gpu": torch.cuda.get_device_name(0), "threads": args.threads,
+                                "style_backend": args.style_backend, "batch_size": args.batch_size,
+                                "seed": args.seed, "model_ids": models,
+                                "initialization_seconds": initialization_seconds,
+                                "warmup_seconds": warmup_seconds,
+                                "gpu_peak_allocated_bytes": torch.cuda.max_memory_allocated(),
+                                "gpu_peak_reserved_bytes": torch.cuda.max_memory_reserved(),
+                                "timing_note": "one warmed process run; load includes concurrent work; "
+                                               "CPU includes all process threads and reaped FFmpeg children"}}
+    finally:
+        for signum, handler in previous.items():
+            signal.signal(signum, handler)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--mode", choices=("parity", "worker"), default="parity")
+    parser.add_argument("--style-backend", choices=("onnx", "torch"), default="onnx",
+                        help="Style backend for worker mode; parity mode compares both")
+    parser.add_argument("--profile-every", type=int, default=100, help="worker profiling interval")
     parser.add_argument("--worker-config", help="existing backfill JSON configuration (read-only)")
     parser.add_argument("--library")
     parser.add_argument("--directory")
@@ -304,9 +387,11 @@ def main():
     parser.add_argument("--count", type=int, default=20)
     parser.add_argument("--threads", type=int, default=2)
     parser.add_argument("--batch-size", type=int, default=8)
-    parser.add_argument("--repeats", type=int, default=3)
+    parser.add_argument("--repeats", type=int, default=3, help="per-track timing repeats in parity mode only")
     parser.add_argument("--seed", type=int, default=20261010)
     args = parser.parse_args()
+    if args.mode == "worker" and args.store:
+        parser.error("worker mode always uses temporary stores; --store is not allowed")
     if args.worker_config:
         config = json.loads(Path(args.worker_config).read_text())
         args.library = args.library or config["library"]
@@ -314,16 +399,29 @@ def main():
     if not args.assets or not args.library or not args.directory:
         parser.error("assets, library and directory are required")
     if (args.count < 1 or not 1 <= args.threads <= 16 or not 1 <= args.batch_size <= 128 or
-            args.repeats < 1 or args.stored_limit < 0):
+            args.repeats < 1 or args.stored_limit < 0 or args.profile_every < 1):
         parser.error("Invalid benchmark processing bounds")
+    from .worker import register_stack_dumps
+    register_stack_dumps()
     # Never use the service's caches, scratch directory, lock, or write path.
-    with tempfile.TemporaryDirectory(prefix="beets-style-benchmark-") as temp:
-        for name, suffix in (("MIOPEN_CUSTOM_CACHE_DIR", "miopen"), ("MIOPEN_USER_DB_PATH", "miopen-db")):
+    with tempfile.TemporaryDirectory(prefix="beets-style-benchmark-", dir="/tmp") as temp:
+        for name, suffix in (("MIOPEN_CUSTOM_CACHE_DIR", "miopen"), ("MIOPEN_USER_DB_PATH", "miopen-db"),
+                             ("XDG_CACHE_HOME", "cache")):
             path = Path(temp) / suffix
             path.mkdir()
             os.environ[name] = str(path)
-        report = run(args)
+        # tempfile caches its root, so changing TMPDIR alone is insufficient.
+        audio_temp = Path(temp) / "audio"
+        audio_temp.mkdir()
+        previous_temp = tempfile.tempdir
+        try:
+            tempfile.tempdir = str(audio_temp)
+            report = run_worker(args, temp) if args.mode == "worker" else run(args)
+        finally:
+            tempfile.tempdir = previous_temp
     print(json.dumps(report, allow_nan=False, sort_keys=True))
+    if args.mode == "worker":
+        return 143 if report["counts"]["interrupted"] else int(bool(report["counts"]["failed"]))
     return 1 if report["verdict"] == "broken" else 0
 
 

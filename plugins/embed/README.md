@@ -739,6 +739,36 @@ same-user py-spy attach; native/sampling profiling requires root or applicable
 ptrace permission, or starting the worker under the profiler. SIGUSR1 needs no
 ptrace access or system configuration change.
 
+For a repeatable full-worker throughput measurement on ROCm, use the existing
+benchmark package's worker mode:
+
+```sh
+nice -n 15 nix run .#beets-embed-style-benchmark -- \
+  --mode worker --worker-config /path/to/beets-embed-backfill.json \
+  --count 30 --threads 2 --batch-size 8 --style-backend torch
+```
+
+Run each backend/thread combination in a fresh process with the same sampler
+seed (default `20261010`) and compare the reported track IDs to confirm the sample
+is unchanged. Compare `onnx` and `torch` at threads `2`, `4`, `8`. Both use ROCm
+AMCLAP; ONNX Style stays on CPU and Torch Style uses ROCm. Worker mode samples the
+library read-only and runs real `process()` fingerprints, one-track prefetch and
+per-family commits. It rejects `--store`, ignores the worker config's store field,
+and uses separate temporary warmup and measurement databases. Audio and model
+caches live in a private `/tmp` directory removed on exit. It never enters the
+backfill service's lock or scratch paths. No service change is required.
+
+Initialization and a first-track warmup are excluded from `measurement` and
+reported separately. `--repeats` and `--stored-limit` apply only to the default
+parity mode; worker mode performs one measured pass. `measurement.cpu_percent`
+includes all process threads and reaped FFmpeg children, divided by measured wall
+time (`100%` is one CPU core). The JSON includes the worker's stage distributions,
+tracks/s, nice level, timestamps and host load. Concurrent nightly GPU/CPU work
+can change results; report contention and prefer an uncontended comparison when
+the nightly window has ended. SIGUSR1 stack dumps and graceful SIGTERM also work
+in worker benchmark mode. The default benchmark mode continues to check Style
+parity and its existing timing comparison.
+
 The external SQLite store uses WAL and per-family commits. Mean/std blobs are
 little-endian float16, head scores float32; labels and full model provenance
 are shared in the `models` table. A vector key includes beets ID, absolute
