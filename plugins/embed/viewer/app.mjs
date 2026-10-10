@@ -11,6 +11,7 @@ import { vibeLinkOpacity, matchBounds, GatherAppearance, GATHER_SIZE_MULTIPLIER,
 import { VibeGraph } from './cosmos-vibe.mjs';
 import { GatherPositions, gatherRings } from './gather.mjs';
 import { renderLibraryStats, appendAlbumMetadata, appendAlbumTitle, appendAlbumSubline } from './library-stats.mjs';
+import { buildTimeline, timelineCutoff, timelineMembership, applyTimeline, timelineStacks, timelinePositionForKey } from './timeline.mjs';
 
 const $ = id => document.getElementById(id);
 const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -39,6 +40,145 @@ let selection = { active: false, states: [], matches: [] }, lensScores, currentL
 let filterPositions, vibeGraph, renderedSizes = [], layoutGeometryKey = '', vibeFitKey;
 let gatherAppearance = new GatherAppearance();
 let gather = new GatherPositions(), gatherEnabled = false, gatherScale = 1, gatherFrame, dragIndex, edgeStrengths = [];
+let timeline, timelinePosition = null, historical = false, timelineRestore;
+let timelineSegments = [], timelineCommunities = [], timelineColors = new Map(), timelineNames = new Map();
+let timelinePartition, timelineFrame, timelinePending, timelineAnnouncementTimer, viewRevision = 0;
+const utcDate = new Intl.DateTimeFormat(undefined, { year: 'numeric', month: 'short', day: 'numeric', timeZone: 'UTC' });
+const utcMonth = new Intl.DateTimeFormat(undefined, { year: 'numeric', month: 'short', timeZone: 'UTC' });
+const sortedGroupNames = names => [...new Set(names)].sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+
+function resetTimeline() {
+  cancelAnimationFrame(timelineFrame); timelineFrame = undefined; timelinePending = undefined;
+  clearTimeout(timelineAnnouncementTimer); timelineAnnouncementTimer = undefined;
+  if (timelineRestore) $('group').value = timelineRestore.group;
+  historical = false; timelineRestore = undefined; timelinePosition = null; timeline = undefined;
+  timelineSegments = []; timelinePartition = undefined; timelineCommunities = [];
+  timelineColors.clear(); timelineNames.clear(); viewRevision++;
+  $('group').disabled = false; $('pause').disabled = false;
+  $('timeline').hidden = true; $('timeline-breakdown').open = false;
+  $('timeline-announcement').textContent = '';
+  for (const id of ['library-count', 'matches']) $(id).setAttribute('aria-live', 'polite');
+  document.querySelector('main').style.setProperty('--timeline-height', '0px');
+}
+function normalizeTimelineGather() {
+  cancelAnimationFrame(gatherFrame); gatherFrame = undefined;
+  const restored = new Map();
+  for (const [index, position] of gather.saved) {
+    filterPositions.saved.set(position, index * 2);
+    if (visibleAlbum(index)) restored.set(index, position);
+  }
+  gather = new GatherPositions(); gatherAppearance = new GatherAppearance();
+  gatherEnabled = false; gatherScale = 1;
+  vibeGraph.anchors = new Map(); vibeGraph.orbit(null);
+  vibeGraph.positions(restored, { visibility: true, resetVelocity: true });
+  updateGatherPhysics(); updateGatherControls();
+}
+function setTimelinePosition(position) {
+  cancelAnimationFrame(timelineFrame); timelineFrame = undefined; timelinePending = undefined;
+  if (!graphReady || !timeline?.bins.length || position === timelinePosition) return;
+  clearTimeout(timelineAnnouncementTimer);
+  if (position !== null && !historical) {
+    historical = true; viewRevision++; initialFitPending = false; vibeFitKey = undefined;
+    // Interrupt the existing D3 camera tween without changing its transform.
+    graph.canvasD3Selection?.interrupt();
+    timelineRestore = { group: $('group').value, paused, running: graph.isSimulationRunning };
+    normalizeTimelineGather();
+    graph.pause();
+    $('group').value = 'cluster'; $('group').disabled = true; $('pause').disabled = true;
+    for (const id of ['library-count', 'matches']) $(id).setAttribute('aria-live', 'off');
+    updateGroups();
+  }
+  timelinePosition = position;
+  if (position === null && historical) {
+    // Apply Latest under the guard; current filters still own map eligibility.
+    $('group').value = timelineRestore.group;
+    updateGroups(); updateSearch();
+    const restore = timelineRestore;
+    historical = false; timelineRestore = undefined;
+    paused = restore.paused; $('group').disabled = false; $('pause').disabled = false;
+    updatePauseButton(); updateGatherControls();
+    for (const id of ['library-count', 'matches']) $(id).setAttribute('aria-live', 'polite');
+    if (restore.running) graph.unpause();
+  } else updateSearch();
+}
+function rebuildTimelineStacks() {
+  if (!timeline) return;
+  const partition = clusters.join(',');
+  if (partition === timelinePartition) return;
+  timelinePartition = partition;
+  const names = groups(data.albums, 'cluster', clusters);
+  timelineCommunities = sortedGroupNames(names);
+  timelineColors = new Map(timelineCommunities.map((name, index) =>
+    [name, `rgb(${color(index).slice(0, 3).map(channel => Math.round(channel * 255)).join(' ')})`]));
+  const definitions = groupLabels(data.albums, names, () => true, { edges, mode: 'cluster' });
+  timelineNames = new Map(definitions.map(group => [group.name, labelPresentation(group).displayName]));
+  timelineSegments = timelineStacks(timeline, names, timelineCommunities);
+  drawTimeline();
+}
+function drawTimeline() {
+  if (!timeline?.bins.length) return;
+  const canvas = $('timeline-histogram'), { width, height } = canvas.getBoundingClientRect();
+  if (!width || !height) return;
+  const dpr = window.devicePixelRatio || 1;
+  canvas.width = Math.round(width * dpr); canvas.height = Math.round(height * dpr);
+  const context = canvas.getContext('2d'); context.scale(dpr, dpr);
+  const pitch = width / (timeline.bins.length + 1), chartHeight = height - 4;
+  timelineSegments.forEach((segments, index) => {
+    let bottom = height;
+    for (const segment of segments) {
+      const size = segment.count / timeline.maxCount * chartHeight;
+      context.fillStyle = timelineColors.get(segment.name);
+      context.fillRect(index * pitch + 1, bottom - size, Math.max(.5, pitch - 2), size);
+      bottom -= size;
+    }
+  });
+  const x = timelinePosition === null ? width - 1 : (timelinePosition + 1) * pitch;
+  context.fillStyle = themeValue('--ink'); context.fillRect(Math.max(0, x - 1), 0, 2, height);
+}
+function announceTimeline(immediate = false) {
+  clearTimeout(timelineAnnouncementTimer);
+  const message = $('timeline-readout').textContent;
+  const announce = () => { timelineAnnouncementTimer = undefined; $('timeline-announcement').textContent = message; };
+  if (immediate) announce(); else timelineAnnouncementTimer = setTimeout(announce, 150);
+}
+function updateTimelineReadout() {
+  if (!timeline) return;
+  const count = timeline.total, bins = timeline.bins;
+  $('timeline').hidden = false;
+  $('timeline-empty').hidden = !!bins.length; $('timeline-controls').hidden = !bins.length;
+  $('timeline-latest').disabled = !graphReady || !bins.length;
+  $('timeline-latest').setAttribute('aria-pressed', String(timelinePosition === null));
+  const playhead = $('timeline-playhead');
+  playhead.disabled = !graphReady || !bins.length; playhead.max = bins.length;
+  playhead.value = timelinePosition ?? bins.length;
+  $('timeline-scope').textContent = `Of the ${count.toLocaleString()} albums in this export · ${timeline.undated.toLocaleString()} undated · Current metadata and similarities`;
+  if (!bins.length) return;
+  const cutoff = timelineCutoff(timeline, timelinePosition);
+  const snapshot = timelinePosition === null ? count : timelinePosition < 0 ? 0 : bins[timelinePosition].cumulative;
+  const date = timelinePosition === null ? 'Latest' : timelinePosition < 0 ?
+    `No albums yet — before ${utcDate.format(cutoff)} UTC; first addition ${utcMonth.format(timeline.first)}` : `Through ${utcDate.format(cutoff - 1)} UTC`;
+  const readout = `${date} · Snapshot ${snapshot.toLocaleString()} / ${count.toLocaleString()} · Shown on map ${selection.visibleIndices.length.toLocaleString()} / ${count.toLocaleString()}`;
+  const changed = $('timeline-readout').textContent !== readout;
+  $('timeline-readout').textContent = readout; playhead.setAttribute('aria-valuetext', readout);
+  $('timeline-first').textContent = utcMonth.format(bins[0].start);
+  $('timeline-last').textContent = `${utcMonth.format(bins.at(-1).end - 1)} · Latest`;
+  const index = timelinePosition === null ? bins.length - 1 : timelinePosition;
+  const bin = bins[index];
+  $('timeline-bin-summary').textContent = bin ?
+    `${utcDate.format(bin.start)}–${utcDate.format(bin.end - 1)} UTC: ${bin.count.toLocaleString()} additions` : 'Before the first interval: 0 additions';
+  $('timeline-bin-groups').textContent = bin ? timelineSegments[index]?.map(segment =>
+    `${timelineNames.get(segment.name) ?? segment.name}: ${segment.count.toLocaleString()}`).join('; ') || 'No additions in this interval.' : 'No additions yet.';
+  drawTimeline();
+  if (changed) announceTimeline();
+}
+function queueTimelinePosition(position) {
+  timelinePending = position;
+  if (timelineFrame === undefined) timelineFrame = requestAnimationFrame(() => {
+    timelineFrame = undefined;
+    const pending = timelinePending; timelinePending = undefined;
+    setTimelinePosition(pending);
+  });
+}
 function visibleAlbum(index) {
   return Number.isInteger(index) && !!data?.albums[index] && selection.states[index]?.visible !== false;
 }
@@ -110,6 +250,11 @@ function refreshLabels() {
   // Reserve the search and navigation areas as well as artwork.
   obstacles.push({ left: 0, right: Math.min(410, width), top: 0, bottom: 76 },
     { left: 0, right: width, top: height - 88, bottom: height });
+  if (!$('timeline').hidden) {
+    const chart = $('timeline').getBoundingClientRect(), map = $('graph').getBoundingClientRect();
+    obstacles.push({ left: chart.left - map.left, right: chart.right - map.left,
+      top: chart.top - map.top - 80, bottom: chart.bottom - map.top });
+  }
   const placed = placeLabels(candidates, width, height, zoom, zoom < .4 ? 12 : 24,
     { obstacles, previous: labelOffsets, minZoom: 0 });
   const shown = new Set(placed.map(label => label.name));
@@ -418,7 +563,7 @@ function configureCommunities() {
     padding });
   graph.setClusterPositions(gatherEnabled ? undefined : Array.from(communityModel.centers));
   graph.setPointClusterStrength(gatherEnabled ? new Float32Array(data.albums.length) : communityModel.strengths);
-  if (!appliedLayout) {
+  if (!appliedLayout && !historical) {
     filterPositions.seed(communityModel.positions);
     graph.setPointPositions(Float32Array.from(communityModel.positions,
       (coordinate, i) => visibleAlbum(Math.floor(i / 2)) ? coordinate : NaN));
@@ -445,9 +590,9 @@ function options() {
   return { useK: $('use-k').checked, k: Number($('k').value),
     useThreshold: $('use-threshold').checked, threshold: Number($('threshold').value) };
 }
-function reheat() { graph.render(); if (!paused) graph.start(0.3); }
+function reheat() { graph.render(); if (!paused && !historical) graph.start(0.3); }
 function fitInitialView(settled = false) {
-  if (!initialFitPending || !graphReady) return;
+  if (historical || !initialFitPending || !graphReady) return;
   const duration = reducedMotion ? 0 : 450;
   // Scale artwork with the camera so zooming out never piles fixed-size covers together.
   const scale = window.matchMedia('(max-width: 760px)').matches ? 1.15 : 1;
@@ -462,15 +607,16 @@ function fitInitialView(settled = false) {
   scheduleCovers();
 }
 function fitVibeMatches() {
-  if (gather.saved.size) return;
+  if (historical || gather.saved.size) return;
   const key = phraseResult ? `${phraseSearch.revision}:${selection.matches.join(',')}` : undefined;
   if (key === vibeFitKey) return;
   vibeFitKey = key;
   if (!key || !graphReady) return;
   initialFitPending = false;
   const currentGeneration = generation;
+  const currentView = viewRevision;
   requestAnimationFrame(() => {
-    if (key !== vibeFitKey || !graphReady || generation !== currentGeneration || gather.saved.size || gatherEnabled) return;
+    if (historical || viewRevision !== currentView || key !== vibeFitKey || !graphReady || generation !== currentGeneration || gather.saved.size || gatherEnabled) return;
     const bounds = matchBounds(selection.matches, graph.getPointPositions(), renderedSizes);
     if (bounds) graph.setZoomTransformByPointPositions(bounds, reducedMotion ? 0 : 450, undefined, 0.12, false);
     scheduleCovers();
@@ -486,7 +632,7 @@ function gatheredStrengths() {
 function updateGatherControls() {
   for (const id of ['gather', 'gather-map']) {
     $(id).hidden = !phraseResult || (id === 'gather-map' && !gatherEnabled);
-    $(id).disabled = !selection.matches.length;
+    $(id).disabled = historical || !selection.matches.length;
     $(id).textContent = gatherEnabled ? 'Ungather' : 'Gather matches';
     $(id).setAttribute('aria-pressed', String(gatherEnabled));
   }
@@ -505,14 +651,14 @@ function updateGatherPhysics() {
   graph.setPointClusterStrength(gatherEnabled ? new Float32Array(data.albums.length) : communityModel?.strengths);
   graph.setLinkStrength(gatheredStrengths());
   coverGeometry = ''; updateHighlights(); graph.render(undefined, 0);
-  if (gatherEnabled && !paused) graph.start(simulationAlpha = Math.max(.3, simulationAlpha));
+  if (!historical && gatherEnabled && !paused) graph.start(simulationAlpha = Math.max(.3, simulationAlpha));
 }
 function animateGather() {
-  if (gatherFrame !== undefined || !graphReady) return;
+  if (historical || gatherFrame !== undefined || !graphReady) return;
   const currentGeneration = generation;
   const frame = now => {
     gatherFrame = undefined;
-    if (!graphReady || generation !== currentGeneration) return;
+    if (historical || !graphReady || generation !== currentGeneration) return;
     const rotating = gatherEnabled && !paused && !reducedMotion;
     const appearanceChanging = gatherAppearance.transitions.size > 0;
     gatherAppearance.frame(now);
@@ -530,7 +676,7 @@ function animateGather() {
   gatherFrame = requestAnimationFrame(frame);
 }
 function layoutGather(fit = true) {
-  if (!graphReady || !gatherEnabled) return;
+  if (historical || !graphReady || !gatherEnabled) return;
   const indices = topMatches(data.albums, phraseResult.cosines, selection.matches, Infinity);
   const sizes = renderedSizes.map((size, i) => size / gatheredScale(i) * GATHER_SIZE_MULTIPLIER);
   const rings = gatherRings(indices, sizes, { center: [layout.spaceSize / 2, layout.spaceSize / 2],
@@ -552,7 +698,7 @@ function layoutGather(fit = true) {
   }
 }
 function endGather() {
-  if (!gatherEnabled || !graphReady) return;
+  if (historical || !gatherEnabled || !graphReady) return;
   gatherEnabled = false;
   const now = performance.now();
   gather.end(graph.getPointPositions(), now, reducedMotion ? 0 : GATHER_TRANSITION_MS);
@@ -660,9 +806,10 @@ function showInfo(index, center = true) {
     const hint = document.createElement('p'); hint.className = 'muted'; hint.textContent = 'Try a lower similarity threshold in Connections.'; $('info').append(hint);
   }
   $('details').scrollTop = 0;
-  if (center) requestAnimationFrame(() => {
+  const currentView = viewRevision, currentGeneration = generation;
+  if (center && !historical) requestAnimationFrame(() => {
     // Let the graph resize beside (or above) the details before centering the album.
-    if (selected === index && graphReady) {
+    if (!historical && viewRevision === currentView && generation === currentGeneration && selected === index && graphReady) {
       const position = Float32Array.from(graph.getPointPositions().slice(index * 2, index * 2 + 2));
       graph.setZoomTransformByPointPositions(position, reducedMotion ? 0 : 350, Math.max(graph.getZoomLevel(), 1.25), 0.1, false);
     }
@@ -731,9 +878,10 @@ function updateGroups() {
   $('map-labels').setAttribute('aria-label', mode === 'cluster' ? 'Sound communities' : `Albums by ${heading}`);
   $('legend').setAttribute('aria-label', `${heading} legend`);
   const names = groups(data.albums, mode, clusters);
-  const unique = [...new Set(names)].sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+  const unique = sortedGroupNames(names);
   const ids = new Map(unique.map((name, i) => [name, i]));
   groupNames = names; groupIds = ids;
+  rebuildTimelineStacks();
   updateColors();
   labelDefinitions = groupLabels(data.albums, names, () => true, { edges, previous: labelDefinitions, mode });
   const definitions = new Map(labelDefinitions.map(group => [group.name, group]));
@@ -764,6 +912,8 @@ function updateSearch() {
     phraseScores: phraseResult?.salience,
     danceMin: Number($('dance-min').value), danceMax: Number($('dance-max').value),
     vocal: $('vocal').value, includeUnknown: $('include-unknown').checked });
+  if (timeline) selection = applyTimeline(selection,
+    timelineMembership(timeline.dates, timelineCutoff(timeline, timelinePosition)));
   if (graphReady) {
     if (selection.active) initialFitPending = false;
     const visible = data.albums.map((_, i) => visibleAlbum(i));
@@ -813,11 +963,13 @@ function updateSearch() {
   updateHighlights(); updateLabelTracking(); scheduleCovers();
   updateGatherControls();
   if (gatherEnabled) layoutGather(); else fitVibeMatches();
+  updateTimelineReadout();
 }
 async function load(exported, name, label = name) {
   if (!webgl2Supported) { showWebGLError(); return; }
   try {
     validateExport(exported);
+    resetTimeline();
     phraseSearch.set(''); $('phrase').value = ''; $('phrase-results').replaceChildren();
     generation++; revision = 0; clearTimeout(edgeTimer);
     initialFitPending = true;
@@ -839,6 +991,7 @@ async function load(exported, name, label = name) {
     geometryScale = 1; simulationAlpha = 1;
     worker?.terminate(); worker = undefined; vibeGraph?.destroy(); graph?.destroy(); graph = undefined;
     data = exported;
+    timeline = buildTimeline(data.albums);
     renderLibraryStats($('library-totals'), data.library);
     filterPositions = new FilterPositions(data.albums.length);
     queryVectors = textVectors(data.albums);
@@ -870,7 +1023,7 @@ async function load(exported, name, label = name) {
     $('k').value = Math.min(8, Number($('k').max));
     $('k-value').value = $('k').value;
     $('empty').hidden = !!data.albums.length;
-    if (!data.albums.length) { showEmpty('Empty export', 'No albums with current embeddings in this export.'); status('Empty export loaded.'); return; }
+    if (!data.albums.length) { showEmpty('Empty export', 'No albums with current embeddings in this export.'); status('Empty export loaded.'); updateTimelineReadout(); return; }
     const config = { backgroundColor: theme.background, pointDefaultColor: themeValue('--point-default'),
       spaceSize: 4096, enableDrag: true, fitViewOnInit: false,
       pixelRatio: window.devicePixelRatio || 1,
@@ -894,7 +1047,7 @@ async function load(exported, name, label = name) {
         initialFitPending = false; dragging = true; hover(undefined);
         dragIndex = graph.store.draggingPointIndex;
         if (gather.saved.has(dragIndex)) gather.drag(dragIndex);
-        if (!paused) graph.start(simulationAlpha = dragAlpha(simulationAlpha));
+        if (!paused && !historical) graph.start(simulationAlpha = dragAlpha(simulationAlpha));
       },
       onDragEnd: () => {
         dragging = false; scheduleCovers(); scheduleLabels();
@@ -902,8 +1055,11 @@ async function load(exported, name, label = name) {
           gather.release(dragIndex, graph.getPointPositions(), performance.now(), reducedMotion ? 0 : 450);
           animateGather();
         }
+        if (historical && visibleAlbum(dragIndex)) {
+          filterPositions.saved.set(graph.getPointPositions().slice(dragIndex * 2, dragIndex * 2 + 2), dragIndex * 2);
+        }
         dragIndex = undefined;
-        if (!paused) graph.start(simulationAlpha = dragAlpha(simulationAlpha, true));
+        if (!paused && !historical) graph.start(simulationAlpha = dragAlpha(simulationAlpha, true));
       },
       onZoomStart: event => { if (event?.sourceEvent) initialFitPending = false; zooming = true; hover(undefined); },
       onZoom: scheduleEdges,
@@ -911,8 +1067,8 @@ async function load(exported, name, label = name) {
       onRenderFrame: refreshLabels,
       onSimulationTick: alpha => {
         simulationAlpha = alpha;
-        if (dragging && !paused && alpha < DRAG_ALPHA) graph.start(simulationAlpha = DRAG_ALPHA);
-        else if (gatherEnabled && !paused && !reducedMotion && alpha < .3) graph.start(simulationAlpha = .3);
+        if (!historical && dragging && !paused && alpha < DRAG_ALPHA) graph.start(simulationAlpha = DRAG_ALPHA);
+        else if (!historical && gatherEnabled && !paused && !reducedMotion && alpha < .3) graph.start(simulationAlpha = .3);
         scheduleCovers();
       },
       onSimulationEnd: () => { fitInitialView(true); scheduleCovers(); scheduleLabels(); } };
@@ -953,7 +1109,7 @@ async function load(exported, name, label = name) {
         }
       });
       for (const index of strongest.values()) strongestEdges.add(index);
-      if (!appliedLayout) {
+      if (!appliedLayout && !historical) {
         // Start close neighbors together; Cosmos freely moves every album from here.
         const seeded = seedLayout(data.albums, edges, clusters, 112, layout);
         layout = { spaceSize: seeded.spaceSize, margin: seeded.margin, spacing: seeded.spacing };
@@ -970,12 +1126,12 @@ async function load(exported, name, label = name) {
       edgeStrengths = communityLinkStrengths(edges, clusters, $('layout-mode').value === 'free' ? 1 : .25);
       updateGroups(); updateSearch(); updateCoverSizes(); graph.render();
       if (gather.saved.size) updateGatherPhysics();
-      if (paused) graph.pause(); else graph.start(appliedLayout ? 0.3 : 1);
+      if (!historical) { if (paused) graph.pause(); else graph.start(appliedLayout ? 0.3 : 1); }
       $('graph').style.visibility = '';
       $('search').disabled = false; $('surprise').disabled = !selection.matches.length;
       if (!appliedLayout) { fitInitialView(); appliedLayout = true; }
       scheduleCovers();
-      if (selected !== undefined) showInfo(selected);
+      if (selected !== undefined) showInfo(selected, !historical);
       status(`${data.albums.length} albums · ${edges.length} links · ${new Set(clusters).size} sound communities`);
     };
     status('Computing similarities…');
@@ -1025,7 +1181,7 @@ $('search').addEventListener('input', updateSearch);
 $('phrase').addEventListener('input', () => phraseSearch.set($('phrase').value));
 $('clear-phrase').addEventListener('click', () => { $('phrase').value = ''; phraseSearch.set(''); });
 for (const id of ['gather', 'gather-map']) $(id).addEventListener('click', () => {
-  if (!graphReady || !phraseResult) return;
+  if (historical || !graphReady || !phraseResult) return;
   if (gatherEnabled) endGather();
   else {
     setSettingsOpen(false); gatherEnabled = true; initialFitPending = false; vibeFitKey = undefined;
@@ -1051,12 +1207,64 @@ function updatePauseButton() {
 }
 updatePauseButton();
 $('pause').addEventListener('click', () => {
+  if (historical) return;
   paused = !paused; initialFitPending = false; updatePauseButton();
   if (graphReady) {
     graph.setConfigPartial({ enableSimulation: !paused });
     if (paused) graph.pause(); else { graph.start(0.3); animateGather(); }
   }
 });
+$('timeline-latest').addEventListener('click', () => { setTimelinePosition(null); announceTimeline(true); });
+$('timeline-playhead').addEventListener('input', event => {
+  const position = Number(event.target.value);
+  queueTimelinePosition(position === timeline.bins.length ? null : position);
+});
+$('timeline-playhead').addEventListener('change', event => {
+  const position = Number(event.target.value);
+  setTimelinePosition(position === timeline.bins.length ? null : position); announceTimeline(true);
+});
+$('timeline-playhead').addEventListener('keydown', event => {
+  const position = timelinePositionForKey(event.key, timelinePosition, timeline?.bins.length ?? 0);
+  if (position === undefined) return;
+  event.preventDefault(); event.stopPropagation(); setTimelinePosition(position); announceTimeline(true);
+});
+$('timeline').addEventListener('keydown', event => {
+  if (event.key !== 'Escape') return;
+  event.preventDefault(); event.stopPropagation(); setTimelinePosition(null); announceTimeline(true);
+});
+for (const type of ['pointerdown', 'pointermove', 'pointerup', 'click', 'wheel', 'touchstart', 'touchmove', 'touchend']) {
+  $('timeline').addEventListener(type, event => event.stopPropagation(), { passive: true });
+}
+function histogramPosition(event) {
+  const { left, width } = $('timeline-histogram').getBoundingClientRect();
+  const position = Math.max(-1, Math.min(timeline.bins.length,
+    Math.round((event.clientX - left) / width * (timeline.bins.length + 1)) - 1));
+  return position === timeline.bins.length ? null : position;
+}
+$('timeline-histogram').addEventListener('pointerdown', event => {
+  if (!graphReady || !timeline?.bins.length || event.button !== 0) return;
+  event.preventDefault(); $('timeline-histogram').setPointerCapture(event.pointerId);
+  queueTimelinePosition(histogramPosition(event));
+});
+$('timeline-histogram').addEventListener('pointermove', event => {
+  if ($('timeline-histogram').hasPointerCapture(event.pointerId)) queueTimelinePosition(histogramPosition(event));
+});
+$('timeline-histogram').addEventListener('pointerup', event => {
+  if (!$('timeline-histogram').hasPointerCapture(event.pointerId)) return;
+  setTimelinePosition(histogramPosition(event)); $('timeline-histogram').releasePointerCapture(event.pointerId);
+  announceTimeline(true);
+});
+$('timeline-histogram').addEventListener('pointercancel', event => {
+  cancelAnimationFrame(timelineFrame); timelineFrame = undefined; timelinePending = undefined;
+  if ($('timeline-histogram').hasPointerCapture(event.pointerId)) $('timeline-histogram').releasePointerCapture(event.pointerId);
+  announceTimeline(true);
+});
+new ResizeObserver(() => {
+  const tray = $('timeline'), main = document.querySelector('main');
+  main.style.setProperty('--timeline-height', tray.hidden ? '0px' :
+    `${Math.ceil(tray.getBoundingClientRect().height + parseFloat(getComputedStyle(tray).bottom) + 8)}px`);
+  drawTimeline(); scheduleLabels();
+}).observe($('timeline'));
 $('clear').addEventListener('click', () => { showInfo(undefined); $('search').focus({ preventScroll: true }); });
 $('surprise').addEventListener('click', () => {
   if (selection.matches.length) focusAlbum(selection.matches[Math.floor(Math.random() * selection.matches.length)]);

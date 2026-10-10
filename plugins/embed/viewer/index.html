@@ -384,6 +384,30 @@
         </section>
         <div id="tooltip" hidden></div>
         <button id="gather-map" hidden aria-pressed="false">Ungather</button>
+        <section id="timeline" hidden aria-label="Added to library">
+          <div class="timeline-heading">
+            <strong>Added to library</strong><span>Sound communities</span>
+            <button id="timeline-latest" type="button">Latest</button>
+          </div>
+          <p id="timeline-empty" hidden>No albums in this export have an added date.</p>
+          <div id="timeline-controls">
+            <canvas id="timeline-histogram" height="56" aria-hidden="true"></canvas>
+            <label class="sr-only" for="timeline-playhead">Library snapshot date</label>
+            <input id="timeline-playhead" type="range" min="-1" max="0" step="1" value="0"
+              aria-describedby="timeline-readout timeline-bin-summary timeline-help" />
+            <div class="timeline-axis"><span id="timeline-first"></span><span id="timeline-last"></span></div>
+            <p id="timeline-readout"></p>
+            <details id="timeline-breakdown">
+              <summary id="timeline-bin-summary">Selected interval additions</summary>
+              <p id="timeline-bin-groups"></p>
+            </details>
+          </div>
+          <p id="timeline-scope"></p>
+          <p id="timeline-help" class="sr-only">Left and Right move one interval. Home selects before the first addition.
+            End selects the final dated interval. Escape returns to Latest. Dates are UTC;
+            snapshots use current metadata and similarities.</p>
+          <p id="timeline-announcement" class="sr-only" role="status" aria-live="polite" aria-atomic="true"></p>
+        </section>
         <div class="map-footer">
           <p id="status" role="status" aria-live="polite">
             Waiting for your library.

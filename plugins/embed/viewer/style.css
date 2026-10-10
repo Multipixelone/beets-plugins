@@ -106,6 +106,22 @@ output { float: right; color: var(--accent); font-variant-numeric: tabular-nums;
 .sidebar-footer { color: var(--muted); font-size: 10px; padding-top: 22px; display: flex; flex-wrap: wrap; gap: 5px 7px; align-items: center; }
 .sidebar-footer a { color: var(--muted); font-size: 10px; text-decoration: none; }.sidebar-footer a:hover { text-decoration: underline; }
 main { flex: 1; min-width: 0; position: relative; overflow: hidden; }
+main { --timeline-height: 0px; }
+#timeline { position: absolute; left: 12px; right: 12px; bottom: max(8px, env(safe-area-inset-bottom)); z-index: 2; padding: 8px 12px; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--card-shadow); touch-action: pan-y; font-size: 10px; }
+.timeline-heading { display: flex; align-items: center; gap: 12px; }
+.timeline-heading strong { font-size: 12px; font-weight: 550; }
+.timeline-heading > span { color: var(--muted); }
+#timeline-latest { margin-left: auto; min-height: 32px; padding: 4px 12px; }
+#timeline-histogram { display: block; width: 100%; height: 56px; touch-action: none; cursor: ew-resize; }
+#timeline-playhead { margin: 0; height: 24px; touch-action: none; }
+.timeline-axis { display: flex; justify-content: space-between; color: var(--muted); }
+#timeline p { margin: 3px 0; }
+#timeline-readout { font-family: var(--font-mono); font-size: 10px; font-variant-numeric: tabular-nums; }
+#timeline-breakdown summary { padding: 2px 18px 2px 0; font-size: 10px; font-weight: 400; color: var(--muted); }
+#timeline-breakdown summary::after { top: -2px; }
+#timeline-bin-groups { max-height: 72px; overflow-y: auto; overflow-wrap: anywhere; }
+#timeline-scope { color: var(--muted); font-size: 9px; }
+#timeline-latest[aria-pressed=true] { border-color: var(--accent); }
 #graph { width: 100%; height: 100%; touch-action: none; }
 @media (min-width: 761px) { .has-selection #graph { width: calc(100% - 296px); } }
 .map-footer { background: var(--paper); padding: 5px 8px; border-radius: var(--radius); position: absolute; left: 30px; bottom: 22px; pointer-events: none; font-size: 10px; color: var(--muted); }#status { margin: 0 0 4px; font-size: 11px; }#status.error { color: var(--error); max-width: 340px; }.map-hint { margin: 0; color: var(--muted); font-size: 10px; }.map-hint span { margin: 0 5px; }
@@ -192,4 +208,25 @@ a:hover, .sidebar-footer a:hover { color: var(--accent-hover); }
 @media (min-width: 1101px) and (pointer: coarse) {
   .map-hint { display: none; }
   .map-hint.map-hint-touch { display: block; }
+}
+
+/* Keep navigation above the tray, including its expanded textual breakdown. */
+.map-footer { bottom: calc(var(--timeline-height) + 22px); }
+.map-toolbar { bottom: calc(var(--timeline-height) + 23px); }
+#details { max-height: calc(100% - 108px - var(--timeline-height)); }
+@media (max-width: 1100px) {
+  .map-toolbar { bottom: calc(var(--timeline-height) + 52px); }
+  .map-footer { bottom: calc(var(--timeline-height) + 17px); }
+  #details { max-height: calc(100% - 190px - var(--timeline-height)); }
+}
+@media (max-width: 760px) {
+  #timeline { left: 8px; right: 8px; padding: 6px 10px; }
+  .timeline-heading { gap: 8px; }
+  #timeline-latest { min-height: 44px; }
+  #timeline-histogram { height: 44px; }
+  #timeline-playhead { height: 28px; }
+  .map-toolbar { bottom: calc(var(--timeline-height) + 49px); }
+  .map-footer { bottom: calc(var(--timeline-height) + max(15px, env(safe-area-inset-bottom))); }
+  #details { bottom: calc(var(--timeline-height) + 107px); max-height: min(35%, 300px, calc(100% - var(--timeline-height) - 119px)); }
+  .has-selection #graph { height: calc(100% - min(35%, 300px) - 107px - var(--timeline-height)); min-height: 120px; }
 }
