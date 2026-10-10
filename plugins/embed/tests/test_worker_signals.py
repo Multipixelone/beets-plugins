@@ -5,6 +5,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from contextlib import closing
 from pathlib import Path
 
 
@@ -67,7 +68,7 @@ with patch("beets_embed.inference.Models", Engine), patch("beets_embed.audio.Pre
                 self.assertTrue(counts["interrupted"])
                 self.assertEqual(counts["computed"], 0)
                 self.assertIn("profiling", counts)
-                with sqlite3.connect(store) as db:
+                with closing(sqlite3.connect(store)) as db:
                     self.assertEqual(db.execute("SELECT COUNT(*) FROM vectors").fetchone()[0], 1)
             finally:
                 if child.poll() is None:
