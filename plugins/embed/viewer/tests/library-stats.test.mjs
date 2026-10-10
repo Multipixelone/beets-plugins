@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { validateExport } from '../logic.mjs';
-import { formatBytes, formatHours, listeningScale, librarySummary, albumQuality, albumMetadata, renderLibraryStats, appendAlbumMetadata } from '../library-stats.mjs';
+import { formatBytes, formatHours, listeningScale, librarySummary, albumQuality, albumMetadata, renderLibraryStats, appendAlbumMetadata, appendAlbumTitle, appendAlbumSubline, releaseHref } from '../library-stats.mjs';
 
 const fixture = JSON.parse(readFileSync(new URL('./fixtures/library-stats.json', import.meta.url)));
 const year = 365.25 * 86400;
@@ -107,9 +107,11 @@ test('album rows format dates in UTC, suppress repeated years and link safe rele
 class Element {
   constructor(tagName, ownerDocument) { this.tagName = tagName; this.ownerDocument = ownerDocument; this.children = []; this.content = ''; }
   set textContent(value) { this.content = value; this.children = []; }
-  get textContent() { return this.content + this.children.map(child => child.textContent).join(''); }
+  get textContent() { return this.content + this.children.map(child => child.textContent ?? child).join(''); }
   append(...children) { this.children.push(...children); }
   replaceChildren(...children) { this.content = ''; this.children = children; }
+  setAttribute(name, value) { (this.attributes ??= new Map()).set(name, String(value)); }
+  getAttribute(name) { return this.attributes?.get(name); }
   querySelector(selector) { return this.children.find(child => `.${child.className}` === selector); }
 }
 const doc = { createElement: tagName => new Element(tagName, doc) };
@@ -141,16 +143,72 @@ test('statistics rendering preserves its heading and expanded state while cleari
   assert.equal(container.open, true);
 });
 
-test('album metadata uses text nodes, hides empty sections and creates only fixed-origin links', () => {
+test('album metadata keeps inline fact groups and footer pairs complete without blank rows', () => {
+  const sparse = doc.createElement('div');
+  appendAlbumMetadata(sparse, fixture.albums[4]);
+  assert.equal(sparse.children.length, 1);
+  assert.equal(sparse.children[0].className, 'album-facts');
+  const group = sparse.children[0].children[0];
+  assert.equal(group.className, 'fact-group');
+  assert.equal(group.tagName, 'p');
+  assert.deepEqual(group.children.map(child => child.textContent), ['10 tracks', '120 plays']);
+  const fractional = doc.createElement('div');
+  appendAlbumMetadata(fractional, { ...fixture.albums[4], track_count: 1, embedded_tracks: 1, summed_plays: 1.5 });
+  assert.deepEqual(fractional.children[0].children[0].children.map(child => child.textContent), ['1 track', '1.5 plays']);
   const container = doc.createElement('div');
-  appendAlbumMetadata(container, fixture.albums[5]);
-  assert.equal(container.children.length, 0);
-  appendAlbumMetadata(container, { ...fixture.albums[0], release: { label: '<img src=x onerror=alert(1)>', mb_albumid: fixture.albums[0].release.mb_albumid } });
-  assert.ok(container.textContent.includes('<img src=x onerror=alert(1)>'));
-  const list = container.children[0], link = list.children.at(-1).children[0];
-  assert.equal(link.tagName, 'a');
+  appendAlbumMetadata(container, { ...fixture.albums[0], release: { ...fixture.albums[0].release, label: '<img src=x onerror=alert(1)>' } });
+  const [facts, footer] = container.children;
+  assert.equal(facts.className, 'album-facts');
+  assert.equal(footer.className, 'album-footer');
+  assert.deepEqual(facts.children.map(child => child.className), ['fact-group', 'fact-group']);
+  assert.deepEqual(facts.children[1].children.map(child => child.textContent), ['FLAC', '24-bit / 96 kHz', '1.3 GB']);
+  assert.ok(footer.textContent.includes('<img src=x onerror=alert(1)>'));
+  assert.deepEqual(footer.children.map(pair => pair.querySelector('.fact-label').textContent), ['Label', 'Country', 'Original year', 'Added']);
+  assert.deepEqual(footer.children.map(pair => pair.querySelector('.fact-value').textContent), ['<img src=x onerror=alert(1)>', 'GB', '1998', 'Oct 9, 2026']);
+  const flat = element => [element, ...element.children.filter(child => child instanceof Element).flatMap(flat)];
+  assert.ok(!container.children.flatMap(flat).some(child => child.tagName === 'img'));
+});
+
+test('album title glues the MusicBrainz link to the final word with a fixed destination', () => {
+  const plain = doc.createElement('h2');
+  appendAlbumTitle(plain, fixture.albums[1]);
+  assert.equal(plain.textContent, 'Signals at Dawn');
+  assert.ok(!plain.querySelector('.release-link'));
+  const heading = doc.createElement('h2');
+  appendAlbumTitle(heading, fixture.albums[0]);
+  const tail = heading.querySelector('.title-tail');
+  const link = tail.querySelector('.release-link');
+  assert.ok(heading.textContent.startsWith('Night Orchard'));
+  assert.equal(heading.children[0], 'Night ');
+  assert.equal(heading.children.at(-1), tail);
+  assert.equal(tail.children.at(-1), link);
+  assert.equal(tail.children[0], 'Orchard' + '\u2060');
   assert.equal(link.href, 'https://musicbrainz.org/release/12345678-abcd-1234-abcd-123456789abc');
   assert.equal(link.rel, 'noopener noreferrer');
   assert.equal(link.target, '_blank');
-  assert.ok(!list.children.some(child => child.tagName === 'img'));
+  assert.equal(link.getAttribute('aria-label'), 'View release on MusicBrainz.');
+  assert.equal(link.title, 'View release on MusicBrainz.');
+  for (const mb_albumid of ['javascript:alert(1)', '../private', null, 42]) {
+    const evil = doc.createElement('h2');
+    appendAlbumTitle(evil, { album: 'Traps', release: { mb_albumid } });
+    assert.equal(evil.textContent, 'Traps');
+    assert.ok(!evil.querySelector('.release-link'));
+  }
+  assert.equal(releaseHref(fixture.albums[0]), 'https://musicbrainz.org/release/12345678-abcd-1234-abcd-123456789abc');
+  assert.equal(releaseHref({}), null);
+});
+
+test('album subline lists artist, year, type and genre while omitting missing values', () => {
+  const full = doc.createElement('p');
+  appendAlbumSubline(full, fixture.albums[0]);
+  assert.deepEqual(full.children.map(child => child.textContent), ['The Lantern Rooms', '2011', 'album', 'Electronic']);
+  const untyped = doc.createElement('p');
+  appendAlbumSubline(untyped, fixture.albums[3]);
+  assert.deepEqual(untyped.children.map(child => child.textContent), ['Tessa Vale', '2011', 'Electronic']);
+  const older = doc.createElement('p');
+  appendAlbumSubline(older, fixture.albums[5]);
+  assert.deepEqual(older.children.map(child => child.textContent), ['Yesterday Club', '2011', 'Electronic']);
+  const empty = doc.createElement('p');
+  appendAlbumSubline(empty, {});
+  assert.equal(empty.children.length, 0);
 });

@@ -54,7 +54,7 @@ export function librarySummary(library) {
   return { primary, secondary };
 }
 
-export function albumQuality(album) {
+export function albumQualityParts(album) {
   const format = text(album.format), parts = [];
   if (format) parts.push(format);
   if (format === 'Mixed') {
@@ -73,28 +73,44 @@ export function albumQuality(album) {
     else if (album.lossless === true) parts.push('Lossless');
     else if (quantity(album.bitrate_kbps) && album.bitrate_kbps > 0) parts.push(`${number(album.bitrate_kbps)} kbps`);
   }
+  return parts;
+}
+
+export function albumQuality(album) {
+  const parts = albumQualityParts(album);
   return parts.length ? parts.join(' · ') : null;
+}
+
+const addedDate = value => {
+  if (!text(value)) return null;
+  const date = new Date(value);
+  return Number.isFinite(date.getTime()) ? date.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric', timeZone: 'UTC' }) : null;
+};
+const releaseInfo = album => album.release && typeof album.release === 'object' ? album.release : {};
+const originalYear = (release, year) =>
+  count(release.original_year) && release.original_year > 0 && release.original_year !== year ? String(release.original_year) : null;
+
+export function releaseHref(album) {
+  const id = releaseInfo(album ?? {}).mb_albumid;
+  return typeof id === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)
+    ? `https://musicbrainz.org/release/${id}` : null;
 }
 
 export function albumMetadata(album) {
   const rows = [], quality = albumQuality(album);
   if (quality) rows.push({ label: 'Quality', value: quality });
-  if (text(album.added)) {
-    const date = new Date(album.added);
-    if (Number.isFinite(date.getTime())) rows.push({ label: 'Added', value: date.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric', timeZone: 'UTC' }) });
-  }
+  const added = addedDate(album.added);
+  if (added) rows.push({ label: 'Added', value: added });
   const size = formatBytes(album.size_bytes);
   if (size) rows.push({ label: 'Size', value: size });
-  const release = album.release;
-  if (release && typeof release === 'object') {
-    for (const [key, label] of [['albumtype', 'Type'], ['label', 'Label'], ['country', 'Country']]) {
-      if (text(release[key])) rows.push({ label, value: text(release[key]) });
-    }
-    if (count(release.original_year) && release.original_year > 0 && release.original_year !== album.year) rows.push({ label: 'Original year', value: String(release.original_year) });
-    if (typeof release.mb_albumid === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(release.mb_albumid)) {
-      rows.push({ label: 'Release', value: 'MusicBrainz ↗', href: `https://musicbrainz.org/release/${release.mb_albumid}` });
-    }
+  const release = releaseInfo(album);
+  for (const [key, label] of [['albumtype', 'Type'], ['label', 'Label'], ['country', 'Country']]) {
+    if (text(release[key])) rows.push({ label, value: text(release[key]) });
   }
+  const original = originalYear(release, album.year);
+  if (original) rows.push({ label: 'Original year', value: original });
+  const href = releaseHref(album);
+  if (href) rows.push({ label: 'Release', value: 'MusicBrainz ↗', href });
   return rows;
 }
 
@@ -117,18 +133,78 @@ export function renderLibraryStats(container, library) {
   }
 }
 
-export function appendAlbumMetadata(container, album) {
-  const rows = albumMetadata(album), doc = container.ownerDocument;
-  if (!rows.length) return;
-  const list = doc.createElement('dl'); list.className = 'album-library-meta';
-  for (const row of rows) {
-    const term = doc.createElement('dt'); term.textContent = row.label;
-    const description = doc.createElement('dd');
-    if (row.href) {
-      const link = doc.createElement('a'); link.href = row.href; link.textContent = row.value;
-      link.target = '_blank'; link.rel = 'noopener noreferrer'; description.append(link);
-    } else description.textContent = row.value;
-    list.append(term, description);
+// The link rides with the final title word in one span, glued by a word
+// joiner so wrapping never separates them — even for CJK titles or trailing
+// punctuation — while overflow-wrap on the heading breaks huge words safely.
+const WORD_JOINER = '\u2060';
+export function appendAlbumTitle(title, album) {
+  const doc = title.ownerDocument;
+  const text = typeof album.album === 'string' ? album.album.trimEnd() : '';
+  const href = releaseHref(album);
+  if (!href) { title.append(text); return; }
+  const finalWord = text.match(/\S+$/)?.[0] ?? '';
+  title.append(text.slice(0, text.length - finalWord.length));
+  const tail = doc.createElement('span'); tail.className = 'title-tail';
+  tail.append(finalWord + WORD_JOINER);
+  const link = doc.createElement('a'); link.className = 'release-link'; link.href = href;
+  link.target = '_blank'; link.rel = 'noopener noreferrer';
+  link.setAttribute('aria-label', 'View release on MusicBrainz.');
+  link.title = 'View release on MusicBrainz.';
+  const icon = doc.createElement('span'); icon.setAttribute('aria-hidden', 'true'); icon.textContent = '↗';
+  link.append(icon);
+  tail.append(link);
+  title.append(tail);
+}
+
+export function appendAlbumSubline(line, album) {
+  const doc = line.ownerDocument, release = releaseInfo(album);
+  const values = [text(album.albumartist), album.year || null, text(release.albumtype), text(album.genre)];
+  for (const value of values) {
+    if (value === null || value === undefined || value === '') continue;
+    const item = doc.createElement('span'); item.textContent = String(value); line.append(item);
   }
-  container.append(list);
+}
+
+// Compact inline facts: playback and audio groups sit side by side when they
+// fit, provenance pairs wrap below. Each fact is a flex item, so it wraps to
+// the next line whole and only breaks internally when impossibly long.
+// Missing fields leave no blank rows.
+export function appendAlbumMetadata(container, album) {
+  const doc = container.ownerDocument, release = releaseInfo(album);
+  const playback = [], audio = [], facts = [];
+  if (count(album.track_count)) playback.push(`${album.track_count} ${album.track_count === 1 ? 'track' : 'tracks'}`);
+  if (quantity(album.summed_plays)) playback.push(`${album.summed_plays.toLocaleString()} ${album.summed_plays === 1 ? 'play' : 'plays'}`);
+  audio.push(...albumQualityParts(album));
+  const size = formatBytes(album.size_bytes);
+  if (size) audio.push(size);
+  if (text(release.label)) facts.push(['Label', text(release.label)]);
+  if (text(release.country)) facts.push(['Country', text(release.country)]);
+  const original = originalYear(release, album.year);
+  if (original) facts.push(['Original year', original]);
+  const added = addedDate(album.added);
+  if (added) facts.push(['Added', added]);
+  if (playback.length || audio.length) {
+    const groups = doc.createElement('div'); groups.className = 'album-facts';
+    for (const values of [playback, audio]) {
+      if (!values.length) continue;
+      const group = doc.createElement('p'); group.className = 'fact-group';
+      for (const value of values) {
+        const fact = doc.createElement('span'); fact.textContent = value;
+        group.append(fact);
+      }
+      groups.append(group);
+    }
+    container.append(groups);
+  }
+  if (facts.length) {
+    const footer = doc.createElement('p'); footer.className = 'album-footer';
+    for (const [label, value] of facts) {
+      const pair = doc.createElement('span'); pair.className = 'fact-pair';
+      const key = doc.createElement('span'); key.className = 'fact-label'; key.textContent = label;
+      const val = doc.createElement('span'); val.className = 'fact-value'; val.textContent = value;
+      pair.append(key, ' ', val);
+      footer.append(pair);
+    }
+    container.append(footer);
+  }
 }

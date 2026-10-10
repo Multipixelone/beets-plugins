@@ -10,7 +10,7 @@ import { textVectors, phraseScores, topMatches, PhraseSearch } from './search.mj
 import { vibeLinkOpacity, matchBounds, GatherAppearance, GATHER_SIZE_MULTIPLIER, GATHER_TRANSITION_MS } from './vibe.mjs';
 import { VibeGraph } from './cosmos-vibe.mjs';
 import { GatherPositions, gatherRings } from './gather.mjs';
-import { renderLibraryStats, appendAlbumMetadata } from './library-stats.mjs';
+import { renderLibraryStats, appendAlbumMetadata, appendAlbumTitle, appendAlbumSubline } from './library-stats.mjs';
 
 const $ = id => document.getElementById(id);
 const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -637,21 +637,23 @@ function showInfo(index, center = true) {
   updateHighlights();
   if (index === undefined) return;
   const album = data.albums[index];
-  const eyebrow = document.createElement('p'); eyebrow.className = 'detail-eyebrow'; eyebrow.textContent = 'SELECTED ALBUM';
-  const title = document.createElement('h2'); title.textContent = album.album;
-  const artist = document.createElement('p'); artist.className = 'album-artist'; artist.textContent = album.albumartist;
-  const info = document.createElement('p'); info.className = 'album-meta';
-  info.textContent = [album.year || null, album.genre || null].filter(Boolean).join(' · ');
-  const plays = document.createElement('p'); plays.className = 'album-meta';
-  plays.textContent = `${album.track_count} tracks · ${album.summed_plays.toLocaleString()} plays`;
+  const header = document.createElement('div'); header.className = 'detail-header';
+  const heading = document.createElement('div'); heading.className = 'detail-heading';
+  const title = document.createElement('h2');
+  appendAlbumTitle(title, album);
+  const subline = document.createElement('p'); subline.className = 'album-subline';
+  appendAlbumSubline(subline, album);
+  heading.append(title);
+  if (subline.hasChildNodes()) heading.append(subline);
+  header.append(coverElement(album, 'detail-cover'), heading);
   const related = edges.filter(edge => (edge.source === index || edge.target === index) &&
     visibleAlbum(edge.source) && visibleAlbum(edge.target))
     .sort((a, b) => b.similarity - a.similarity);
-  const heading = document.createElement('p'); heading.className = 'related-heading';
-  heading.textContent = related.length ? `CONNECTED ALBUMS · ${related.length}` : 'NO CONNECTIONS IN THIS VIEW';
-  $('info').append(coverElement(album, 'detail-cover'), eyebrow, title, artist, info, plays);
+  const relatedHeading = document.createElement('p'); relatedHeading.className = 'related-heading';
+  relatedHeading.textContent = related.length ? `CONNECTED ALBUMS · ${related.length}` : 'NO CONNECTIONS IN THIS VIEW';
+  $('info').append(header);
   appendAlbumMetadata($('info'), album);
-  $('info').append(heading);
+  $('info').append(relatedHeading);
   appendSounds($('info'), album);
   for (const edge of related.slice(0, 4)) $('info').append(albumButton(edge.source === index ? edge.target : edge.source));
   if (!related.length) {
