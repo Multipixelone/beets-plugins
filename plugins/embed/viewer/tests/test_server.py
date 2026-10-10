@@ -1,4 +1,5 @@
 import importlib.util
+import json
 import os
 import sys
 import tempfile
@@ -17,6 +18,25 @@ spec.loader.exec_module(server_module)
 
 
 class ServerTests(unittest.TestCase):
+    def test_library_metadata_fixture_is_served_unchanged(self):
+        fixture = Path(__file__).with_name('fixtures') / 'library-stats.json'
+        handler = partial(server_module.Handler, directory=str(fixture.parent), data=fixture)
+        with server_module.Server(('127.0.0.1', 0), handler) as server:
+            thread = threading.Thread(target=server.serve_forever)
+            thread.start()
+            try:
+                with urlopen(f'http://127.0.0.1:{server.server_port}/data.json') as response:
+                    body = response.read()
+                self.assertEqual(body, fixture.read_bytes())
+                data = json.loads(body)
+                self.assertGreater(data['library']['albums'], len(data['albums']))
+                self.assertEqual(data['albums'][0]['format'], 'FLAC')
+                self.assertIn('release', data['albums'][0])
+                self.assertNotIn('added', data['albums'][-1])
+            finally:
+                server.shutdown()
+                thread.join()
+
     def test_branding_assets_are_served_only_at_allowlisted_paths(self):
         with tempfile.TemporaryDirectory() as directory:
             assets = Path(directory)

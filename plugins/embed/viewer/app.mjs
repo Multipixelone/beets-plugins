@@ -10,6 +10,7 @@ import { textVectors, phraseScores, topMatches, PhraseSearch } from './search.mj
 import { vibeLinkOpacity, matchBounds, GatherAppearance, GATHER_SIZE_MULTIPLIER, GATHER_TRANSITION_MS } from './vibe.mjs';
 import { VibeGraph } from './cosmos-vibe.mjs';
 import { GatherPositions, gatherRings } from './gather.mjs';
+import { renderLibraryStats, appendAlbumMetadata } from './library-stats.mjs';
 
 const $ = id => document.getElementById(id);
 const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -648,7 +649,9 @@ function showInfo(index, center = true) {
     .sort((a, b) => b.similarity - a.similarity);
   const heading = document.createElement('p'); heading.className = 'related-heading';
   heading.textContent = related.length ? `CONNECTED ALBUMS · ${related.length}` : 'NO CONNECTIONS IN THIS VIEW';
-  $('info').append(coverElement(album, 'detail-cover'), eyebrow, title, artist, info, plays, heading);
+  $('info').append(coverElement(album, 'detail-cover'), eyebrow, title, artist, info, plays);
+  appendAlbumMetadata($('info'), album);
+  $('info').append(heading);
   appendSounds($('info'), album);
   for (const edge of related.slice(0, 4)) $('info').append(albumButton(edge.source === index ? edge.target : edge.source));
   if (!related.length) {
@@ -834,6 +837,7 @@ async function load(exported, name, label = name) {
     geometryScale = 1; simulationAlpha = 1;
     worker?.terminate(); worker = undefined; vibeGraph?.destroy(); graph?.destroy(); graph = undefined;
     data = exported;
+    renderLibraryStats($('library-totals'), data.library);
     filterPositions = new FilterPositions(data.albums.length);
     queryVectors = textVectors(data.albums);
     $('phrase').disabled = !queryVectors.some(vector => vector !== null);

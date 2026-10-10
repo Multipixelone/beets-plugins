@@ -1,0 +1,234 @@
+{
+  "schema_version": 3,
+  "model_id": "style:synthetic-viewer-fixture",
+  "exported_at": "2026-10-09T12:00:00Z",
+  "labels": [],
+  "albums": [
+    {
+      "genre": "Electronic",
+      "year": 2011,
+      "track_count": 10,
+      "embedded_tracks": 10,
+      "summed_plays": 120,
+      "mean_plays": 12,
+      "cover": "cover-60a15aac771b11c92d32094bed1b607706d7e1ae9096c8f10bf624a3dbaaa0f4.jpg",
+      "added": "2026-10-09T00:01:00Z",
+      "format": "FLAC",
+      "formats": {
+        "FLAC": 10
+      },
+      "lossless": true,
+      "bitrate_kbps": 2840,
+      "samplerate_hz": 96000,
+      "bitdepth": 24,
+      "size_bytes": 1280345678,
+      "release": {
+        "albumtype": "album",
+        "label": "Lantern Press",
+        "country": "GB",
+        "original_year": 1998,
+        "mb_albumid": "12345678-abcd-1234-abcd-123456789abc"
+      },
+      "id": 1,
+      "album": "Night Orchard",
+      "albumartist": "The Lantern Rooms",
+      "vector": [
+        1,
+        0.2,
+        0.1,
+        0.05
+      ],
+      "cover_large": "cover-a78adb9086558df4e036d34784804399b8957fc92ab082dadf8d7352050b6fa9.jpg"
+    },
+    {
+      "genre": "Electronic",
+      "year": 2011,
+      "track_count": 10,
+      "embedded_tracks": 10,
+      "summed_plays": 120,
+      "mean_plays": 12,
+      "cover": null,
+      "added": "2024-02-29T12:00:00Z",
+      "format": "MP3",
+      "formats": {
+        "MP3": 10
+      },
+      "lossless": false,
+      "bitrate_kbps": 320,
+      "samplerate_hz": 44100,
+      "bitdepth": null,
+      "size_bytes": 123000000,
+      "release": {
+        "albumtype": "ep",
+        "label": "Meridian Records",
+        "country": "US",
+        "original_year": 2011,
+        "mb_albumid": null
+      },
+      "id": 2,
+      "album": "Signals at Dawn",
+      "albumartist": "June Meridian",
+      "vector": [
+        0.95,
+        0.25,
+        0.2,
+        0.05
+      ]
+    },
+    {
+      "genre": "Electronic",
+      "year": 2011,
+      "track_count": 10,
+      "embedded_tracks": 10,
+      "summed_plays": 120,
+      "mean_plays": 12,
+      "cover": null,
+      "added": "2025-07-14T16:32:00Z",
+      "format": "Mixed",
+      "formats": {
+        "FLAC": 8,
+        "MP3": 2
+      },
+      "lossless": false,
+      "bitrate_kbps": 1400,
+      "samplerate_hz": 96000,
+      "bitdepth": 24,
+      "size_bytes": 760000000,
+      "release": {
+        "albumtype": "compilation",
+        "label": "Soft Transit / An Independent Label With a Long Name",
+        "country": "CA",
+        "original_year": 2003,
+        "mb_albumid": null
+      },
+      "id": 3,
+      "album": "Between Stations",
+      "albumartist": "Soft Transit",
+      "vector": [
+        0.9,
+        0.3,
+        0.1,
+        0.2
+      ]
+    },
+    {
+      "genre": "Electronic",
+      "year": 2011,
+      "track_count": 10,
+      "embedded_tracks": 10,
+      "summed_plays": 120,
+      "mean_plays": 12,
+      "cover": null,
+      "added": null,
+      "format": null,
+      "formats": {},
+      "lossless": true,
+      "bitrate_kbps": null,
+      "samplerate_hz": 44100,
+      "bitdepth": null,
+      "size_bytes": null,
+      "release": {
+        "albumtype": null,
+        "label": null,
+        "country": null,
+        "original_year": null,
+        "mb_albumid": null
+      },
+      "id": 4,
+      "album": "Paper Satellites",
+      "albumartist": "Tessa Vale",
+      "vector": [
+        0.2,
+        1,
+        0.1,
+        0.1
+      ]
+    },
+    {
+      "genre": "Electronic",
+      "year": 2011,
+      "track_count": 10,
+      "embedded_tracks": 10,
+      "summed_plays": 120,
+      "mean_plays": 12,
+      "cover": null,
+      "added": null,
+      "format": null,
+      "formats": {},
+      "lossless": false,
+      "bitrate_kbps": null,
+      "samplerate_hz": null,
+      "bitdepth": null,
+      "size_bytes": null,
+      "release": {
+        "albumtype": null,
+        "label": null,
+        "country": null,
+        "original_year": null,
+        "mb_albumid": null
+      },
+      "id": 5,
+      "album": "Quiet Current",
+      "albumartist": "Moss Assembly",
+      "vector": [
+        0.1,
+        0.2,
+        1,
+        0.1
+      ]
+    },
+    {
+      "genre": "Electronic",
+      "year": 2011,
+      "track_count": 10,
+      "embedded_tracks": 10,
+      "summed_plays": 120,
+      "mean_plays": 12,
+      "cover": null,
+      "id": 6,
+      "album": "An Older Export",
+      "albumartist": "Yesterday Club",
+      "vector": [
+        0.1,
+        0.1,
+        0.2,
+        1
+      ]
+    }
+  ],
+  "summary": {
+    "skipped_albums": 0
+  },
+  "library": {
+    "albums": 4012,
+    "tracks": 42806,
+    "size_bytes": 1500000000000,
+    "duration_seconds": 11160000,
+    "listened_seconds_estimate": 20736000,
+    "lossless_albums": 3290,
+    "formats": {
+      "FLAC": {
+        "albums": 3290,
+        "tracks": 36000,
+        "size_bytes": 1400000000000
+      },
+      "MP3": {
+        "albums": 322,
+        "tracks": 3600,
+        "size_bytes": 50000000000
+      },
+      "AAC": {
+        "albums": 211,
+        "tracks": 2000,
+        "size_bytes": 30000000000
+      },
+      "OGG": {
+        "albums": 189,
+        "tracks": 1206,
+        "size_bytes": 20000000000
+      }
+    },
+    "missing_files": 3,
+    "computed_at": "2026-10-09T12:00:00Z"
+  }
+}

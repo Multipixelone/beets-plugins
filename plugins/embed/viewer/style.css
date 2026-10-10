@@ -51,6 +51,25 @@
 }
 * { box-sizing: border-box; }
 body { margin: 0; height: 100dvh; overflow: hidden; display: flex; flex-direction: column; }
+.viewer-shell { position: relative; display: flex; flex-direction: column; flex: 1; min-height: 0; }
+#library-totals { flex-shrink: 0; padding: 12px 24px; background: var(--panel); border-bottom: 1px solid var(--line); }
+.library-eyebrow { margin: 0 0 3px; color: var(--accent); font-size: 9px; font-weight: 650; letter-spacing: 1.3px; }
+.library-primary, .library-secondary { display: flex; flex-wrap: wrap; gap: 2px 16px; margin: 0; }
+.library-primary { font-size: 17px; line-height: 1.4; font-variant-numeric: tabular-nums; }
+.library-primary > span + span::before { content: '·'; color: var(--muted); margin-right: 16px; }
+.library-secondary { margin-top: 4px; color: var(--muted); font-size: 11px; line-height: 1.6; }
+.library-secondary > span { overflow-wrap: anywhere; min-width: 0; }
+.library-secondary small { font: inherit; }
+.album-library-meta { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 6px 12px; clear: both; margin: 14px 0 0; padding-top: 12px; border-top: 1px solid var(--line); font-size: 11px; }
+.album-library-meta dt { color: var(--muted); }
+.album-library-meta dd { margin: 0; overflow-wrap: anywhere; font-family: var(--font-mono); font-size: 10px; }
+.album-library-meta a { text-underline-offset: 3px; }
+@media (max-width: 760px) {
+  #library-totals { padding: 10px 12px; }
+  .library-primary { font-size: 14px; gap: 2px 8px; }
+  .library-primary > span + span::before { margin-right: 8px; }
+  .library-secondary { font-size: 10px; gap: 2px 12px; }
+}
 button, input, select { font: inherit; }
 button, a, input, select, summary { -webkit-tap-highlight-color: transparent; }
 button, select, summary, input[type=range], input[type=checkbox] { cursor: pointer; }

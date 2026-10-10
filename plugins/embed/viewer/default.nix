@@ -7,7 +7,7 @@ buildNpmPackage {
     fileset = lib.fileset.unions [
       ./package.json ./package-lock.json ./build.mjs ./app.mjs ./worker.mjs
       ./static
-      ./logic.mjs ./sound.mjs ./covers.mjs ./atlas.mjs ./cosmos-atlas-patch.mjs ./cosmos-vibe.mjs ./vibe.mjs ./gather.mjs ./physics.mjs ./visibility.mjs ./search.mjs ./index.html ./style.css ./server.py ./text_query.py ./tests
+      ./logic.mjs ./library-stats.mjs ./sound.mjs ./covers.mjs ./atlas.mjs ./cosmos-atlas-patch.mjs ./cosmos-vibe.mjs ./vibe.mjs ./gather.mjs ./physics.mjs ./visibility.mjs ./search.mjs ./index.html ./style.css ./server.py ./text_query.py ./tests
     ];
   };
   npmDepsHash = "sha256-rMjW7mYkrkOusOpbdTTwvwA5GET9/mECayN03DPMteQ=";
