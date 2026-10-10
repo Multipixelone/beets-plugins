@@ -100,13 +100,17 @@ class Models:
         with redirect_stdout(sys.stderr):
             self._load_text()
 
+    def configure_threads(self):
+        from .threads import configure_torch_threads
+        configure_torch_threads(self.threads)
+
     def _load_text(self):
+        self.configure_threads()
         os.environ.update(HF_HUB_OFFLINE="1", TRANSFORMERS_OFFLINE="1",
                           TOKENIZERS_PARALLELISM="false")
         import torch
         import gin
         import huggingface_hub
-        torch.set_num_threads(self.threads)
         # OMAR's loader expects Hub IDs; resolve only the pinned local config.
         # No network/cache fallback is possible, including for unexpected assets.
         def local_asset(repo_id, filename, **kwargs):

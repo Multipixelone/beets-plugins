@@ -51,10 +51,11 @@ def select_worker(requested, cpu_worker):
 def probe_rocm():
     # This code runs only in the disposable probe process, never in beets.
     import torch
+    from .threads import configure_torch_threads
+    configure_torch_threads(2)
     from torch.nn.functional import conv1d
     if not torch.version.hip or not torch.cuda.is_available():
         raise ValueError("HIP-backed torch and an accessible GPU are required")
-    torch.set_num_threads(2)
     device = "cuda:0"
     matrix = torch.arange(32 * 32, dtype=torch.float32).reshape(32, 32) / 1024
     signal = torch.linspace(-1, 1, 128).reshape(1, 1, 128)

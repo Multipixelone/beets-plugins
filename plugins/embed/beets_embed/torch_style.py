@@ -9,12 +9,14 @@ from onnx import numpy_helper
 from torch import fx, nn
 from torch.nn import functional as F
 
+from .threads import configure_torch_threads
+
 
 HEADS = ("moodtheme", "instrument", "approachability", "engagement")
 
 
 def configure_fp32(threads):
-    torch.set_num_threads(threads)
+    configure_torch_threads(threads)
     torch.set_float32_matmul_precision("highest")
     torch.backends.cuda.matmul.allow_tf32 = False
     torch.backends.cudnn.allow_tf32 = False

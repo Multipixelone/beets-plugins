@@ -219,12 +219,12 @@ def benchmark_track(track, args, engines, logits, synchronize):
 
 def run(args):
     import torch
+    from .threads import configure_torch_threads
+    configure_torch_threads(args.threads)
     import onnx
     import onnxruntime as ort
     if not torch.version.hip or not torch.cuda.is_available():
         raise ValueError("This experiment requires HIP-backed Torch and an accessible AMD GPU")
-    torch.set_num_threads(args.threads)
-    torch.set_num_interop_threads(1)
     synchronize = torch.cuda.synchronize
     started = time.perf_counter()
     engines = [Models(args.assets, args.threads, style_backend="onnx"),

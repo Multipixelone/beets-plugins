@@ -117,6 +117,7 @@ def main():
             parser.error("serve-text requires --device cpu --threads 2")
         from .inference import Models
         engine = Models(args.assets, 2, "cpu", text_only=True)
+        engine.configure_threads()
         for line in iter(lambda: sys.stdin.readline(4097), ''):
             if len(line) > 4096 or not line.endswith('\n'):
                 raise ValueError('Invalid text request size')
@@ -140,6 +141,7 @@ def main():
             parser.error("Invalid text vocabulary")
         from .inference import Models
         engine = Models(args.assets, args.threads, "cpu", text_only=True)
+        engine.configure_threads()
         vectors = []
         for first in range(0, len(phrases), args.batch_size):
             vectors.extend(engine.text_batch(phrases[first:first + args.batch_size]).tolist())
@@ -165,6 +167,7 @@ def main():
     from .retrieval import available, album_vectors, rank, similar
     engine = Models(args.assets, args.threads, "cuda:0" if device == "rocm" else "cpu",
                     text_only=args.mode in ("search", "similar"), style_backend=args.style_backend)
+    engine.configure_threads()
     if args.mode == "smoke":
         import numpy as np
         import tempfile
