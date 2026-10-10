@@ -138,6 +138,7 @@ main { --timeline-height: 0px; }
 .detail-heading { flex: 1; min-width: 0; padding-right: 30px; }
 #details h2 { margin: 0; font: 22px/1.15 var(--font-serif); letter-spacing: -.4px; overflow-wrap: break-word; }
 .release-link { margin: -.3em 0 -.3em .1em; padding: .3em .25em; font-size: .68em; line-height: 1; text-decoration: none; }
+.release-link svg { width: 1em; height: 1em; vertical-align: -.08em; color: var(--accent); }
 .album-subline { display: flex; flex-wrap: wrap; gap: 2px 9px; margin: 3px 0 0; color: var(--muted); font: 12px/1.45 var(--font-mono); }
 .album-subline > span { min-width: 0; overflow-wrap: anywhere; }
 .related-heading { border-top: 1px solid var(--line); padding-top: 12px; margin: 12px 0 0; font-size: 9px; font-weight: 650; letter-spacing: 1.3px; }

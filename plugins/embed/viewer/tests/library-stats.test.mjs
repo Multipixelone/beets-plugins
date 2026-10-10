@@ -114,7 +114,10 @@ class Element {
   getAttribute(name) { return this.attributes?.get(name); }
   querySelector(selector) { return this.children.find(child => `.${child.className}` === selector); }
 }
-const doc = { createElement: tagName => new Element(tagName, doc) };
+const doc = {
+  createElement: tagName => new Element(tagName, doc),
+  createElementNS: (namespaceURI, tagName) => Object.assign(new Element(tagName, doc), { namespaceURI }),
+};
 
 test('statistics rendering preserves its heading and expanded state while clearing legacy totals', () => {
   const container = doc.createElement('details'), summary = doc.createElement('summary'), content = doc.createElement('div');
@@ -205,6 +208,22 @@ test('album title glues the MusicBrainz link to the final word with a fixed dest
   assert.equal(link.target, '_blank');
   assert.equal(link.getAttribute('aria-label'), 'View release on MusicBrainz.');
   assert.equal(link.title, 'View release on MusicBrainz.');
+  assert.equal(link.children[0], '\u2060');
+  const icon = link.children[1];
+  assert.equal(icon.tagName, 'svg');
+  assert.equal(icon.namespaceURI, 'http://www.w3.org/2000/svg');
+  assert.equal(icon.getAttribute('viewBox'), '0 0 24 24');
+  assert.equal(icon.getAttribute('aria-hidden'), 'true');
+  assert.equal(icon.getAttribute('focusable'), 'false');
+  assert.equal(icon.textContent, '');
+  assert.ok(icon.children.every(child => child.namespaceURI === icon.namespaceURI));
+  for (const album of ['A very long title with punctuation!', '最後の曲', 'Supercalifragilisticexpialidocious']) {
+    const heading = doc.createElement('h2');
+    appendAlbumTitle(heading, { ...fixture.albums[0], album });
+    const tail = heading.querySelector('.title-tail');
+    assert.equal(tail.children[0], album.match(/\S+$/)[0] + '\u2060');
+    assert.equal(tail.children.at(-1).className, 'release-link');
+  }
   for (const mb_albumid of ['javascript:alert(1)', '../private', null, 42]) {
     const evil = doc.createElement('h2');
     appendAlbumTitle(evil, { album: 'Traps', release: { mb_albumid } });

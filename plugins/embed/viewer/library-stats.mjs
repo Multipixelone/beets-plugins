@@ -150,8 +150,25 @@ export function appendAlbumTitle(title, album) {
   link.target = '_blank'; link.rel = 'noopener noreferrer';
   link.setAttribute('aria-label', 'View release on MusicBrainz.');
   link.title = 'View release on MusicBrainz.';
-  const icon = doc.createElement('span'); icon.setAttribute('aria-hidden', 'true'); icon.textContent = '↗';
-  link.append(icon);
+  // MusicBrainz's split hexagon: a musical note and a few circuit branches.
+  const ns = 'http://www.w3.org/2000/svg';
+  const icon = doc.createElementNS(ns, 'svg');
+  icon.setAttribute('viewBox', '0 0 24 24');
+  icon.setAttribute('aria-hidden', 'true'); icon.setAttribute('focusable', 'false');
+  for (const d of [
+    'M12 1 22 6v12l-10 5-10-5V6Z M12 1v22',
+    'M8 16V8l3-1 M8 16c0 2-4 3-4 1s4-3 4-1',
+    'M12 8h3l2-2 M15 8v4l3 2 M12 16h3l2 2',
+  ]) {
+    const path = doc.createElementNS(ns, 'path'); path.setAttribute('d', d); icon.append(path);
+  }
+  for (const [cx, cy] of [[18, 5], [19, 15], [18, 19]]) {
+    const node = doc.createElementNS(ns, 'circle');
+    node.setAttribute('cx', cx); node.setAttribute('cy', cy); node.setAttribute('r', '1.25');
+    icon.append(node);
+  }
+  // Replaced elements can introduce a break inside the anchor as well.
+  link.append(WORD_JOINER, icon);
   tail.append(link);
   title.append(tail);
 }
