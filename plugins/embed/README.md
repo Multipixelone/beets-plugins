@@ -93,6 +93,59 @@ shown in album details. `style` (Discogs-EffNet) is the default embedding family
 embedding store; ordinary beets startup behavior still applies. Output cannot
 overwrite either database or its SQLite sidecars, including aliases.
 
+### Library and quality metadata
+
+Every album row also contains these additive schema-v3 fields:
+
+| Field | Value |
+| --- | --- |
+| `added` | Album addition time as an ISO-8601 UTC string ending in `Z`, or null |
+| `format` | Format covering at least 90% of all tracks, `Mixed` otherwise, or null when all formats are unknown |
+| `formats` | Known format names mapped to track counts |
+| `lossless` | True only when every track is FLAC, ALAC, WAV, AIFF, APE, or WavPack |
+| `bitrate_kbps` | Rounded integer mean of known positive track bitrates in kbps, or null |
+| `samplerate_hz` | Integer mode of known positive sample rates, or null |
+| `bitdepth` | Integer mode of known positive bit depths, or null; lossy zero values are excluded |
+| `size_bytes` | Integer sum of successfully statted file sizes, or null when no stat succeeded |
+| `release` | Object with `albumtype`, `label`, `country`, `original_year`, and `mb_albumid`; empty strings and zero become null |
+
+Release values are strings except `original_year`, which is an integer.
+Sample-rate and bit-depth ties choose the smaller value. Unknown formats count
+against the 90% threshold and prevent an album from being marked lossless.
+
+The top-level `library` object describes the **whole beets library**, regardless
+of the graph query or embedding coverage. It contains integer `albums`,
+`tracks`, `size_bytes`, `lossless_albums`, and `missing_files` totals; floating
+point `duration_seconds` and `listened_seconds_estimate`; a `formats` object;
+and `computed_at`, an ISO-8601 UTC string ending in `Z`. The listening estimate
+sums each track's length multiplied by the same play-count fallback used for
+album statistics. Standalone tracks contribute to track, size, duration, and
+listening totals, but do not create albums.
+
+Each library format entry contains integer `albums`, `tracks`, and `size_bytes`
+counts. Albums count under their dominant format or `Mixed`; tracks and bytes
+count under their actual formats. Consequently a `Mixed` entry can have albums
+but zero tracks and bytes. Unknown formats have no format entry, while their
+tracks and bytes still contribute to overall totals. Overall size is zero when
+no files could be statted. Failed stats increment `missing_files`; valid empty
+files contribute zero bytes without counting as missing.
+
+Quality and library statistics share the existing selected-album item processing.
+Remaining tracks are read in bounded batches, with one filesize stat per item;
+the existing embedding fingerprint checks are separate. Export logs report the
+time spent computing library totals, including selected-album contributions.
+The export includes no file paths or directories. Schema version remains 3,
+matching earlier additive v3 extensions and existing viewer/listen consumers.
+
+An October 9, 2026 read-only benchmark used a temporary SQLite backup of the
+real library and the NAS music mount: **6,396 albums / 93,765 tracks**. Computing
+library totals took **29.853 seconds**, reporting **1,977,198,513,000 bytes**,
+**19,208,908.05370401 seconds** of duration,
+**18,998,313.2967483 seconds** of estimated listening, **5,036 lossless albums**,
+and **100 missing files**. The single-album export took 30.924 seconds, excluding
+the 7.593-second database snapshot; covers and descriptor inference were disabled.
+This measures the cost of the required whole-library scan even for a narrow query.
+
 `--covers-dir DIR` enables a dedicated incremental thumbnail cache. Pillow fits
 full artwork into 256×256 map JPEGs and separate 512×512 card JPEGs with neutral
 padding. Quality 85 retains more detail than 82 for about 10% more bytes at

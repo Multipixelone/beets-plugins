@@ -6,6 +6,7 @@ import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from PIL import Image
@@ -13,7 +14,8 @@ from PIL import Image
 import numpy as np
 from beets.library import Album, Item, Library
 from beetsplug.embed import EmbedPlugin
-from beets_embed.graph_export import export_albums, plays, protect_output
+from beets_embed.graph_export import (AlbumStatistics, export_albums, file_size,
+                                     plays, protect_output, utc_timestamp)
 from beets_embed.store import Store, fingerprint
 
 
@@ -70,6 +72,170 @@ class GraphExportTests(unittest.TestCase):
         self.assertEqual(result['schema_version'], 3)
         self.assertIn('+00:00', result['exported_at'])
         self.assertEqual(json.loads(self.output.read_text()), result)
+
+    def quality_items(self, fields):
+        for item, values in zip(self.items, fields):
+            item.update(values)
+            item.store()
+
+    def test_album_quality_release_and_library_totals(self):
+        self.quality_items([
+            dict(format='FLAC', bitrate=1000000, samplerate=44100, bitdepth=16, length=60),
+            dict(format='FLAC', bitrate=900000, samplerate=48000, bitdepth=24, length=90),
+            dict(format='FLAC', bitrate=1100000, samplerate=44100, bitdepth=16, length=120),
+            dict(format='AAC', bitrate=320000, samplerate=44100, bitdepth=0, length=30),
+        ])
+        self.first.update(dict(added=1709294400, albumtype='album', label='Island',
+                               country='GB', original_year=1969, mb_albumid='release-id'))
+        self.first.store()
+        result = self.export({self.first.id})
+        album = result['albums'][0]
+        expected = dict(added='2024-03-01T12:00:00Z', format='FLAC', formats={'FLAC': 3},
+                        lossless=True, bitrate_kbps=1000, samplerate_hz=44100,
+                        bitdepth=16, size_bytes=15,
+                        release=dict(albumtype='album', label='Island', country='GB',
+                                     original_year=1969, mb_albumid='release-id'))
+        self.assertEqual({key: album[key] for key in expected}, expected)
+        library = result['library']
+        self.assertEqual({key: library[key] for key in library if key != 'computed_at'},
+                         dict(albums=2, tracks=4, size_bytes=20, duration_seconds=300.0,
+                              listened_seconds_estimate=1140.0, lossless_albums=1,
+                              formats={'AAC': dict(albums=1, tracks=1, size_bytes=5),
+                                       'FLAC': dict(albums=1, tracks=3, size_bytes=15)},
+                              missing_files=0))
+        self.assertIsInstance(library['duration_seconds'], float)
+        self.assertIsInstance(library['listened_seconds_estimate'], float)
+        self.assertRegex(library['computed_at'], r'^\d{4}-\d\d-\d\dT.*Z$')
+        self.assertNotIn(str(self.root), self.output.read_text())
+        self.assertNotIn('path', album)
+        self.assertEqual(json.loads(self.output.read_text()), result)
+
+    def test_mixed_formats_known_quality_and_dominant_album_buckets(self):
+        self.quality_items([
+            dict(format='FLAC', bitrate=1000000, samplerate=48000, bitdepth=24),
+            dict(format='FLAC', bitrate=0, samplerate=0, bitdepth=0),
+            dict(format='MP3', bitrate=320000, samplerate=44100, bitdepth=0),
+            dict(format='MP3', bitrate=320000, samplerate=44100, bitdepth=0),
+        ])
+        result = self.export()
+        album = result['albums'][0]
+        self.assertEqual(album['format'], 'Mixed')
+        self.assertEqual(album['formats'], {'FLAC': 2, 'MP3': 1})
+        self.assertFalse(album['lossless'])
+        self.assertEqual(album['bitrate_kbps'], 660)
+        self.assertEqual(album['samplerate_hz'], 44100)  # Ties use the smaller value.
+        self.assertEqual(album['bitdepth'], 24)
+        self.assertEqual(result['library']['formats'],
+                         {'FLAC': dict(albums=0, tracks=2, size_bytes=10),
+                          'MP3': dict(albums=1, tracks=2, size_bytes=10),
+                          'Mixed': dict(albums=1, tracks=0, size_bytes=0)})
+
+    def test_lossy_bitdepth_and_empty_release_values_are_null(self):
+        self.quality_items([dict(format='MP3', bitdepth=0)] * 3)
+        self.first.update(dict(added=0, albumtype='', label=' ', country='',
+                               original_year=0, mb_albumid=''))
+        self.first.store()
+        album = self.export()['albums'][0]
+        self.assertEqual(album['format'], 'MP3')
+        self.assertFalse(album['lossless'])
+        for key in ('added', 'bitdepth', 'bitrate_kbps', 'samplerate_hz'):
+            self.assertIsNone(album[key])
+        self.assertEqual(album['release'], dict(albumtype=None, label=None, country=None,
+                                               original_year=None, mb_albumid=None))
+
+    def test_unknown_formats_and_numeric_metadata(self):
+        album = self.export()['albums'][0]
+        self.assertIsNone(album['format'])
+        self.assertEqual(album['formats'], {})
+        self.assertFalse(album['lossless'])
+        self.assertEqual(self.export()['library']['formats'], {})
+        self.assertEqual(self.export()['library']['lossless_albums'], 0)
+        for value in (None, '', 0, -1, 'nan', 'inf', 'bad', 1e100):
+            with self.subTest(timestamp=value):
+                self.assertIsNone(utc_timestamp(value))
+
+    def test_format_threshold_includes_unknown_tracks_and_all_lossless_formats(self):
+        for last, expected, lossless in [('MP3', 'FLAC', False),
+                                         ('', 'FLAC', False), ('ALAC', 'FLAC', True)]:
+            with self.subTest(last=last):
+                stats = AlbumStatistics()
+                for format in ['FLAC'] * 9 + [last]:
+                    stats.add({}, format or None, 0, 0)
+                self.assertEqual(stats.export()['format'], expected)
+                self.assertEqual(stats.export()['lossless'], lossless)
+                stats.add({}, 'MP3', 0, 0)
+                self.assertEqual(stats.export()['format'], 'Mixed')
+        stats = AlbumStatistics()
+        for format in ('FLAC', 'ALAC', 'WAV', 'AIFF', 'APE', 'WavPack'):
+            stats.add({}, format, 1, 0)
+        self.assertTrue(stats.export()['lossless'])
+        self.assertEqual(stats.export()['format'], 'Mixed')
+        self.assertFalse(AlbumStatistics().export()['lossless'])
+
+    def test_missing_audio_partial_and_all_failed_sizes(self):
+        Path(os.fsdecode(self.items[2].path)).unlink()
+        result = self.export()
+        self.assertEqual(result['albums'][0]['size_bytes'], 10)
+        self.assertEqual(result['library']['size_bytes'], 15)
+        self.assertEqual(result['library']['missing_files'], 1)
+        original = file_size
+        def unavailable(item, directory):
+            return None if item.album_id == self.first.id else original(item, directory)
+        with patch('beets_embed.graph_export.file_size', side_effect=unavailable):
+            result = self.export()
+        self.assertIsNone(result['albums'][0]['size_bytes'])
+        self.assertEqual(result['library']['size_bytes'], 5)
+        self.assertEqual(result['library']['missing_files'], 3)
+        with patch('beets_embed.graph_export.os.stat', side_effect=PermissionError):
+            self.assertIsNone(file_size(self.items[0], self.lib.directory))
+
+    def test_filesize_read_once_and_real_zero_byte_file(self):
+        standalone_path = self.root / 'empty.wav'
+        standalone_path.touch()
+        standalone = Item(path=os.fsencode(standalone_path), format='WAV', length=10,
+                          play_count='2')
+        self.lib.add(standalone)
+        with patch('beets_embed.graph_export.file_size', wraps=file_size) as sizes, \
+             patch('beets_embed.graph_export.plays', wraps=plays) as play_counts:
+            result = self.export()
+        self.assertCountEqual([call.args[0].id for call in sizes.call_args_list],
+                              [item.id for item in self.items] + [standalone.id])
+        self.assertEqual(play_counts.call_count, 5)
+        self.assertEqual(result['library']['albums'], 2)
+        self.assertEqual(result['library']['tracks'], 5)
+        self.assertEqual(result['library']['duration_seconds'], 10.0)
+        self.assertEqual(result['library']['listened_seconds_estimate'], 20.0)
+        self.assertEqual(result['library']['missing_files'], 0)
+        self.assertEqual(result['library']['formats']['WAV'], dict(albums=0, tracks=1, size_bytes=0))
+        with patch('beets_embed.graph_export.os.stat', return_value=SimpleNamespace(st_size=0)) as stat:
+            self.assertEqual(file_size(SimpleNamespace(path=b'empty.wav'), self.root), 0)
+        stat.assert_called_once_with(str(standalone_path))
+
+    def test_library_totals_ignore_selection_and_embedding_availability(self):
+        first = self.export()
+        empty = self.export(set())
+        stale = self.export(model='absent:model')
+        for result in (empty, stale):
+            self.assertEqual(result['albums'], [])
+            self.assertEqual({k: v for k, v in result['library'].items() if k != 'computed_at'},
+                             {k: v for k, v in first['library'].items() if k != 'computed_at'})
+        # Candidates whose current vectors are stale still contribute once.
+        for item in self.items[:2]:
+            Path(os.fsdecode(item.path)).write_bytes(b'changed')
+        with patch('beets_embed.graph_export.file_size', wraps=file_size) as sizes:
+            result = self.export()
+        self.assertEqual(result['albums'], [])
+        self.assertEqual(sizes.call_count, 4)
+        self.assertEqual(result['library']['size_bytes'], 24)
+
+    def test_empty_library_totals(self):
+        for album in (self.first, self.missing):
+            album.remove(delete=False)
+        result = self.export()
+        self.assertEqual({k: v for k, v in result['library'].items() if k != 'computed_at'},
+                         dict(albums=0, tracks=0, size_bytes=0, duration_seconds=0.0,
+                              listened_seconds_estimate=0.0, lossless_albums=0,
+                              formats={}, missing_files=0))
 
     def test_query_selects_whole_album_without_writes_or_inference(self):
         standalone = Item(path=b'/unused.wav', artist='Finn', album='Single')
