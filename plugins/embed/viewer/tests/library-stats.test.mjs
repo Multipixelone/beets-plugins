@@ -110,22 +110,35 @@ class Element {
   get textContent() { return this.content + this.children.map(child => child.textContent).join(''); }
   append(...children) { this.children.push(...children); }
   replaceChildren(...children) { this.content = ''; this.children = children; }
+  querySelector(selector) { return this.children.find(child => `.${child.className}` === selector); }
 }
 const doc = { createElement: tagName => new Element(tagName, doc) };
 
-test('strip rendering labels the estimate visibly and clears when an older export loads', () => {
-  const container = doc.createElement('section');
+test('statistics rendering preserves its heading and expanded state while clearing legacy totals', () => {
+  const container = doc.createElement('details'), summary = doc.createElement('summary'), content = doc.createElement('div');
+  summary.textContent = 'Library Statistics'; content.className = 'section-content';
+  container.append(summary, content); container.open = false;
   renderLibraryStats(container, fixture.library);
   assert.equal(container.hidden, false);
-  assert.match(container.textContent, /WHOLE LIBRARY.*4,012 albums/);
+  assert.equal(container.open, false);
+  assert.equal(container.children[0], summary);
+  assert.equal(content.children[0].textContent, '4,012 albums · 1.5 TB · 3,100 hours of music');
   assert.match(container.textContent, /Estimated listened: 5,760 hours \(play count × track length\)/);
   assert.ok(!container.textContent.includes('missing_files'));
   assert.ok(!container.textContent.includes(fixture.library.computed_at));
-  renderLibraryStats(container, undefined);
-  assert.equal(container.hidden, true);
-  assert.equal(container.textContent, '');
+  container.open = true;
+  for (const library of [undefined, null, {}, { lossless_albums: 0 }]) {
+    renderLibraryStats(container, library);
+    assert.equal(container.hidden, true);
+    assert.equal(content.textContent, '');
+    assert.equal(container.textContent, 'Library Statistics');
+    assert.equal(container.children[0], summary);
+    assert.equal(container.open, true);
+  }
   renderLibraryStats(container, { albums: 3 });
-  assert.equal(container.textContent, 'WHOLE LIBRARY3 albums');
+  assert.equal(container.hidden, false);
+  assert.equal(content.textContent, '3 albums');
+  assert.equal(container.open, true);
 });
 
 test('album metadata uses text nodes, hides empty sections and creates only fixed-origin links', () => {

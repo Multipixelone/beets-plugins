@@ -55,8 +55,6 @@
     <link rel="stylesheet" href="style.css" />
   </head>
   <body>
-    <section id="library-totals" hidden aria-label="Whole library totals"></section>
-    <div class="viewer-shell">
     <header class="topbar">
       <div class="search-wrap">
         <label class="search-label" for="search"
@@ -122,6 +120,10 @@
               the vectors. Matching against the library happens in your browser.
             </p>
           </div>
+        </details>
+        <details id="library-totals" class="control-section" hidden>
+          <summary>Library Statistics</summary>
+          <div class="section-content"></div>
         </details>
         <details class="control-section" open>
           <summary>Map appearance</summary>
@@ -406,7 +408,6 @@
           ><button id="pause" aria-pressed="false">Live physics</button>
         </div>
       </main>
-    </div>
     </div>
     <script type="module" src="app.js"></script>
   </body>

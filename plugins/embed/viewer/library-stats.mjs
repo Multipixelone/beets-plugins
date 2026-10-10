@@ -99,23 +99,21 @@ export function albumMetadata(album) {
 }
 
 export function renderLibraryStats(container, library) {
-  container.replaceChildren();
+  const content = container.querySelector('.section-content');
+  content.replaceChildren();
   const { primary, secondary } = librarySummary(library), doc = container.ownerDocument;
   container.hidden = !primary.length && !secondary.length;
   if (container.hidden) return;
-  const label = doc.createElement('p'); label.className = 'library-eyebrow'; label.textContent = 'WHOLE LIBRARY';
-  container.append(label);
-  for (const [values, className] of [[primary, 'library-primary'], [secondary, 'library-secondary']]) {
-    if (!values.length) continue;
-    const line = doc.createElement('p'); line.className = className;
-    for (const value of values) {
-      const item = doc.createElement('span'); item.textContent = value;
-      if (value.startsWith('Estimated listened:')) {
-        const explanation = doc.createElement('small'); explanation.textContent = ' (play count × track length)'; item.append(explanation);
-      }
-      line.append(item);
+  if (primary.length) {
+    const line = doc.createElement('p'); line.className = 'library-primary'; line.textContent = primary.join(' · ');
+    content.append(line);
+  }
+  for (const value of secondary) {
+    const line = doc.createElement('p'); line.className = 'library-secondary'; line.textContent = value;
+    if (value.startsWith('Estimated listened:')) {
+      const explanation = doc.createElement('small'); explanation.textContent = ' (play count × track length)'; line.append(explanation);
     }
-    container.append(line);
+    content.append(line);
   }
 }
 
