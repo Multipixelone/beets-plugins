@@ -139,3 +139,29 @@ class ProcessProfileTests(unittest.TestCase):
         self.assertEqual(counts["profiling"]["stages_seconds"]["style"]["n"], 0)
         for prepared in self.prepared:
             prepared.close.assert_called_once()
+
+    def test_wait_fraction_includes_draining_prefetch_on_shutdown(self):
+        clock = [0.0]
+        delays = iter((2.0, 5.0))
+        stopped = False
+        def submit(function, job):
+            result, delay = function(job), next(delays)
+            def wait():
+                clock[0] += delay
+                return result
+            return SimpleNamespace(result=wait)
+        def style(*args):
+            nonlocal stopped
+            clock[0] += 3.0
+            stopped = True
+            return [1], [0], {}, 1
+        self.engine.style.side_effect = style
+        with patch("beets_embed.worker.ThreadPoolExecutor") as executor, \
+             patch("beets_embed.worker.time.perf_counter", side_effect=lambda: clock[0]):
+            executor.return_value.__enter__.return_value.submit.side_effect = submit
+            counts = process(self.tracks[:2], self.store, {"style": "v1"}, self.engine,
+                             self.prepare, stopping=lambda: stopped)
+        self.assertEqual(counts["profiling"]["prep_wait_seconds"], 7)
+        self.assertEqual(counts["profiling"]["loop_seconds"], 10)
+        self.assertEqual(counts["profiling"]["prep_wait_fraction"], .7)
+        self.assertEqual(counts["computed"], 0)

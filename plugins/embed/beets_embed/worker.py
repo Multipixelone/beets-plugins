@@ -62,6 +62,7 @@ def process(tracks, store, models, engine, prepare, batch_size=8, stopping=lambd
             iteration_started = time.perf_counter()
             prepared, error, prep_seconds = future.result()
             waited = time.perf_counter() - iteration_started
+            loop_wait = waited
             stages = {"prep_wait": waited, "prep": prep_seconds, "store": 0.0}
             stages.update(getattr(prepared, "timings", {}))
             computed = False
@@ -97,10 +98,12 @@ def process(tracks, store, models, engine, prepare, batch_size=8, stopping=lambd
                     prepared.close()
                 # On termination clean an already scheduled preparation too.
                 if stopping() and next_future is not None:
+                    started = time.perf_counter()
                     extra, _, _ = next_future.result()
+                    loop_wait += time.perf_counter() - started
                     if extra is not None:
                         extra.close()
-                profile.iteration(time.perf_counter() - iteration_started, waited)
+                profile.iteration(time.perf_counter() - iteration_started, loop_wait)
                 if computed:
                     profile.computed_track(stages)
             job, future = following, next_future
