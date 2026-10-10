@@ -158,7 +158,7 @@ export function appendAlbumTitle(title, album) {
 
 export function appendAlbumSubline(line, album) {
   const doc = line.ownerDocument, release = releaseInfo(album);
-  const values = [text(album.albumartist), album.year || null, text(release.albumtype), text(album.genre)];
+  const values = [text(album.albumartist), album.year || null, text(album.genre), text(release.albumtype)];
   for (const value of values) {
     if (value === null || value === undefined || value === '') continue;
     const item = doc.createElement('span'); item.textContent = String(value); line.append(item);

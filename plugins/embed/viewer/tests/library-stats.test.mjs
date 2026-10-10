@@ -198,10 +198,10 @@ test('album title glues the MusicBrainz link to the final word with a fixed dest
   assert.equal(releaseHref({}), null);
 });
 
-test('album subline lists artist, year, type and genre while omitting missing values', () => {
+test('album subline lists artist, year, genre and type while omitting missing values', () => {
   const full = doc.createElement('p');
   appendAlbumSubline(full, fixture.albums[0]);
-  assert.deepEqual(full.children.map(child => child.textContent), ['The Lantern Rooms', '2011', 'album', 'Electronic']);
+  assert.deepEqual(full.children.map(child => child.textContent), ['The Lantern Rooms', '2011', 'Electronic', 'album']);
   const untyped = doc.createElement('p');
   appendAlbumSubline(untyped, fixture.albums[3]);
   assert.deepEqual(untyped.children.map(child => child.textContent), ['Tessa Vale', '2011', 'Electronic']);
@@ -211,4 +211,17 @@ test('album subline lists artist, year, type and genre while omitting missing va
   const empty = doc.createElement('p');
   appendAlbumSubline(empty, {});
   assert.equal(empty.children.length, 0);
+  for (const [genre, albumtype, expected] of [
+    ['Indie Pop', 'album', ['Indie Pop', 'album']],
+    ['Indie Rock', 'EP', ['Indie Rock', 'EP']],
+    ['Jazz', 'single', ['Jazz', 'single']],
+    ['  Jazz  ', ' single ', ['Jazz', 'single']],
+    [null, 'EP', ['EP']],
+    ['Jazz', null, ['Jazz']],
+    ['  ', '  ', []],
+  ]) {
+    const line = doc.createElement('p');
+    appendAlbumSubline(line, { albumartist: 'Mitski', year: 2018, genre, release: { albumtype } });
+    assert.deepEqual(line.children.map(child => child.textContent), ['Mitski', '2018', ...expected]);
+  }
 });
