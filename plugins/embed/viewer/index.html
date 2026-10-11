@@ -384,16 +384,53 @@
         </section>
         <div id="tooltip" hidden></div>
         <button id="gather-map" hidden aria-pressed="false">Ungather</button>
+        <div class="map-bottom">
+          <div class="map-footer">
+            <p id="status" role="status" aria-live="polite">
+              Waiting for your library.
+            </p>
+            <p class="map-hint">
+              Drag to explore <span>·</span> Scroll to zoom <span>·</span> Select
+              an album
+            </p>
+            <p class="map-hint map-hint-touch">
+              Drag to pan <span>·</span> Pinch to zoom <span>·</span> Tap an album
+            </p>
+          </div>
+          <div class="map-toolbar" aria-label="Graph navigation">
+            <div class="toolbar-group">
+              <button id="zoom-out" aria-label="Zoom out">−</button>
+              <button id="zoom-in" aria-label="Zoom in">+</button>
+            </div>
+            <div class="toolbar-group">
+              <span class="toolbar-divider" aria-hidden="true"></span>
+              <button id="fit" title="Fit all albums in view">
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M9 4H4v5m11-5h5v5M4 15v5h5m11-5v5h-5" />
+                </svg>Fit view
+              </button>
+            </div>
+            <div class="toolbar-group">
+              <span class="toolbar-divider" aria-hidden="true"></span>
+              <button id="pause" aria-pressed="false">Live physics</button>
+            </div>
+            <div id="timeline-dock" class="toolbar-group" hidden>
+              <span class="toolbar-divider" aria-hidden="true"></span>
+              <button id="timeline-toggle" type="button" aria-expanded="false"
+                aria-controls="timeline-content" aria-describedby="timeline-compact"
+                aria-label="Show timeline" title="Show timeline">
+                <span>Timeline</span><span aria-hidden="true">·</span>
+                <span id="timeline-compact">Latest</span>
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 15 6-6 6 6" /></svg>
+              </button>
+            </div>
+          </div>
+        </div>
         <section id="timeline" hidden aria-label="Added to library">
           <div class="timeline-heading">
             <strong>Added to library</strong><span>Sound communities</span>
-            <span id="timeline-compact" hidden>Latest</span>
-            <button id="timeline-toggle" type="button" aria-expanded="true"
-              aria-controls="timeline-content" aria-label="Hide timeline" title="Hide timeline">
-              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6" /></svg>
-            </button>
           </div>
-          <div id="timeline-content">
+          <div id="timeline-content" hidden>
             <button id="timeline-latest" type="button">Latest</button>
             <p id="timeline-empty" hidden>No albums in this export have an added date.</p>
             <div id="timeline-controls">
@@ -418,31 +455,8 @@
               End selects the final dated interval. Escape returns to Latest. Dates are UTC;
               snapshots use current metadata and similarities.</p>
           </div>
-          <p id="timeline-announcement" class="sr-only" role="status" aria-live="polite" aria-atomic="true"></p>
         </section>
-        <div class="map-footer">
-          <p id="status" role="status" aria-live="polite">
-            Waiting for your library.
-          </p>
-          <p class="map-hint">
-            Drag to explore <span>·</span> Scroll to zoom <span>·</span> Select
-            an album
-          </p>
-          <p class="map-hint map-hint-touch">
-            Drag to pan <span>·</span> Pinch to zoom <span>·</span> Tap an album
-          </p>
-        </div>
-        <div class="map-toolbar" aria-label="Graph navigation">
-          <button id="zoom-out" aria-label="Zoom out">−</button
-          ><button id="zoom-in" aria-label="Zoom in">+</button
-          ><span class="toolbar-divider"></span
-          ><button id="fit" title="Fit all albums in view">
-            <svg viewBox="0 0 24 24" aria-hidden="true">
-              <path d="M9 4H4v5m11-5h5v5M4 15v5h5m11-5v5h-5" /></svg
-            >Fit view</button
-          ><span class="toolbar-divider"></span
-          ><button id="pause" aria-pressed="false">Live physics</button>
-        </div>
+        <p id="timeline-announcement" class="sr-only" role="status" aria-live="polite" aria-atomic="true"></p>
       </main>
     </div>
     <script type="module" src="app.js"></script>

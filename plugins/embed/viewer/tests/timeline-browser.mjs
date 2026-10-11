@@ -69,9 +69,42 @@ async function key(value, id = 'timeline-playhead') {
   await call('Input.dispatchKeyEvent', { type:'keyDown', ...fields, text, unmodifiedText:text });
   await call('Input.dispatchKeyEvent', { type:'keyUp', ...fields });
 }
+async function bottomLayout() {
+  return evaluate(`Object.fromEntries(['.map-footer', '#status', '.map-toolbar', '#graph', '#graph canvas'].map(selector => {
+    const {x,y,width,height}=document.querySelector(selector).getBoundingClientRect();
+    return [selector,{x,y,width,height}];
+  }))`);
+}
+async function checkStableLayout(before, label) {
+  const after = await bottomLayout();
+  for (const selector of Object.keys(before)) for (const field of ['x','y','width','height'])
+    assert.ok(Math.abs(after[selector][field]-before[selector][field])<=.5,
+      `${label}: ${selector}.${field} changed from ${before[selector][field]} to ${after[selector][field]}`);
+  checks.push(label);
+}
+async function checkDockedToggle(label) {
+  await check(`(() => {
+    const toggle=document.getElementById('timeline-toggle'), toolbar=document.querySelector('.map-toolbar');
+    const a=toggle.getBoundingClientRect(), b=toolbar.getBoundingClientRect(), fit=document.getElementById('fit');
+    return toolbar.contains(toggle) && a.width>0 && a.left>=b.left && a.right<=b.right &&
+      a.top>=b.top && a.bottom<=b.bottom && a.height===fit.getBoundingClientRect().height &&
+      getComputedStyle(toggle).borderRadius===getComputedStyle(fit).borderRadius;
+  })()`, label);
+}
+async function checkBottomControls(label) {
+  await check(`(() => {
+    const footer=document.querySelector('.map-footer').getBoundingClientRect(),
+      toolbar=document.querySelector('.map-toolbar').getBoundingClientRect();
+    const separate=(a,b)=>a.right<=b.left||b.right<=a.left||a.bottom<=b.top||b.bottom<=a.top;
+    const buttons=[...document.querySelectorAll('.map-toolbar button')].map(button=>button.getBoundingClientRect());
+    return separate(footer,toolbar) && [footer,toolbar,...buttons].every(rect=>
+      rect.left>=0 && rect.right<=innerWidth && rect.top>=0 && rect.bottom<=innerHeight) &&
+      buttons.every((a,i)=>buttons.slice(i+1).every(b=>separate(a,b)));
+  })()`, label);
+}
 async function reload() {
   await call('Page.reload', { ignoreCache: true });
-  await wait(`!!document.querySelector('#graph canvas') && !document.getElementById('timeline').hidden && !document.getElementById('search').disabled`);
+  await wait(`!!document.querySelector('#graph canvas') && !document.getElementById('timeline-dock').hidden && !document.getElementById('search').disabled`);
 }
 async function screenshot(name) {
   if (!process.env.TIMELINE_SCREENSHOT_DIR) return;
@@ -83,12 +116,27 @@ try {
   await call('Page.enable'); await call('Runtime.enable');
   await call('Emulation.setDeviceMetricsOverride', { width: 1440, height: 1000, deviceScaleFactor: 1, mobile: false });
   await call('Page.navigate', { url });
-  await wait(`!!document.querySelector('#graph canvas') && !document.getElementById('timeline').hidden && !document.getElementById('search').disabled`);
+  await wait(`!!document.querySelector('#graph canvas') && !document.getElementById('timeline-dock').hidden && !document.getElementById('search').disabled`);
   previousDockPreference = await evaluate(`localStorage.getItem(${dockKey})`);
   await evaluate(`localStorage.removeItem(${dockKey})`);
   await reload();
-  await check(`document.getElementById('timeline-toggle').getAttribute('aria-expanded') === 'true' &&
-    !document.getElementById('timeline-content').hidden`, 'desktop defaults to an expanded timeline');
+  await check(`document.getElementById('timeline-toggle').getAttribute('aria-expanded') === 'false' &&
+    document.getElementById('timeline').hidden && document.getElementById('timeline-content').hidden &&
+    localStorage.getItem(${dockKey})===null`, 'desktop starts closed without persisting the default');
+  await checkDockedToggle('desktop toggle is a matching control inside the navigation panel');
+  await wait(`document.getElementById('cover-status').textContent.includes('covers in view')`);
+  await screenshot('packaged-desktop-closed');
+  const desktopLayout = await bottomLayout();
+  await key('Enter', 'timeline-toggle');
+  await wait(`!document.getElementById('timeline').hidden`); await sleep(150);
+  await checkStableLayout(desktopLayout, 'desktop opening leaves stats, controls and graph bounds unchanged');
+  await checkBottomControls('desktop stats and navigation targets do not overlap');
+  await key(' ', 'timeline-toggle'); await sleep(150);
+  await checkStableLayout(desktopLayout, 'desktop closing leaves stats, controls and graph bounds unchanged');
+  await key('Enter', 'timeline-toggle');
+  await key('Tab', 'timeline-toggle');
+  await check(`document.getElementById('timeline').contains(document.activeElement)`,
+    'Tab from the open docked toggle enters the tray controls');
   await check(`(() => { const gl = document.querySelector('#graph canvas').getContext('webgl2');
     const info = gl.getExtension('WEBGL_debug_renderer_info');
     return !!info && !/swiftshader|llvmpipe|software/i.test(gl.getParameter(info.UNMASKED_RENDERER_WEBGL)); })()`, 'packaged viewer uses hardware WebGL 2');
@@ -106,19 +154,26 @@ try {
   await screenshot('packaged-desktop');
 
   await call('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
+  await evaluate(`localStorage.removeItem(${dockKey})`);
   await reload();
   await check(`document.getElementById('timeline-content').hidden &&
     document.getElementById('timeline-compact').textContent === 'Latest' &&
     document.getElementById('timeline-toggle').getAttribute('aria-label') === 'Show timeline' &&
-    localStorage.getItem(${dockKey}) === null`, '390px defaults to a docked pill without persisting the default');
+    localStorage.getItem(${dockKey}) === null`, '390px starts closed without persisting the default');
+  await checkDockedToggle('390px toggle is a matching control inside the navigation panel');
+  await screenshot('packaged-mobile-closed');
+  const mobileLayout = await bottomLayout();
   await key('Enter', 'timeline-toggle');
-  await wait(`!document.getElementById('timeline-content').hidden`);
+  await wait(`!document.getElementById('timeline-content').hidden`); await sleep(150);
+  await checkStableLayout(mobileLayout, '390px opening leaves stats, controls and graph bounds unchanged');
+  await checkBottomControls('390px stats and wrapped navigation targets do not overlap');
+  await screenshot('packaged-mobile-open');
   await key('Home'); await key('ArrowRight');
   await evaluate(`globalThis.packagedCutoff = document.getElementById('timeline-playhead').value;
     globalThis.packagedReadout = document.getElementById('timeline-readout').textContent;
-    globalThis.packagedHeight = parseFloat(document.querySelector('main').style.getPropertyValue('--timeline-height'));
     document.getElementById('timeline-toggle').click();`);
-  await wait(`parseFloat(document.querySelector('main').style.getPropertyValue('--timeline-height')) < packagedHeight`);
+  await wait(`document.getElementById('timeline').hidden`); await sleep(150);
+  await checkStableLayout(mobileLayout, '390px closing leaves stats, controls and graph bounds unchanged');
   await check(`document.getElementById('timeline-playhead').value === packagedCutoff &&
     document.getElementById('timeline-readout').textContent === packagedReadout && document.getElementById('group').disabled &&
     document.getElementById('timeline-compact').textContent.startsWith('Snapshot:') &&
@@ -126,12 +181,12 @@ try {
     document.getElementById('timeline-toggle').getAttribute('aria-controls') === 'timeline-content'`, 'packaged docking preserves history, exposes the compact date and rescues playhead focus');
   await key('Escape', 'timeline-toggle');
   await check(`document.getElementById('timeline-compact').textContent === 'Latest' &&
-    document.getElementById('timeline-content').hidden && document.activeElement.id === 'timeline-toggle'`, 'Escape on the docked toggle restores Latest and keeps the pill docked');
+    document.getElementById('timeline-content').hidden && document.activeElement.id === 'timeline-toggle'`, 'Escape on the docked toggle restores Latest and keeps the tray closed');
   await reload();
   await check(`document.getElementById('timeline-content').hidden`, 'docked choice survives a mobile reload');
   await call('Emulation.setDeviceMetricsOverride', { width: 1440, height: 1000, deviceScaleFactor: 1, mobile: false });
   await reload();
-  await check(`document.getElementById('timeline-content').hidden`, 'saved docked choice overrides the desktop default');
+  await check(`document.getElementById('timeline-content').hidden`, 'saved closed choice survives a desktop reload');
   await key(' ', 'timeline-toggle'); await reload();
   await check(`!document.getElementById('timeline-content').hidden`, 'expanded choice survives a desktop reload');
   await call('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
@@ -262,7 +317,7 @@ try {
     await check(`(() => { const tray = document.getElementById('timeline').getBoundingClientRect();
       return document.documentElement.scrollWidth <= innerWidth && ['.map-toolbar','.map-footer'].every(selector => {
         const rect = document.querySelector(selector).getBoundingClientRect();
-        return rect.bottom <= tray.top && rect.left >= 0 && rect.right <= innerWidth && rect.top >= 0;
+        return rect.top >= tray.bottom && rect.left >= 0 && rect.right <= innerWidth && rect.top >= 0;
       }) && tray.bottom <= innerHeight; })()`, `tray and navigation remain reachable at ${width}×${height}`);
     await evaluate(`t.setPosition(t.timeline.bins.length - 1); t.showInfo(t.selection.visibleIndices[0],false)`); await sleep(150);
     await check(`(() => { const main=document.querySelector('main').getBoundingClientRect(),
@@ -281,29 +336,20 @@ try {
       return rect.width === 42 && rect.height === 42 && svg.width === 20 && svg.height === 20 &&
         toggle.querySelector('path').getAttribute('d') === 'M4 7h1.5M10.5 7H20M4 17h9.5M18.5 17H20';
     })()`, `updated map settings icon stays intact at ${width}×${height}`);
-    await evaluate(`globalThis.dockBefore = { position:t.position, snapshot:t.snapshot(), calls:{...calls},
-      height:parseFloat(document.querySelector('main').style.getPropertyValue('--timeline-height')),
-      footer:document.querySelector('.map-footer').getBoundingClientRect().bottom,
-      toolbar:document.querySelector('.map-toolbar').getBoundingClientRect().bottom,
-      details:document.getElementById('details').getBoundingClientRect() };
+    await checkDockedToggle(`toggle stays inside the navigation panel at ${width}×${height}`);
+    await checkBottomControls(`stats and navigation targets stay separate at ${width}×${height}`);
+    const beforeDock = await bottomLayout();
+    await evaluate(`globalThis.dockBefore = { position:t.position, snapshot:t.snapshot(), calls:{...calls} };
       document.getElementById('timeline-playhead').focus(); document.getElementById('timeline-toggle').click();`);
     await sleep(150);
-    await check(`(() => { const tray=document.getElementById('timeline').getBoundingClientRect(),
-      reserved=parseFloat(document.querySelector('main').style.getPropertyValue('--timeline-height')),
-      reclaimed=dockBefore.height-reserved, card=document.getElementById('details').getBoundingClientRect();
-      return reclaimed>60 && reserved===Math.ceil(tray.height+parseFloat(getComputedStyle(document.getElementById('timeline')).bottom)+8) &&
-        Math.abs(document.querySelector('.map-footer').getBoundingClientRect().bottom-dockBefore.footer-reclaimed)<1 &&
-        Math.abs(document.querySelector('.map-toolbar').getBoundingClientRect().bottom-dockBefore.toolbar-reclaimed)<1 &&
-        tray.width<innerWidth-16 && tray.left>=0 && tray.right<=innerWidth && tray.bottom<=innerHeight &&
-        card.height>=dockBefore.details.height && card.bottom<=tray.top &&
-        (innerWidth>760 || Math.abs(card.bottom-dockBefore.details.bottom-reclaimed)<1);
-    })()`, `docking reclaims measured space for navigation and details at ${width}×${height}`);
+    await checkStableLayout(beforeDock, `closing preserves stats, navigation and selected graph bounds at ${width}×${height}`);
+    await check(`document.getElementById('timeline').hidden`, `closing removes the entire tray at ${width}×${height}`);
     await check(`(() => { const obstacles=['#timeline','.map-toolbar','.map-footer'].map(selector=>document.querySelector(selector).getBoundingClientRect());
       return [...document.querySelectorAll('.map-label')].filter(label=>getComputedStyle(label).visibility==='visible').every(label=> {
         const rect=label.getBoundingClientRect(); return obstacles.every(obstacle=>rect.bottom<=obstacle.top ||
           rect.top>=obstacle.bottom || rect.right<=obstacle.left || rect.left>=obstacle.right);
       });
-    })()`, `labels avoid the docked pill and repositioned navigation at ${width}×${height}`);
+    })()`, `labels avoid the docked controls at ${width}×${height}`);
     await check(`t.position===dockBefore.position && t.historical && !t.graph.isSimulationRunning &&
       JSON.stringify(t.snapshot().visible)===JSON.stringify(dockBefore.snapshot.visible) &&
       JSON.stringify(t.snapshot().positions)===JSON.stringify(dockBefore.snapshot.positions) &&
@@ -315,8 +361,8 @@ try {
       document.activeElement.getBoundingClientRect().height>0`, `Tab skips hidden timeline controls at ${width}×${height}`);
     await key('Enter', 'timeline-toggle'); await sleep(150);
     await check(`!document.getElementById('timeline-content').hidden && t.position===dockBefore.position &&
-      parseFloat(document.querySelector('main').style.getPropertyValue('--timeline-height'))===dockBefore.height &&
       document.activeElement.id==='timeline-toggle'`, `keyboard undocking restores layout and keeps focus at ${width}×${height}`);
+    await checkStableLayout(beforeDock, `opening preserves stats, navigation and selected graph bounds at ${width}×${height}`);
     await screenshot(`width-${width}`);
     await evaluate(`t.showInfo(undefined,false)`);
   }
@@ -350,7 +396,7 @@ try {
     await evaluate(`globalThis.togglePose=t.snapshot(); globalThis.togglePosition=t.position`);
     const toggle = await evaluate(`(() => { const r=document.getElementById('timeline-toggle').getBoundingClientRect();
       return { x:r.left+r.width/2, y:r.top+r.height/2, width:r.width, height:r.height }; })()`);
-    assert.equal(toggle.width, 44); assert.equal(toggle.height, 44);
+    assert.ok(toggle.width >= 44); assert.equal(toggle.height, 44);
     await call('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x:toggle.x, y:toggle.y }] });
     await sleep(60);
     await call('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
@@ -453,6 +499,14 @@ try {
   for (const [width, height] of [[1440,1000], [390,844]]) {
     await call('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor:1, mobile:width<761 });
     await sleep(200);
+    // Match the longer status line from the live library without needing its export.
+    await evaluate(`document.getElementById('status').textContent='5148 albums · 32970 links · 173 sound communities'`);
+    await sleep(150);
+    await checkBottomControls(`live-length stats remain clear of navigation with bookmarks at ${width}px`);
+    const bookmarkLayout = await bottomLayout();
+    await evaluate(`document.getElementById('timeline-breakdown').open=true`); await sleep(150);
+    await checkStableLayout(bookmarkLayout, `expanded bookmark breakdown preserves stats, navigation and graph bounds at ${width}px`);
+    await evaluate(`document.getElementById('timeline-breakdown').open=false`); await sleep(150);
     await evaluate(`t.setPosition(null); t.graph.pause(); globalThis.bookmarkPose=t.snapshot();
       globalThis.importIndex=t.timeline.bookmarks.findIndex(b=>b.id==='beets-library-import');
       document.querySelectorAll('.timeline-bookmark')[importIndex].focus();`);
@@ -496,12 +550,16 @@ try {
       `bookmark Escape restores Latest and dismisses the tooltip at ${width}px`);
     await evaluate(`document.querySelectorAll('.timeline-bookmark')[0].focus()`);
     await key(' ', 'timeline-toggle');
+    await sleep(150);
+    await checkStableLayout(bookmarkLayout, `closing bookmarks preserves stats, navigation and graph bounds at ${width}px`);
     await check(`document.getElementById('timeline-content').hidden && document.getElementById('timeline-bookmark-label').hidden`,
       `docking hides bookmark controls and labels at ${width}px`);
     await key('Tab', 'timeline-toggle');
     await check(`!document.getElementById('timeline-bookmarks').contains(document.activeElement)`,
       `Tab skips docked bookmarks at ${width}px`);
     await key('Enter', 'timeline-toggle');
+    await sleep(150);
+    await checkStableLayout(bookmarkLayout, `opening bookmarks preserves stats, navigation and graph bounds at ${width}px`);
   }
 
   await call('Emulation.setDeviceMetricsOverride', { width:1440, height:1000, deviceScaleFactor:1, mobile:false });

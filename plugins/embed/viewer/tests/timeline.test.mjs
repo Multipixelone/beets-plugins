@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { parseAdded, buildTimeline, timelineCutoff, timelineMembership, applyTimeline,
   timelineStacks, timelinePositionForKey, TIMELINE_DOCK_KEY, readTimelineDockPreference,
-  saveTimelineDockPreference, timelineDocked, timelineReservedHeight } from '../timeline.mjs';
+  saveTimelineDockPreference, timelineDocked } from '../timeline.mjs';
 import { selectionState } from '../sound.mjs';
 import { FilterPositions, edgeStyles } from '../visibility.mjs';
 
@@ -113,35 +113,30 @@ test('keyboard positions distinguish final dated bin, before-first and Latest', 
   assert.equal(timelinePositionForKey('Home', null, 0), undefined);
 });
 
-test('docking defaults follow mobile widths until an explicit preference is stored', () => {
+test('docking defaults closed on every viewport until an explicit preference is stored', () => {
   const values = new Map();
   const storage = { getItem: key => values.get(key) ?? null, setItem: (key, value) => values.set(key, value) };
   assert.equal(readTimelineDockPreference(storage), null);
-  assert.equal(timelineDocked(readTimelineDockPreference(storage), true), true);
-  assert.equal(timelineDocked(readTimelineDockPreference(storage), false), false);
+  assert.equal(timelineDocked(readTimelineDockPreference(storage)), true);
+  assert.equal(values.size, 0, 'reading the default does not save a choice');
   for (const choice of [false, true]) {
     saveTimelineDockPreference(storage, choice);
     assert.equal(values.get(TIMELINE_DOCK_KEY), String(choice));
-    // Reading anew represents reloading the viewer at either viewport width.
-    for (const narrow of [true, false]) assert.equal(timelineDocked(readTimelineDockPreference(storage), narrow), choice);
+    // Reading anew represents reloading the viewer.
+    assert.equal(timelineDocked(readTimelineDockPreference(storage)), choice);
   }
 });
 
-test('invalid or unavailable preference storage preserves responsive defaults and session choices', () => {
+test('invalid or unavailable preference storage preserves closed defaults and session choices', () => {
   for (const value of [null, '', 'TRUE', '0', 'null', '{}']) {
-    assert.equal(readTimelineDockPreference({ getItem: () => value }), null);
+    const preference = readTimelineDockPreference({ getItem: () => value });
+    assert.equal(preference, null);
+    assert.equal(timelineDocked(preference), true);
   }
   const blocked = { getItem() { throw new Error('blocked'); }, setItem() { throw new Error('quota'); } };
   for (const storage of [undefined, blocked]) {
-    assert.equal(readTimelineDockPreference(storage), null);
+    assert.equal(timelineDocked(readTimelineDockPreference(storage)), true);
     assert.doesNotThrow(() => saveTimelineDockPreference(storage, false));
-    assert.equal(timelineDocked(false, true), false, 'failed storage does not override the session choice');
+    assert.equal(timelineDocked(false), false, 'failed storage does not override the session choice');
   }
-});
-
-test('reserved height follows the actual tray size, bottom safe area and hidden state', () => {
-  assert.equal(timelineReservedHeight(false, 184.25, 8), 201);
-  assert.equal(timelineReservedHeight(false, 50, 8), 66);
-  assert.equal(timelineReservedHeight(false, 50, 34), 92);
-  assert.equal(timelineReservedHeight(true, 184.25, 34), 0);
 });

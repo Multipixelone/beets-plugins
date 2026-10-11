@@ -46,6 +46,7 @@ export class TimelineBookmarks {
       path.setAttribute('d', GLYPHS[glyph]); svg.append(path); marker.append(svg);
       const show = () => {
         this.tooltip.textContent = bookmarkLabel(bookmark); this.tooltip.hidden = false;
+        this.positionLabel();
       };
       marker.addEventListener('pointerenter', show);
       marker.addEventListener('pointerleave', () => {
@@ -65,6 +66,15 @@ export class TimelineBookmarks {
       }
       this.track.append(marker); this.buttons.push({ marker, range });
     }
+  }
+
+  positionLabel() {
+    if (this.tooltip.hidden) return;
+    const tray = this.root.closest('#timeline').getBoundingClientRect();
+    const view = this.root.ownerDocument.defaultView;
+    this.tooltip.style.left = `${tray.left + 12}px`;
+    this.tooltip.style.right = `${view.innerWidth - tray.right + 12}px`;
+    this.tooltip.style.bottom = `${view.innerHeight - tray.top + 4}px`;
   }
 
   hideLabel() { this.tooltip.hidden = true; this.tooltip.textContent = ''; }
@@ -94,6 +104,7 @@ export class TimelineBookmarks {
       }
     });
     const focused = this.buttons.find(({ marker }) => marker === this.root.ownerDocument.activeElement)?.marker;
+    this.positionLabel();
     focused?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
   }
 }

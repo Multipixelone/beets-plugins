@@ -12,13 +12,12 @@ import { VibeGraph } from './cosmos-vibe.mjs';
 import { GatherPositions, gatherRings } from './gather.mjs';
 import { renderLibraryStats, appendAlbumMetadata, appendAlbumTitle, appendAlbumSubline } from './library-stats.mjs';
 import { buildTimeline, timelineCutoff, timelineMembership, applyTimeline, timelineStacks, timelinePositionForKey,
-  readTimelineDockPreference, saveTimelineDockPreference, timelineDocked, timelineReservedHeight,
+  readTimelineDockPreference, saveTimelineDockPreference, timelineDocked,
   timelinePositionForDate, bookmarkLabel } from './timeline.mjs';
 import { TimelineBookmarks } from './timeline-bookmarks.mjs';
 
 const $ = id => document.getElementById(id);
 const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-const timelineMobile = window.matchMedia('(max-width: 760px)');
 function timelineStorage() {
   try { return window.localStorage; } catch { return undefined; }
 }
@@ -67,11 +66,12 @@ function resetTimeline() {
   timelineSegments = []; timelinePartition = undefined; timelineCommunities = [];
   timelineColors.clear(); timelineNames.clear(); viewRevision++;
   $('group').disabled = false; $('pause').disabled = false;
-  $('timeline').hidden = true; $('timeline-breakdown').open = false;
+  if ($('timeline').contains(document.activeElement)) $('timeline-toggle').focus({ preventScroll: true });
+  $('timeline').hidden = true; $('timeline-dock').hidden = true; $('timeline-breakdown').open = false;
   $('timeline-announcement').textContent = '';
   timelineBookmarks.reset();
   for (const id of ['library-count', 'matches']) $(id).setAttribute('aria-live', 'polite');
-  document.querySelector('main').style.setProperty('--timeline-height', '0px');
+  measureTimeline();
 }
 function normalizeTimelineGather() {
   cancelAnimationFrame(gatherFrame); gatherFrame = undefined;
@@ -157,7 +157,8 @@ function announceTimeline(immediate = false, bookmark) {
 function updateTimelineReadout() {
   if (!timeline) return;
   const count = timeline.total, bins = timeline.bins;
-  $('timeline').hidden = false;
+  $('timeline-dock').hidden = false;
+  $('timeline').hidden = timelineDocked(timelineDockPreference);
   $('timeline-empty').hidden = !!bins.length; $('timeline-controls').hidden = !bins.length;
   $('timeline-latest').disabled = !graphReady || !bins.length;
   $('timeline-latest').setAttribute('aria-pressed', String(timelinePosition === null));
@@ -168,6 +169,7 @@ function updateTimelineReadout() {
   $('timeline-scope').textContent = `Of the ${count.toLocaleString()} albums in this export · ${timeline.undated.toLocaleString()} undated · Current metadata and similarities`;
   $('timeline-compact').textContent = timelinePosition === null || !bins.length ? 'Latest' : timelinePosition < 0 ?
     `Snapshot: Before ${utcMonth.format(bins[0].start)}` : `Snapshot: ${utcDate.format(timelineCutoff(timeline, timelinePosition) - 1)}`;
+  $('timeline-toggle').title = `${$('timeline-toggle').getAttribute('aria-label')} · ${$('timeline-compact').textContent}`;
   if (!bins.length) return;
   const cutoff = timelineCutoff(timeline, timelinePosition);
   const snapshot = timelinePosition === null ? count : timelinePosition < 0 ? 0 : bins[timelinePosition].cumulative;
@@ -1246,13 +1248,16 @@ $('timeline-playhead').addEventListener('keydown', event => {
   if (position === undefined) return;
   event.preventDefault(); event.stopPropagation(); setTimelinePosition(position); announceTimeline(true);
 });
-$('timeline').addEventListener('keydown', event => {
+function timelineEscape(event) {
   if (event.key !== 'Escape') return;
   timelineBookmarks.hideLabel();
   event.preventDefault(); event.stopPropagation(); setTimelinePosition(null); announceTimeline(true);
-});
+}
+$('timeline').addEventListener('keydown', timelineEscape);
+$('timeline-toggle').addEventListener('keydown', timelineEscape);
 for (const type of ['pointerdown', 'pointermove', 'pointerup', 'click', 'wheel', 'touchstart', 'touchmove', 'touchend']) {
-  $('timeline').addEventListener(type, event => event.stopPropagation(), { passive: true });
+  for (const element of [$('timeline'), $('timeline-toggle')])
+    element.addEventListener(type, event => event.stopPropagation(), { passive: true });
 }
 function histogramPosition(event) {
   const { left, width } = $('timeline-histogram').getBoundingClientRect();
@@ -1280,31 +1285,35 @@ $('timeline-histogram').addEventListener('pointercancel', event => {
 });
 function measureTimeline() {
   const tray = $('timeline'), main = document.querySelector('main');
-  main.style.setProperty('--timeline-height', `${timelineReservedHeight(tray.hidden,
-    tray.getBoundingClientRect().height, parseFloat(getComputedStyle(tray).bottom))}px`);
+  const bottom = main.getBoundingClientRect().bottom;
+  const navigation = document.querySelector('.map-bottom').getBoundingClientRect();
+  const offset = Math.ceil(bottom - navigation.top + 8);
+  main.style.setProperty('--bottom-chrome-offset', `${offset}px`);
+  const clearance = tray.hidden ? offset : Math.ceil(bottom - tray.getBoundingClientRect().top + 8);
+  main.style.setProperty('--timeline-clearance', `${clearance}px`);
   drawTimeline(); scheduleLabels();
   timelineBookmarks.layout();
 }
 function updateTimelineDocking() {
-  const docked = timelineDocked(timelineDockPreference, timelineMobile.matches);
+  const docked = timelineDocked(timelineDockPreference);
   const content = $('timeline-content'), toggle = $('timeline-toggle');
-  if (docked && content.contains(document.activeElement)) toggle.focus({ preventScroll: true });
-  content.hidden = docked; $('timeline-compact').hidden = !docked;
+  if (docked && $('timeline').contains(document.activeElement)) toggle.focus({ preventScroll: true });
+  content.hidden = docked; $('timeline').hidden = !timeline || docked;
   if (docked) timelineBookmarks.hideLabel();
-  $('timeline').classList.toggle('docked', docked);
   toggle.setAttribute('aria-expanded', String(!docked));
   const label = docked ? 'Show timeline' : 'Hide timeline';
-  toggle.setAttribute('aria-label', label); toggle.title = label;
+  toggle.setAttribute('aria-label', label); toggle.title = `${label} · ${$('timeline-compact').textContent}`;
   measureTimeline();
 }
 $('timeline-toggle').addEventListener('click', () => {
-  timelineDockPreference = !timelineDocked(timelineDockPreference, timelineMobile.matches);
+  timelineDockPreference = !timelineDocked(timelineDockPreference);
   saveTimelineDockPreference(timelineStorage(), timelineDockPreference);
   updateTimelineDocking();
 });
-timelineMobile.addEventListener('change', () => { if (timelineDockPreference === null) updateTimelineDocking(); });
 updateTimelineDocking();
-new ResizeObserver(measureTimeline).observe($('timeline'));
+const timelineResize = new ResizeObserver(measureTimeline);
+for (const element of [$('timeline'), document.querySelector('.map-bottom'), document.querySelector('main')])
+  timelineResize.observe(element);
 $('clear').addEventListener('click', () => { showInfo(undefined); $('search').focus({ preventScroll: true }); });
 $('surprise').addEventListener('click', () => {
   if (selection.matches.length) focusAlbum(selection.matches[Math.floor(Math.random() * selection.matches.length)]);
