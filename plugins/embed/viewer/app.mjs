@@ -176,7 +176,7 @@ function updateTimelineReadout() {
   const cutoff = timelineCutoff(timeline, timelinePosition);
   const snapshot = timelinePosition === null ? count : timelinePosition < 0 ? 0 : bins[timelinePosition].cumulative;
   const date = timelinePosition === null ? 'Latest' : timelinePosition < 0 ?
-    `No albums yet — before ${utcDate.format(cutoff)} UTC${timeline.first === null ? '' : `; first addition ${utcMonth.format(timeline.first)}`}` : `Through ${utcDate.format(cutoff - 1)} UTC`;
+    `No albums yet — before ${utcDate.format(cutoff)} UTC${timeline.first === null ? '' : `; first album ${utcMonth.format(timeline.first)}`}` : `Through ${utcDate.format(cutoff - 1)} UTC`;
   const readout = `${date} · Snapshot ${snapshot.toLocaleString()} / ${count.toLocaleString()} · Shown on map ${selection.visibleIndices.length.toLocaleString()} / ${count.toLocaleString()}`;
   const changed = $('timeline-readout').textContent !== readout;
   $('timeline-readout').textContent = readout; playhead.setAttribute('aria-valuetext', readout);
@@ -185,9 +185,9 @@ function updateTimelineReadout() {
   const index = timelinePosition === null ? bins.length - 1 : timelinePosition;
   const bin = bins[index];
   $('timeline-bin-summary').textContent = bin ?
-    `${utcDate.format(bin.start)}–${utcDate.format(bin.end - 1)} UTC: ${bin.count.toLocaleString()} additions` : 'Before the first interval: 0 additions';
+    `${utcDate.format(bin.start)}–${utcDate.format(bin.end - 1)} UTC: ${bin.count.toLocaleString()} albums` : 'Before the first interval: 0 albums';
   $('timeline-bin-groups').textContent = bin ? timelineSegments[index]?.map(segment =>
-    `${timelineNames.get(segment.name) ?? segment.name}: ${segment.count.toLocaleString()}`).join('; ') || 'No additions in this interval.' : 'No additions yet.';
+    `${timelineNames.get(segment.name) ?? segment.name}: ${segment.count.toLocaleString()}`).join('; ') || 'No albums in this interval.' : 'No albums yet.';
   drawTimeline();
   if (changed) announceTimeline();
 }

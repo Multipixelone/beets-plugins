@@ -32,6 +32,17 @@ export function parseBookmarkDate(value) {
     parseAdded(`${value}T00:00:00Z`) : NaN;
 }
 
+// The export already chooses the earlier of first scrobble and library addition.
+// Keep legacy added timestamps intact, including their time of day.
+export function albumTimelineDate(album) {
+  const first = parseBookmarkDate(album.first_played);
+  if (Number.isFinite(first)) {
+    const source = ['lastfm', 'added'].includes(album.first_played_source) ? album.first_played_source : null;
+    return { date: first, source };
+  }
+  return { date: parseAdded(album.added), source: 'added' };
+}
+
 export function normalizeBookmarks(value) {
   if (!Array.isArray(value)) return [];
   const ids = new Set(), bookmarks = [];
@@ -58,7 +69,7 @@ export function bookmarkLabel(bookmark) {
 }
 
 export function buildTimeline(albums, bookmarks) {
-  const dates = Float64Array.from(albums, album => parseAdded(album.added));
+  const dates = Float64Array.from(albums, album => albumTimelineDate(album).date);
   let first = Infinity, last = -Infinity, undated = 0;
   for (const date of dates) {
     if (!Number.isFinite(date)) undated++;

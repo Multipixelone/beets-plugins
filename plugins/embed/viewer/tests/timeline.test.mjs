@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { parseAdded, buildTimeline, timelineCutoff, timelineMembership, applyTimeline,
+import { parseAdded, albumTimelineDate, buildTimeline, timelineCutoff, timelineMembership, applyTimeline,
   timelineStacks, timelinePositionForKey, TIMELINE_DOCK_KEY, readTimelineDockPreference,
   saveTimelineDockPreference, timelineDocked } from '../timeline.mjs';
 import { selectionState } from '../sound.mjs';
@@ -8,6 +8,48 @@ import { FilterPositions, edgeStyles } from '../visibility.mjs';
 
 const album = added => ({ added, album: 'Album', albumartist: 'Artist' });
 const at = value => Date.parse(value);
+test('first-play calendar dates take precedence regardless of source or added timestamp', () => {
+  for (const source of ['lastfm', 'added', null, undefined, 'unknown']) {
+    const value = { first_played: '2024-02-29', first_played_source: source, added: '2026-10-09T00:01:00Z' };
+    assert.equal(albumTimelineDate(value).date, at('2024-02-29T00:00:00Z'));
+    assert.equal(albumTimelineDate(value).source, ['lastfm', 'added'].includes(source) ? source : null);
+  }
+  assert.equal(albumTimelineDate({ first_played: '2024-02-29' }).date, at('2024-02-29T00:00:00Z'));
+  assert.equal(albumTimelineDate({ first_played: '2024-02-29', added: 'invalid' }).date, at('2024-02-29T00:00:00Z'));
+  assert.equal(albumTimelineDate({ first_played: '2024-02-29', added: '2020-01-01T00:00:00Z' }).date,
+    at('2024-02-29T00:00:00Z'), 'the viewer trusts the export rather than recalculating its minimum');
+});
+test('missing or invalid first-play dates fall back to strict legacy added timestamps', () => {
+  const added = '2024-02-29T12:30:59.123456Z';
+  for (const first_played of [undefined, null, '', 2024, 'invalid', '2023-02-29', '2024-02-30',
+    '2024-13-01', '2024-00-01', '2024-01-00', '2024-2-29', ' 2024-02-29', '2024-02-29T00:00:00Z']) {
+    assert.deepEqual(albumTimelineDate({ added, first_played, first_played_source: 'lastfm' }),
+      { date: parseAdded(added), source: 'added' });
+    assert.ok(Number.isNaN(albumTimelineDate({ first_played }).date));
+  }
+  const legacy = ['2024-01-01T00:00:00Z', added, null].map(album);
+  const withMissingFirst = legacy.map(value => ({ ...value, first_played: null, first_played_source: null }));
+  assert.deepEqual(buildTimeline(withMissingFirst), buildTimeline(legacy));
+  assert.deepEqual([...buildTimeline(legacy).dates], legacy.map(value => parseAdded(value.added)));
+});
+test('first-play placement and snapshots use the same effective date', () => {
+  const model = buildTimeline([
+    { first_played: '2024-02-28', first_played_source: 'lastfm', added: '2026-10-09T00:01:00Z' },
+    { first_played: '2024-02-29', first_played_source: 'added', added: '2024-02-29T12:00:00Z' },
+    { first_played: '2023-02-29', added: '2024-03-01T23:59:59Z' },
+    { first_played: '2024-02-29', added: null },
+    { first_played: null, added: null }
+  ]);
+  assert.equal(model.unit, 'day');
+  assert.deepEqual([...model.albumBins], [0, 1, 2, 1, -1]);
+  assert.deepEqual(model.bins.map(bin => bin.count), [1, 2, 1]);
+  assert.deepEqual(model.bins.map(bin => bin.cumulative), [1, 3, 4]);
+  assert.deepEqual(timelineMembership(model.dates, timelineCutoff(model, -1)).eligible, [false, false, false, false, false]);
+  assert.deepEqual(timelineMembership(model.dates, timelineCutoff(model, 0)).eligible, [true, false, false, false, false]);
+  assert.deepEqual(timelineMembership(model.dates, timelineCutoff(model, 1)).eligible, [true, true, false, true, false]);
+  assert.equal(timelineMembership(model.dates, timelineCutoff(model, 2)).count, 4);
+  assert.equal(timelineMembership(model.dates).count, 5);
+});
 test('strict UTC parsing accepts fractions and leap days without rolling invalid calendars', () => {
   for (const value of ['2024-02-29T12:30:59Z', '2024-02-29T12:30:59.1Z',
     '2024-02-29T12:30:59.123456Z', '0099-01-01T00:00:00Z']) assert.equal(parseAdded(value), at(value));

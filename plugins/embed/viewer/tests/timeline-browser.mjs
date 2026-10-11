@@ -445,7 +445,7 @@ try {
   await evaluate(`document.getElementById('timeline-toggle').click()`);
   await evaluate(`announcementObserver.disconnect(); t.setPosition(null); t.clearPhrase();
     globalThis.originalExport = structuredClone(t.data); globalThis.legacyExport = structuredClone(t.data);
-    legacyExport.albums.forEach(album => delete album.added);
+    legacyExport.albums.forEach(album => { delete album.added; delete album.first_played; delete album.first_played_source; });
     document.getElementById('timeline-playhead').value=0;
     document.getElementById('timeline-playhead').dispatchEvent(new Event('input', {bubbles:true}));
     t.load(legacyExport, 'Legacy fixture');`);
@@ -459,6 +459,36 @@ try {
   await check(`t.position === null && t.timeline.bins.length > 0 && !t.historical`, 'dated reload rebuilds bins and resets pending state');
   await check(`document.getElementById('timeline-content').hidden`, 'loading a new export preserves the docking choice');
   await evaluate(`document.getElementById('timeline-toggle').click()`);
+  const firstPlayFixture = JSON.parse(await readFile(new URL('./fixtures/timeline-first-played.json', import.meta.url), 'utf8'));
+  await evaluate(`t.load(${JSON.stringify(firstPlayFixture)}, 'First-play fixture')`);
+  await wait(`!document.getElementById('search').disabled && !document.getElementById('timeline-playhead').disabled`);
+  await check(`t.timeline.dates[0]===Date.parse('2021-01-21T00:00:00Z') &&
+    t.timeline.dates[1]===Date.parse('2024-02-29T00:00:00Z') &&
+    t.timeline.dates[2]===Date.parse(t.data.albums[2].added) &&
+    t.timeline.dates[3]===Date.parse('2023-09-06T00:00:00Z') &&
+    Number.isNaN(t.timeline.dates[4]) && Number.isNaN(t.timeline.dates[5])`,
+    'first-play fixture places albums by valid first-play dates and falls back to added');
+  for (const [index, text] of [[0, 'First heard 2021-01-21 (last.fm)'], [1, 'Added 2024-02-29'],
+    [2, 'Added 2025-07-14'], [3, 'First heard 2023-09-06']]) {
+    await evaluate(`t.showInfo(${index}, false)`);
+    await check(`document.querySelector('#info .album-footer').textContent.includes(${JSON.stringify(text)}) &&
+      [...document.querySelectorAll('#info .fact-label')].filter(label=>['Added','First heard'].includes(label.textContent)).length===1`,
+      `details show one effective date with its source for album ${index}`);
+  }
+  await evaluate(`t.showInfo(0,false); t.setPosition(t.timeline.albumBins[0])`);
+  await check(`t.selection.visibleIndices.length===1 && t.selection.visibleIndices[0]===0 &&
+    !document.getElementById('details').hidden && document.getElementById('timeline-readout').textContent.includes('Snapshot 1 / 6')`,
+    'snapshot includes a first-heard album before its added date');
+  await evaluate(`t.setPosition(-1)`);
+  await check(`!t.selection.visibleIndices.length && document.getElementById('details').hidden`,
+    'before-first snapshot hides the selected first-heard album');
+  await evaluate(`t.setPosition(t.timeline.albumBins[1])`);
+  await check(`JSON.stringify(t.selection.visibleIndices)==='[0,1,3]'`,
+    'snapshot through the first-play interval excludes future added fallback and undated albums');
+  await evaluate(`t.setPosition(null); t.load(originalExport,'Legacy added-date fixture')`);
+  await wait(`!document.getElementById('search').disabled && !document.getElementById('timeline-playhead').disabled`);
+  await check(`t.timeline.dates.every((date,index)=>Number.isFinite(date) ? date===Date.parse(t.data.albums[index].added) :
+    !t.data.albums[index].added)`, 'exports without first-play fields retain legacy added timestamps');
   await evaluate(`globalThis.lensExport=structuredClone(t.data);
     lensExport.labels.push({id:'timeline:test',label:'Timeline test lens',source:'essentia',kind:'probability',min:0,max:1,
       scores:btoa(lensExport.albums.map((_,i)=>String.fromCharCode(i%2?1:255)).join(''))});
@@ -573,7 +603,7 @@ try {
       'empty or malformed bookmarks restore the exact original tray height and clear old controls');
   }
   await evaluate(`globalThis.bookmarkOnlyExport=structuredClone(originalExport);
-    bookmarkOnlyExport.albums.forEach(album=>delete album.added);
+    bookmarkOnlyExport.albums.forEach(album=>{ delete album.added; delete album.first_played; delete album.first_played_source; });
     bookmarkOnlyExport.bookmarks=${JSON.stringify(bookmarkFixture.bookmarks)};
     t.load(bookmarkOnlyExport,'Events with undated albums');`);
   await wait(`!document.getElementById('search').disabled && !document.getElementById('timeline-playhead').disabled && t.timeline.bookmarks.length===11`);

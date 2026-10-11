@@ -426,13 +426,13 @@
             </div>
           </div>
         </div>
-        <section id="timeline" hidden aria-label="Added to library">
+        <section id="timeline" hidden aria-label="Library timeline">
           <div class="timeline-heading">
-            <strong>Added to library</strong><span>Sound communities</span>
+            <strong>Library timeline</strong><span>Sound communities</span>
           </div>
           <div id="timeline-content" hidden>
             <button id="timeline-latest" type="button">Latest</button>
-            <p id="timeline-empty" hidden>No albums in this export have an added date.</p>
+            <p id="timeline-empty" hidden>No albums in this export have a first-play or added date.</p>
             <div id="timeline-controls">
               <div id="timeline-bookmarks" hidden>
                 <span class="sr-only">Life-event bookmarks. Activate an event to select its starting interval.</span>
@@ -446,12 +446,12 @@
               <div class="timeline-axis"><span id="timeline-first"></span><span id="timeline-last"></span></div>
               <p id="timeline-readout"></p>
               <details id="timeline-breakdown">
-                <summary id="timeline-bin-summary">Selected interval additions</summary>
+                <summary id="timeline-bin-summary">Albums in selected interval</summary>
                 <p id="timeline-bin-groups"></p>
               </details>
             </div>
             <p id="timeline-scope"></p>
-            <p id="timeline-help" class="sr-only">Left and Right move one interval. Home selects before the first addition.
+            <p id="timeline-help" class="sr-only">Left and Right move one interval. Home selects before the first album.
               End selects the final dated interval. Escape returns to Latest. Dates are UTC;
               snapshots use current metadata and similarities.</p>
           </div>

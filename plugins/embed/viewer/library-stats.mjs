@@ -1,4 +1,6 @@
 // Optional export metadata: presentation only, independent of map filtering.
+import { albumTimelineDate } from './timeline.mjs';
+
 const count = value => Number.isInteger(value) && value >= 0;
 const quantity = value => Number.isFinite(value) && value >= 0;
 const text = value => typeof value === 'string' && value.trim() ? value.trim() : null;
@@ -81,10 +83,11 @@ export function albumQuality(album) {
   return parts.length ? parts.join(' · ') : null;
 }
 
-const addedDate = value => {
-  if (!text(value)) return null;
-  const date = new Date(value);
-  return Number.isFinite(date.getTime()) ? date.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric', timeZone: 'UTC' }) : null;
+const timelineFact = album => {
+  const { date, source } = albumTimelineDate(album);
+  if (!Number.isFinite(date)) return null;
+  return { label: source === 'added' ? 'Added' : 'First heard',
+    value: new Date(date).toISOString().slice(0, 10) + (source === 'lastfm' ? ' (last.fm)' : '') };
 };
 const releaseInfo = album => album.release && typeof album.release === 'object' ? album.release : {};
 const originalYear = (release, year) =>
@@ -99,8 +102,8 @@ export function releaseHref(album) {
 export function albumMetadata(album) {
   const rows = [], quality = albumQuality(album);
   if (quality) rows.push({ label: 'Quality', value: quality });
-  const added = addedDate(album.added);
-  if (added) rows.push({ label: 'Added', value: added });
+  const heard = timelineFact(album);
+  if (heard) rows.push(heard);
   const size = formatBytes(album.size_bytes);
   if (size) rows.push({ label: 'Size', value: size });
   const release = releaseInfo(album);
@@ -198,8 +201,8 @@ export function appendAlbumMetadata(container, album) {
   if (text(release.country)) facts.push(['Country', text(release.country)]);
   const original = originalYear(release, album.year);
   if (original) facts.push(['Original year', original]);
-  const added = addedDate(album.added);
-  if (added) facts.push(['Added', added]);
+  const heard = timelineFact(album);
+  if (heard) facts.push([heard.label, heard.value]);
   if (playback.length || audio.length) {
     const groups = doc.createElement('div'); groups.className = 'album-facts';
     for (const values of [playback, audio]) {

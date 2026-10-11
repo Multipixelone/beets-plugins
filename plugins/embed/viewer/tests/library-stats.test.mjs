@@ -87,7 +87,7 @@ test('album rows format dates in UTC, suppress repeated years and link safe rele
   const rows = albumMetadata(fixture.albums[0]);
   assert.deepEqual(rows.slice(0, 3), [
     { label: 'Quality', value: 'FLAC · 24-bit / 96 kHz' },
-    { label: 'Added', value: 'Oct 9, 2026' },
+    { label: 'Added', value: '2026-10-09' },
     { label: 'Size', value: '1.3 GB' }
   ]);
   assert.ok(rows.some(row => row.label === 'Original year' && row.value === '1998'));
@@ -98,7 +98,7 @@ test('album rows format dates in UTC, suppress repeated years and link safe rele
   assert.deepEqual(albumMetadata({ added: 'invalid', release: { mb_albumid: 'javascript:alert(1)' } }), []);
   assert.deepEqual(albumMetadata({ release: { mb_albumid: '../private' } }), []);
   const boundary = albumMetadata({ added: '2026-10-09T00:01:00Z', size_bytes: 0 });
-  assert.equal(boundary[0].value, 'Oct 9, 2026');
+  assert.equal(boundary[0].value, '2026-10-09');
   assert.equal(boundary[1].value, '0 B');
 });
 
@@ -118,6 +118,32 @@ const doc = {
   createElement: tagName => new Element(tagName, doc),
   createElementNS: (namespaceURI, tagName) => Object.assign(new Element(tagName, doc), { namespaceURI }),
 };
+
+test('details use the effective timeline date and label its source without duplicating Added', () => {
+  for (const [fields, expected] of [
+    [{ first_played: '2021-01-21', first_played_source: 'lastfm' }, ['First heard', '2021-01-21 (last.fm)']],
+    [{ first_played: '2023-09-06', first_played_source: 'added' }, ['Added', '2023-09-06']],
+    [{ first_played: '2024-02-29', first_played_source: null }, ['First heard', '2024-02-29']],
+    [{ first_played: '2024-02-29' }, ['First heard', '2024-02-29']],
+    [{ first_played: '2024-02-29', first_played_source: '<img src=x>' }, ['First heard', '2024-02-29']],
+    [{ first_played: '2023-02-29', first_played_source: 'lastfm' }, ['Added', '2026-10-09']],
+    [{ first_played: '<img src=x>', first_played_source: 'lastfm' }, ['Added', '2026-10-09']],
+    [{ first_played: null }, ['Added', '2026-10-09']],
+    [{}, ['Added', '2026-10-09']],
+    [{ added: null, first_played: '2024-02-29', first_played_source: 'lastfm' }, ['First heard', '2024-02-29 (last.fm)']],
+    [{ added: null, first_played: null }, null],
+    [{ added: '2023-02-29T00:00:00Z', first_played: 'invalid' }, null]
+  ]) {
+    const album = { added: '2026-10-09T00:01:00Z', ...fields };
+    const rows = albumMetadata(album);
+    assert.deepEqual(rows, expected ? [{ label: expected[0], value: expected[1] }] : []);
+    const container = doc.createElement('div');
+    appendAlbumMetadata(container, album);
+    const footer = container.querySelector('.album-footer');
+    assert.equal(footer?.textContent ?? '', expected ? expected.join(' ') : '');
+    assert.equal(footer?.children.length ?? 0, expected ? 1 : 0);
+  }
+});
 
 test('statistics rendering preserves its heading and expanded state while clearing legacy totals', () => {
   const container = doc.createElement('details'), summary = doc.createElement('summary'), content = doc.createElement('div');
@@ -167,7 +193,7 @@ test('album metadata keeps inline fact groups and footer pairs complete without 
   assert.deepEqual(facts.children[1].children.map(child => child.textContent), ['FLAC', '24-bit / 96 kHz', '1.3 GB']);
   assert.ok(footer.textContent.includes('<img src=x onerror=alert(1)>'));
   assert.deepEqual(footer.children.map(pair => pair.querySelector('.fact-label').textContent), ['Label', 'Country', 'Original year', 'Added']);
-  assert.deepEqual(footer.children.map(pair => pair.querySelector('.fact-value').textContent), ['<img src=x onerror=alert(1)>', 'GB', '1998', 'Oct 9, 2026']);
+  assert.deepEqual(footer.children.map(pair => pair.querySelector('.fact-value').textContent), ['<img src=x onerror=alert(1)>', 'GB', '1998', '2026-10-09']);
   const flat = element => [element, ...element.children.filter(child => child instanceof Element).flatMap(flat)];
   assert.ok(!container.children.flatMap(flat).some(child => child.tagName === 'img'));
 });
@@ -185,7 +211,7 @@ test('album facts omit empty groups and keep Added in the footer', () => {
     const groups = container.querySelector('.album-facts');
     assert.deepEqual(groups?.children.map(group => group.children.map(fact => fact.textContent)) ?? [], expected);
     const footer = container.querySelector('.album-footer');
-    assert.deepEqual(footer.children.map(pair => [pair.querySelector('.fact-label').textContent, pair.querySelector('.fact-value').textContent]), [['Added', 'Nov 6, 2023']]);
+    assert.deepEqual(footer.children.map(pair => [pair.querySelector('.fact-label').textContent, pair.querySelector('.fact-value').textContent]), [['Added', '2023-11-06']]);
   }
 });
 
