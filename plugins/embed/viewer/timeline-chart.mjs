@@ -17,6 +17,12 @@ export function timelineTicks(model, geometry, viewportWidth) {
       ticks.push({ time: bin.start, label: label(bin.start), edge: '' }); previous = x;
     }
   }
+  if (ticks.length === 1 && model.bins.length > 1 && geometry.plot.width >= 180) {
+    const middle = (geometry.plot.left + geometry.plot.right) / 2;
+    const bin = model.bins.slice(1).reduce((nearest, candidate) =>
+      Math.abs(geometry.xForTime(candidate.start) - middle) < Math.abs(geometry.xForTime(nearest.start) - middle) ? candidate : nearest);
+    ticks.push({ time: bin.start, label: label(bin.start), edge: '' });
+  }
   ticks.push({ time: endpoints[1], label: label(endpoints[1]), edge: 'last' });
   return ticks;
 }

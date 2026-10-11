@@ -8,13 +8,16 @@ await build({ entryPoints: { app: 'app.mjs', worker: 'worker.mjs' }, outdir: 'di
   format: 'esm', platform: 'browser', target: 'es2022', minify: true, legalComments: 'eof',
   plugins: [cosmosAtlasPlugin] });
 await copyFile('style.css', 'dist/style.css');
+await copyFile('timeline-bookmarks.css', 'dist/timeline-bookmarks.css');
 await copyFile('static/favicon.ico', 'dist/favicon.ico');
 await copyFile('static/social-card.png', 'dist/social-card.png');
 // Version all viewer assets together so a cached script cannot outlive its UI.
-const assets = await Promise.all(['app.js', 'worker.js', 'style.css'].map(name => readFile(`dist/${name}`)));
+const assets = await Promise.all(['app.js', 'worker.js', 'style.css', 'timeline-bookmarks.css'].map(name => readFile(`dist/${name}`)));
 const version = createHash('sha256');
 for (const asset of assets) version.update(asset);
 const suffix = `?v=${version.digest('hex').slice(0, 16)}`;
+await writeFile('dist/style.css', (await readFile('style.css', 'utf8'))
+  .replace('./timeline-bookmarks.css', `./timeline-bookmarks.css${suffix}`));
 const html = (await readFile('index.html', 'utf8'))
   .replace('href="style.css"', `href="style.css${suffix}"`)
   .replace('src="app.js"', `src="app.js${suffix}"`);

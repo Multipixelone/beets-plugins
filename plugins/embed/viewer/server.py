@@ -18,7 +18,7 @@ from text_query import QueryError, TextQuery
 
 COVER_PATH = re.compile(r"/covers/cover-[0-9a-f]{64}\.jpg\Z")
 
-ASSETS = {"/", "/index.html", "/app.js", "/worker.js", "/style.css", "/THIRD_PARTY_LICENSES.txt",
+ASSETS = {"/", "/index.html", "/app.js", "/worker.js", "/style.css", "/timeline-bookmarks.css", "/THIRD_PARTY_LICENSES.txt",
           "/favicon.ico", "/social-card.png"}
 
 

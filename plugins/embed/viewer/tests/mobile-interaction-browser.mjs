@@ -99,13 +99,15 @@ export async function mobileInteractionChecks({ call, evaluate, check, wait, sle
   await pinch('.timeline-heading strong', 'open timeline tray');
 
   // First finger already owns a custom scrub capture when the second arrives.
-  const histogram = await center('#timeline-histogram');
-  await touch('touchStart', [[histogram[0] - 8, histogram[1]]]);
-  await touch('touchStart', [[histogram[0] - 8, histogram[1]], [histogram[0] + 8, histogram[1]]]);
+  const scrubber = await center('#timeline-playhead');
+  await touch('touchStart', [[scrubber[0] - 8, scrubber[1]]]);
+  await touch('touchStart', [[scrubber[0] - 8, scrubber[1]], [scrubber[0] + 8, scrubber[1]]]);
   const cutoff = await evaluate(`t.position`);
-  await touch('touchMove', [[histogram[0] - 20, histogram[1]], [histogram[0] + 20, histogram[1]]]);
+  await touch('touchMove', [[scrubber[0] - 20, scrubber[1]], [scrubber[0] + 20, scrubber[1]]]);
   await touch('touchEnd', []);
   assert.equal(await evaluate(`t.position`), cutoff, 'pinch takeover cancels pending timeline scrub updates');
+  await check(`Number(document.getElementById('timeline-playhead').value)===(t.cutoff??t.timeline.bins.at(-1).end)`,
+    'pinch takeover restores the scrubber value to the completed cutoff');
 
   await evaluate(`t.setPosition(null); t.showInfo(undefined,false);
     if(!document.getElementById('timeline-content').hidden) document.getElementById('timeline-toggle').click();
@@ -120,10 +122,10 @@ export async function mobileInteractionChecks({ call, evaluate, check, wait, sle
 
   // Make panel content overflow without changing product layout or fixtures.
   // Real single-finger scrolling must remain native and leave the camera alone.
-  for (const [selector, parent] of [['#details', '#info'], ['.timeline-bookmark-scroll', '.timeline-bookmark-track']]) {
+  for (const [selector, parent] of [['#details', '#info'], ['#timeline-content', '#timeline-controls']]) {
     if (selector.includes('timeline')) {
       await evaluate(`if(document.getElementById('timeline-content').hidden) document.getElementById('timeline-toggle').click();
-        document.getElementById('timeline-bookmarks').hidden=false;`);
+        document.getElementById('timeline-content').scrollTop=0;`);
     }
     await evaluate(`(() => { const filler=document.createElement('div'); filler.id='gesture-scroll-fixture';
       filler.style.height='800px'; document.querySelector(${JSON.stringify(parent)}).append(filler);
@@ -165,8 +167,16 @@ export async function mobileInteractionChecks({ call, evaluate, check, wait, sle
   await touch('touchEnd', []);
   await check(`t.graph.getZoomLevel()>handoffZoom && t.graph.getPointPositions().slice(0,2).every((v,i)=>v===handoffNode[i])`,
     'second finger immediately hands album dragging to graph pinch');
-  // Empty corner avoids node picking and tests ordinary graph pan and double tap.
-  const corner = await evaluate(`(() => { const r=t.graph.canvas.getBoundingClientRect();return [r.left+10,r.top+10];})()`);
+  // Verify the background target instead of assuming a corner is unoccupied.
+  // Large-cover fixtures can put an album there after the preceding pinch.
+  await evaluate(`t.graph.fitView(0,.12,false)`); await sleep(150);
+  const corner = await evaluate(`(() => { const g=t.graph, r=g.canvas.getBoundingClientRect();
+    for (const y of [10,r.height*.2,r.height*.4]) for (const x of [10,r.width*.25,r.width*.75,r.width-60]) {
+      if(document.elementFromPoint(r.left+x,r.top+y)!==g.canvas) continue;
+      g.updateMousePosition({offsetX:x,offsetY:y}); g.findHoveredItem(true);
+      if(!g.store.hoveredPoint) return [r.left+x,r.top+y];
+    }
+    throw new Error('No uncovered graph background target for pan acceptance'); })()`);
   await evaluate(`globalThis.panBefore=t.snapshot()`);
   await touch('touchStart', [corner]); await touch('touchMove', [[corner[0] + 40, corner[1] + 25]]); await touch('touchEnd', []);
   await check(`t.graph.getZoomLevel()===panBefore.zoom && JSON.stringify(t.snapshot().camera)!==JSON.stringify(panBefore.camera)`, 'one-finger background drag pans the graph');

@@ -428,34 +428,65 @@
         </div>
         <section id="timeline" hidden aria-label="Library timeline">
           <div class="timeline-heading">
-            <strong>Library timeline</strong><span>Sound communities</span>
+            <strong>Library history</strong>
+            <button id="timeline-latest" type="button">Latest</button>
           </div>
           <div id="timeline-content" hidden>
-            <button id="timeline-latest" type="button">Latest</button>
             <p id="timeline-empty" hidden>No albums in this export have a first-play or added date.</p>
             <div id="timeline-controls">
-              <div id="timeline-bookmarks" hidden>
-                <span class="sr-only">Life-event bookmarks. Activate an event to select its starting interval.</span>
-                <p id="timeline-bookmark-label" role="tooltip" hidden></p>
-                <div class="timeline-bookmark-scroll"><div class="timeline-bookmark-track"></div></div>
+              <div class="timeline-chart-caption">
+                <strong id="timeline-measure">Albums by month</strong><span id="timeline-peak"></span>
               </div>
-              <canvas id="timeline-histogram" height="56" aria-hidden="true"></canvas>
-              <label class="sr-only" for="timeline-playhead">Library snapshot date</label>
-              <input id="timeline-playhead" type="range" min="-1" max="0" step="1" value="0"
-                aria-describedby="timeline-readout timeline-bin-summary timeline-help" />
-              <div class="timeline-axis"><span id="timeline-first"></span><span id="timeline-last"></span></div>
+              <div class="timeline-chart-layout">
+                <div id="timeline-y-axis" aria-label="Albums count axis"></div>
+                <div id="timeline-stage" tabindex="-1">
+                  <div id="timeline-stage-content">
+                    <div id="timeline-bookmarks" hidden>
+                      <span class="sr-only">Important dates. Activate an event to select the snapshot through its start day.</span>
+                    </div>
+                    <canvas id="timeline-histogram" height="120" role="group" tabindex="0"
+                      aria-label="Albums by month" aria-describedby="timeline-bin-summary timeline-inspection-help"></canvas>
+                    <div id="timeline-selection" aria-hidden="true" hidden></div>
+                    <div id="timeline-axis" class="timeline-axis" aria-label="UTC calendar axis"></div>
+                    <div class="timeline-scrubber">
+                      <label class="sr-only" for="timeline-playhead">Library snapshot date</label>
+                      <input id="timeline-playhead" type="range" min="0" max="1" step="any" value="1"
+                        aria-describedby="timeline-readout timeline-help" />
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <p class="timeline-legend-heading">Global top five · across dated history</p>
+              <ul id="timeline-legend" aria-label="Global top five sound communities and combined other communities"></ul>
               <p id="timeline-readout"></p>
-              <details id="timeline-breakdown">
-                <summary id="timeline-bin-summary">Albums in selected interval</summary>
-                <p id="timeline-bin-groups"></p>
-              </details>
+              <div class="timeline-period-summary">
+                <p id="timeline-bin-summary" aria-live="polite" aria-atomic="true">Albums in selected period</p>
+                <p class="timeline-local-heading">Local top three · within this period</p>
+                <ul id="timeline-bin-groups"></ul>
+                <p id="timeline-remaining"></p>
+                <details id="timeline-breakdown">
+                  <summary>Full period community breakdown</summary>
+                  <div class="timeline-table-scroll">
+                    <table><caption class="sr-only">All sound communities within the inspected period</caption>
+                      <thead><tr><th scope="col">Sound community</th><th scope="col">Albums</th><th scope="col">Share</th></tr></thead>
+                      <tbody id="timeline-community-table"></tbody>
+                    </table>
+                  </div>
+                </details>
+              </div>
             </div>
+            <p id="timeline-date-source">Dates prefer exported first-play history, falling back to the library's added timestamp. UTC.</p>
             <p id="timeline-scope"></p>
             <p id="timeline-help" class="sr-only">Left and Right move one interval. Home selects before the first album.
               End selects the final dated interval. Escape returns to Latest. Dates are UTC;
               snapshots use current metadata and similarities.</p>
+            <p id="timeline-inspection-help" class="sr-only">Left and Right inspect a period without changing the map.
+              Enter selects its cumulative snapshot. Swipe the chart to scroll; drag the snapshot handle to change history.</p>
           </div>
         </section>
+        <div id="timeline-tooltip-layer">
+          <p id="timeline-period-tooltip" role="tooltip" hidden></p>
+        </div>
         <p id="timeline-announcement" class="sr-only" role="status" aria-live="polite" aria-atomic="true"></p>
       </main>
     </div>
