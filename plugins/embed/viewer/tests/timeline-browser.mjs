@@ -511,9 +511,9 @@ try {
     'exports without bookmarks retain an empty hidden bookmark strip');
   await evaluate(`globalThis.noBookmarkHeight=document.getElementById('timeline').getBoundingClientRect().height;
     t.load({...structuredClone(originalExport), ...${JSON.stringify(bookmarkFixture)}}, 'Life-event fixture');`);
-  await wait(`!document.getElementById('search').disabled && !document.getElementById('timeline-playhead').disabled && t.timeline.bookmarks.length===11`);
+  await wait(`!document.getElementById('search').disabled && !document.getElementById('timeline-playhead').disabled && t.timeline.bookmarks.length===12`);
   await sleep(150);
-  await check(`document.querySelectorAll('.timeline-bookmark').length===11 &&
+  await check(`document.querySelectorAll('.timeline-bookmark').length===12 &&
     document.querySelectorAll('.timeline-bookmark-range').length===2 &&
     document.querySelectorAll('.timeline-bookmark.approximate').length===6`,
     'valid fixture events, ranges and approximate precisions render while malformed entries are ignored');
@@ -534,6 +534,14 @@ try {
     await evaluate(`document.getElementById('status').textContent='5148 albums · 32970 links · 173 sound communities'`);
     await sleep(150);
     await checkBottomControls(`live-length stats remain clear of navigation with bookmarks at ${width}px`);
+    await check(`(() => {
+      const markers=[...document.querySelectorAll('.timeline-bookmark')];
+      const friend=markers[t.timeline.bookmarks.findIndex(bookmark=>bookmark.category==='friend')];
+      const relationship=markers[t.timeline.bookmarks.findIndex(bookmark=>bookmark.category==='relationship')];
+      return friend && relationship && friend.getAttribute('aria-label').includes('Met a new friend') &&
+        friend.querySelector('path').getAttribute('d')!==relationship.querySelector('path').getAttribute('d') &&
+        friend.style.getPropertyValue('--bookmark-color')==='var(--community-green)';
+    })()`, `friend bookmark has a distinct non-romantic SVG in the existing palette at ${width}px`);
     const bookmarkLayout = await bottomLayout();
     await evaluate(`document.getElementById('timeline-breakdown').open=true`); await sleep(150);
     await checkStableLayout(bookmarkLayout, `expanded bookmark breakdown preserves stats, navigation and graph bounds at ${width}px`);
@@ -606,7 +614,7 @@ try {
     bookmarkOnlyExport.albums.forEach(album=>{ delete album.added; delete album.first_played; delete album.first_played_source; });
     bookmarkOnlyExport.bookmarks=${JSON.stringify(bookmarkFixture.bookmarks)};
     t.load(bookmarkOnlyExport,'Events with undated albums');`);
-  await wait(`!document.getElementById('search').disabled && !document.getElementById('timeline-playhead').disabled && t.timeline.bookmarks.length===11`);
+  await wait(`!document.getElementById('search').disabled && !document.getElementById('timeline-playhead').disabled && t.timeline.bookmarks.length===12`);
   await evaluate(`document.querySelectorAll('.timeline-bookmark')[0].focus()`);
   await key('Enter', null);
   await check(`t.timeline.maxCount===0 && t.selection.visibleIndices.length===0 &&

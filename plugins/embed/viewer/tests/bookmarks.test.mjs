@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs';
 import { BOOKMARK_CATEGORIES, parseBookmarkDate, normalizeBookmarks, bookmarkLabel, bookmarkLayout,
   buildTimeline, timelinePositionForDate, timelineCutoff, timelineMembership } from '../timeline.mjs';
 import { validateExport } from '../logic.mjs';
+import { TimelineBookmarks } from '../timeline-bookmarks.mjs';
 
 const fixture = JSON.parse(readFileSync(new URL('./fixtures/timeline-bookmarks.json', import.meta.url)));
 const library = JSON.parse(readFileSync(new URL('./fixtures/library-stats.json', import.meta.url)));
@@ -54,9 +55,36 @@ test('all supplied categories and precisions are accepted and labelled without f
   }
 });
 
+test('friend bookmarks render a people glyph distinct from the relationship heart', () => {
+  const makeElement = () => ({ children: [], attributes: new Map(),
+    classList: { toggle() {} }, style: { setProperty() {} }, addEventListener() {},
+    setAttribute(name, value) { this.attributes.set(name, value); },
+    append(...children) { this.children.push(...children); },
+    replaceChildren() { this.children = []; } });
+  const track = makeElement(), tooltip = { id: 'bookmark-tooltip' };
+  const root = { ownerDocument: { createElement: makeElement, createElementNS: makeElement },
+    querySelector: selector => selector === '.timeline-bookmark-track' ? track : tooltip };
+  const model = buildTimeline([], [
+    { ...event, id: 'friend', category: 'friend' },
+    { ...event, id: 'relationship', category: 'relationship' },
+    { ...event, id: 'unknown', category: 'unknown' }
+  ]);
+  assert.deepEqual(model.bookmarks.map(bookmark => bookmark.category), ['friend', 'relationship']);
+  assert.deepEqual(BOOKMARK_CATEGORIES.friend, ['people', 'green']);
+  new TimelineBookmarks(root, () => {}).reset(model);
+  const [friend, relationship] = track.children;
+  assert.equal(root.hidden, false);
+  assert.match(friend.attributes.get('aria-label'), /friend/);
+  const friendPath = friend.children[0].children[0].attributes.get('d');
+  const heartPath = relationship.children[0].children[0].attributes.get('d');
+  assert.ok(friendPath && heartPath);
+  assert.notEqual(friendPath, heartPath);
+  assert.equal(friend.children[0].attributes.get('viewBox'), '0 0 24 24');
+});
+
 test('events extend the domain while only album additions determine counts and snapshot membership', () => {
   const model = buildTimeline(library.albums, fixture.bookmarks);
-  assert.equal(model.bookmarks.length, 11);
+  assert.equal(model.bookmarks.length, 12);
   assert.equal(model.bins[0].start, Date.parse('2023-09-01T00:00:00Z'));
   assert.ok(model.bins.at(-1).end > Date.parse('2027-01-01T00:00:00Z'));
   assert.equal(model.bins.reduce((sum, bin) => sum + bin.count, 0), library.albums.filter(a => a.added).length);
@@ -83,7 +111,7 @@ test('overlapping events are staggered with reachable hit areas at desktop and m
   const model = buildTimeline(library.albums, fixture.bookmarks);
   for (const width of [1440, 390, 320]) {
     const { markers, height } = bookmarkLayout(model, width);
-    assert.equal(markers.length, 11); assert.equal(height % 44, 0);
+    assert.equal(markers.length, 12); assert.equal(height % 44, 0);
     assert.ok(markers.every(m => m.left >= 0 && m.left + 44 <= width && m.position >= 0));
     for (const [index, marker] of markers.entries()) {
       const right = Math.max(marker.left + 44, marker.rangeLeft + (marker.bookmark.end === null ? 0 : marker.rangeWidth));

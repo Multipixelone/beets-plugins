@@ -10,6 +10,7 @@
     { "id": "job", "date": "2027-01-01", "end_date": null, "precision": "year", "title": "A new job", "category": "job" },
     { "id": "health", "date": "2025-07-14", "end_date": null, "precision": "approximate", "title": "Feeling better", "category": "health" },
     { "id": "relationship", "date": "2025-07-14", "end_date": null, "precision": "day", "title": "Met someone", "category": "relationship" },
+    { "id": "friend", "date": "2025-07-14", "end_date": null, "precision": "day", "title": "Met a new friend", "category": "friend" },
     { "id": "show", "date": "2025-07-15", "end_date": null, "precision": "day", "title": "Opening night", "category": "show" },
     null,
     { "id": "invalid-date", "date": "2023-02-29", "end_date": null, "precision": "day", "title": "Invalid calendar", "category": "other" },

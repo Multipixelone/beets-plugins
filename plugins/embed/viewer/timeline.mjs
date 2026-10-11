@@ -22,7 +22,7 @@ export function parseAdded(value) {
 export const BOOKMARK_CATEGORIES = {
   move: ['house', 'blue'], school: ['book', 'yellow'], job: ['case', 'orange'],
   show: ['stage', 'purple'], concert: ['ticket', 'red'], travel: ['compass', 'aqua'],
-  health: ['cross', 'green'], relationship: ['heart', 'purple'], music: ['note', 'aqua'],
+  health: ['cross', 'green'], relationship: ['heart', 'purple'], friend: ['people', 'green'], music: ['note', 'aqua'],
   milestone: ['flag', 'yellow'], other: ['circle', 'blue']
 };
 const PRECISIONS = new Set(['day', 'month', 'season', 'year', 'approximate']);
