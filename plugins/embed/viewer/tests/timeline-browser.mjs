@@ -12,6 +12,7 @@ import { fileURLToPath } from 'node:url';
 import { build } from 'esbuild';
 import { cosmosAtlasPlugin } from '../cosmos-atlas-patch.mjs';
 import { TIMELINE_DOCK_KEY } from '../timeline.mjs';
+import { mobileInteractionChecks } from './mobile-interaction-browser.mjs';
 
 const url = process.env.TIMELINE_BROWSER_URL;
 const cdp = process.env.TIMELINE_CDP_URL;
@@ -581,6 +582,9 @@ try {
   await check(`t.timeline.maxCount===0 && t.selection.visibleIndices.length===0 &&
     document.getElementById('timeline-readout').textContent.includes('Snapshot 0 /')`,
     'bookmark-only dates render safely and historical snapshots exclude undated albums');
+  await evaluate(`t.load(originalExport, 'Mobile gesture fixture')`);
+  await wait(`!document.getElementById('search').disabled && !document.getElementById('timeline-playhead').disabled`);
+  await mobileInteractionChecks({ call, evaluate, check, wait, sleep });
   assert.deepEqual(exceptions, [], 'no browser exceptions or console errors');
   console.log(JSON.stringify({ result: 'PASS', checks }, null, 2));
 } finally {

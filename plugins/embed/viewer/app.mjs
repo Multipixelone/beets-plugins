@@ -15,6 +15,7 @@ import { buildTimeline, timelineCutoff, timelineMembership, applyTimeline, timel
   readTimelineDockPreference, saveTimelineDockPreference, timelineDocked,
   timelinePositionForDate, bookmarkLabel } from './timeline.mjs';
 import { TimelineBookmarks } from './timeline-bookmarks.mjs';
+import { graphTouchCamera, TouchNavigation } from './interaction.mjs';
 
 const $ = id => document.getElementById(id);
 const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -36,6 +37,7 @@ const theme = {
 let graph, worker, data, clusters = [], edges = [], selected, paused = false;
 let coverLoader, coverTimer, atlasTimer, visibleCovers = [], atlasEntries = [], coverActive = false;
 let dragging = false, zooming = false, graphReady = false;
+let touchCamera;
 let simulationAlpha = 1;
 let coverLimits, coverDpr = 1, overviewController, coverTiers = new Map();
 let labelFrame, labelGroups = [], labelDefinitions = [], trackedKey, hovered;
@@ -988,6 +990,7 @@ async function load(exported, name, label = name) {
   if (!webgl2Supported) { showWebGLError(); return; }
   try {
     validateExport(exported);
+    touchNavigation.reset(); touchCamera = undefined;
     resetTimeline();
     phraseSearch.set(''); $('phrase').value = ''; $('phrase-results').replaceChildren();
     generation++; revision = 0; clearTimeout(edgeTimer);
@@ -1097,6 +1100,7 @@ async function load(exported, name, label = name) {
     const currentGeneration = generation;
     await graph.ready;
     if (generation !== currentGeneration) return;
+    touchCamera = graphTouchCamera(graph, () => { initialFitPending = false; hover(undefined); });
     vibeGraph = new VibeGraph(graph);
     const gl = $('graph').querySelector('canvas').getContext('webgl2');
     const constrained = constrainedCovers({ width: window.innerWidth,
@@ -1344,6 +1348,13 @@ document.addEventListener('keydown', event => {
     if (document.body.classList.contains('settings-open')) { setSettingsOpen(false); $('settings-toggle').focus(); }
     else if (!$('search-results').hidden) { $('search').focus(); $('search-results').hidden = true; }
     else if (selected !== undefined) { showInfo(undefined); $('search').focus({ preventScroll: true }); }
+  }
+});
+const touchNavigation = new TouchNavigation(document.body, {
+  camera: () => graphReady ? touchCamera : undefined,
+  isGraph: target => !!target.closest('#graph'),
+  onTakeover: () => {
+    cancelAnimationFrame(timelineFrame); timelineFrame = undefined; timelinePending = undefined;
   }
 });
 for (const event of ['pointerdown', 'wheel', 'touchstart']) $('graph').addEventListener(event, () => { initialFitPending = false; }, { passive: true });

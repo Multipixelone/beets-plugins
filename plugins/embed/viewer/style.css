@@ -51,6 +51,10 @@
 }
 * { box-sizing: border-box; }
 body { margin: 0; height: 100dvh; overflow: hidden; display: flex; flex-direction: column; }
+/* Allow native panel scrolling, but reserve pinch gestures for the graph.
+   manipulation would also permit browser pinch zoom. Do not use none here. */
+body, .topbar, aside, #details, #search-results, #timeline, .map-bottom, .map-toolbar { touch-action: pan-x pan-y; }
+#graph canvas { touch-action: none; }
 .library-primary, .library-secondary { margin: 0 0 10px; overflow-wrap: anywhere; }
 .library-primary { font-size: 12px; font-variant-numeric: tabular-nums; }
 .library-secondary { color: var(--muted); font-size: 11px; line-height: 1.7; }
@@ -77,6 +81,7 @@ svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width:
 .search-wrap { position: relative; width: min(380px, 100%); }
 .search-label { position: absolute; left: 14px; top: 12px; color: var(--muted); line-height: 0; }
 input[type=search] { width: 100%; height: 44px; padding: 10px 14px 10px 44px; border: 1px solid var(--control-border); background: var(--panel); border-radius: var(--radius); color: var(--ink); font-size: 13px; }
+@media (pointer: coarse) { input[type=search] { font-size: 16px; } }
 input::placeholder { color: var(--muted); }
 #settings-toggle { display: none; align-items: center; gap: 7px; }
 .workspace { display: flex; flex: 1; min-height: 0; position: relative; }
@@ -107,7 +112,7 @@ output { float: right; color: var(--accent); font-variant-numeric: tabular-nums;
 .sidebar-footer a { color: var(--muted); font-size: 10px; text-decoration: none; }.sidebar-footer a:hover { text-decoration: underline; }
 main { flex: 1; min-width: 0; position: relative; overflow: hidden; isolation: isolate; }
 main { --bottom-chrome-offset: 64px; --timeline-clearance: 64px; }
-#timeline { position: absolute; left: 12px; right: 12px; bottom: var(--bottom-chrome-offset); z-index: 3; display: flex; flex-direction: column; max-height: min(50%, calc(100% - var(--bottom-chrome-offset) - 64px)); padding: 8px 12px; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--card-shadow); touch-action: pan-y; font-size: 10px; }
+#timeline { position: absolute; left: 12px; right: 12px; bottom: var(--bottom-chrome-offset); z-index: 3; display: flex; flex-direction: column; max-height: min(50%, calc(100% - var(--bottom-chrome-offset) - 64px)); padding: 8px 12px; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--card-shadow); touch-action: pan-x pan-y; font-size: 10px; }
 .timeline-heading { display: flex; align-items: center; gap: 12px; padding-right: 84px; min-height: 44px; flex-shrink: 0; }
 .timeline-heading strong { font-size: 12px; font-weight: 550; }
 .timeline-heading > span { color: var(--muted); }
