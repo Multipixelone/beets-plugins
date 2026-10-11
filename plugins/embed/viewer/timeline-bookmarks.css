@@ -1,0 +1,19 @@
+.ag-bookmark-rail { position: relative; flex: none; overflow: visible; }
+.ag-bookmark-lines { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; overflow: visible; }
+.ag-bookmark-leader, .ag-bookmark-span, .ag-bookmark-bracket { fill: none; stroke: var(--bookmark-color, var(--muted)); stroke-width: 1; opacity: .7; }
+.ag-bookmark-approximate { stroke-dasharray: 3 2; }
+.ag-bookmark-anchor { fill: var(--bookmark-color, var(--muted)); stroke: var(--bookmark-color, var(--muted)); stroke-width: 1; }
+.ag-bookmark-anchor.ag-bookmark-approximate { fill: var(--panel); stroke-dasharray: none; }
+.ag-bookmark-target { position: absolute; width: 44px; height: 44px; min-width: 44px; min-height: 44px; padding: 0; border: 0; border-radius: 4px; display: grid; place-items: center; color: var(--bookmark-color, var(--muted)); background: transparent; box-shadow: none; transition: none; touch-action: pan-x pan-y; }
+.ag-bookmark-badge { display: grid; place-items: center; width: 26px; height: 26px; border-radius: 4px; background: var(--panel); font: 11px var(--font-mono); }
+.ag-bookmark-badge svg { width: 16px; height: 16px; padding: 0; border: 0; border-radius: 0; }
+.ag-bookmark-target:hover { background: transparent; color: var(--bookmark-color, var(--muted)); box-shadow: none; }
+.ag-bookmark-target:hover .ag-bookmark-badge, .ag-bookmark-target:focus .ag-bookmark-badge { background: var(--paper); }
+.ag-bookmark-target[aria-current=date] .ag-bookmark-badge { background: var(--selection-bg); box-shadow: inset 0 0 0 1px var(--muted); }
+.ag-bookmark-target:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.ag-bookmark-tooltip, .ag-bookmark-list { position: fixed; z-index: 8; box-sizing: border-box; margin: 0; padding: 8px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel); color: var(--ink); box-shadow: var(--card-shadow); font-size: 11px; overflow-wrap: anywhere; overflow-y: auto; overscroll-behavior: contain; }
+.ag-bookmark-tooltip { pointer-events: none; }
+.ag-bookmark-list { width: min(360px, calc(100vw - 16px)); max-height: calc(100dvh - 16px); touch-action: pan-y; }
+.ag-bookmark-list ol { list-style: none; padding: 0; margin: 4px 0 0; }
+.ag-bookmark-list button { min-height: 44px; text-align: left; width: 100%; padding: 8px; white-space: normal; }
+.ag-bookmark-list-close { color: var(--muted); }
