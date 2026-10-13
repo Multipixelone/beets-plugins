@@ -434,54 +434,63 @@
           <div id="timeline-content" hidden>
             <p id="timeline-empty" hidden>No albums in this export have a first-play or added date.</p>
             <div id="timeline-controls">
+              <div class="timeline-explore-controls">
+                <label>Group by <select id="timeline-group"><option value="cluster">Sound community</option><option value="genre">Genre</option><option value="albumartist">Artist</option><option value="source">Date source</option></select></label>
+                <label>Interval <select id="timeline-interval"><option value="auto">Auto</option><option value="day">Day</option><option value="week">Week</option><option value="month">Month</option><option value="year">Year</option></select></label>
+                <label>Measure <select id="timeline-mode"><option value="count">Album count</option><option value="percent">Share (%)</option></select></label>
+                <div class="timeline-zoom-buttons"><button id="timeline-zoom-in" type="button" aria-label="Zoom timeline in">+</button><button id="timeline-zoom-out" type="button" aria-label="Zoom timeline out">−</button><button id="timeline-reset-zoom" type="button">All dates</button></div>
+              </div>
               <div class="timeline-chart-caption">
                 <strong id="timeline-measure">Albums by month</strong><span id="timeline-peak"></span>
               </div>
               <div class="timeline-chart-layout">
-                <div id="timeline-y-axis" aria-label="Albums count axis"></div>
                 <div id="timeline-stage" tabindex="-1">
                   <div id="timeline-stage-content">
                     <div id="timeline-bookmarks" hidden>
                       <span class="sr-only">Important dates. Activate an event to select the snapshot through its start day.</span>
                     </div>
-                    <canvas id="timeline-histogram" height="120" role="group" tabindex="0"
-                      aria-label="Albums by month" aria-describedby="timeline-bin-summary timeline-inspection-help"></canvas>
-                    <div id="timeline-selection" aria-hidden="true" hidden></div>
-                    <div id="timeline-axis" class="timeline-axis" aria-label="UTC calendar axis"></div>
-                    <div class="timeline-scrubber">
-                      <label class="sr-only" for="timeline-playhead">Library snapshot date</label>
-                      <input id="timeline-playhead" type="range" min="0" max="1" step="any" value="1"
-                        aria-describedby="timeline-readout timeline-help" />
-                    </div>
+                    <div id="timeline-histogram" role="group" tabindex="0"
+                      aria-label="Albums by month" aria-describedby="timeline-bin-summary timeline-inspection-help"></div>
                   </div>
                 </div>
               </div>
-              <p class="timeline-legend-heading">Global top five · across dated history</p>
-              <ul id="timeline-legend" aria-label="Global top five sound communities and combined other communities"></ul>
-              <p id="timeline-readout"></p>
+              <div class="timeline-range-controls">
+                <label>From <input id="timeline-from" type="date" /></label><label>Through <input id="timeline-through" type="date" /></label>
+                <button id="timeline-filter-range" type="button">Show range on map</button><button id="timeline-clear-range" type="button" hidden>Clear range filter</button>
+              </div>
+              <p id="timeline-range-readout"></p>
+              <p class="timeline-legend-heading" id="timeline-legend-heading">Top groups in this window · Select to toggle</p>
+              <ul id="timeline-legend" aria-label="Top groups in this window"></ul>
+              <button id="timeline-show-groups" type="button" hidden>Show all groups</button>
               <div class="timeline-period-summary">
                 <p id="timeline-bin-summary" aria-live="polite" aria-atomic="true">Albums in selected period</p>
                 <p class="timeline-local-heading">Local top three · within this period</p>
                 <ul id="timeline-bin-groups"></ul>
                 <p id="timeline-remaining"></p>
                 <details id="timeline-breakdown">
-                  <summary>Full period community breakdown</summary>
+                  <summary>Full period breakdown</summary>
                   <div class="timeline-table-scroll">
-                    <table><caption class="sr-only">All sound communities within the inspected period</caption>
-                      <thead><tr><th scope="col">Sound community</th><th scope="col">Albums</th><th scope="col">Share</th></tr></thead>
+                    <table><caption class="sr-only">All groups within the inspected period. Select a group to toggle it on the chart.</caption>
+                      <thead><tr><th scope="col">Group</th><th scope="col">Albums</th><th scope="col">Share</th></tr></thead>
                       <tbody id="timeline-community-table"></tbody>
                     </table>
                   </div>
                 </details>
               </div>
+              <div class="timeline-snapshot">
+                <label for="timeline-playhead">Library snapshot <span>Full history</span></label>
+                <input id="timeline-playhead" type="range" min="0" max="1" step="any" value="1"
+                  aria-describedby="timeline-readout timeline-help" />
+                <p id="timeline-readout"></p>
+              </div>
             </div>
-            <p id="timeline-date-source">Dates prefer exported first-play history, falling back to the library's added timestamp. UTC.</p>
+            <p id="timeline-date-source">First-play dates with library-added fallback · UTC. Counts are album arrivals, not repeat listens.</p>
             <p id="timeline-scope"></p>
             <p id="timeline-help" class="sr-only">Left and Right move one interval. Home selects before the first album.
               End selects the final dated interval. Escape returns to Latest. Dates are UTC;
               snapshots use current metadata and similarities.</p>
             <p id="timeline-inspection-help" class="sr-only">Left and Right inspect a period without changing the map.
-              Enter selects its cumulative snapshot. Swipe the chart to scroll; drag the snapshot handle to change history.</p>
+              Enter selects its cumulative snapshot. Wheel or pinch to zoom; drag to pan. Use the date window or zoom buttons for keyboard navigation.</p>
           </div>
         </section>
         <div id="timeline-tooltip-layer">

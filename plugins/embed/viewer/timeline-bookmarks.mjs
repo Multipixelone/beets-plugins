@@ -90,7 +90,7 @@ export function createBookmarkRail({ container, tooltipLayer, geometry, bookmark
     activeLines?.replaceChildren();
     if (active && activeLines) anchor(active.bookmark, activeLines);
     tooltip.hidden = true;
-    if (active) {
+    if (active && !openRecord) {
       tooltip.textContent = bookmarkDetails(active.bookmark);
       // Measure wrapping before selecting a free rectangle outside the target.
       tooltip.style.width = `${Math.min(320, viewport().width - 16)}px`;
@@ -122,14 +122,20 @@ export function createBookmarkRail({ container, tooltipLayer, geometry, bookmark
     if (openRecord === record) { closeList(true); return; }
     closeList(false); openRecord = record; hovered = null; list.scrollTop = 0;
     record.button.setAttribute('aria-expanded', 'true');
-    const close = element('button', 'ag-bookmark-list-close', list);
-    close.type = 'button'; close.textContent = 'Close important dates';
+    const heading = element('div', 'ag-bookmark-list-heading', list);
+    element('strong', '', heading).textContent = 'Important dates';
+    const close = element('button', 'ag-bookmark-list-close', heading);
+    close.type = 'button'; close.textContent = '×'; close.setAttribute('aria-label', 'Close important dates');
     close.addEventListener('click', () => closeList(true));
     const ordered = element('ol', '', list);
     for (const bookmark of record.item.events) {
       const row = element('li', '', ordered), button = element('button', 'ag-bookmark-entry', row);
-      button.type = 'button'; button.textContent = bookmarkDetails(bookmark);
-      button.setAttribute('aria-describedby', tooltip.id);
+      button.type = 'button'; button.setAttribute('aria-label', bookmarkDetails(bookmark));
+      element('strong', '', button).textContent = bookmark.title;
+      const dates = bookmark.end_date === null ? bookmark.date : `${bookmark.date}–${bookmark.end_date}`;
+      const precision = bookmark.precision === 'day' ? '' : bookmark.precision === 'approximate' ?
+        ' · Approximate date' : ` · Approximate ${bookmark.precision}`;
+      element('span', '', button).textContent = `${dates} UTC${precision}`;
       button.setAttribute('data-bookmark-id', bookmark.id);
       const entry = { bookmark, target: button };
       button.addEventListener('focus', () => { focused = entry; refresh(); });
@@ -149,6 +155,13 @@ export function createBookmarkRail({ container, tooltipLayer, geometry, bookmark
     lines?.remove();
     lines = svgNode('svg', { class: 'ag-bookmark-lines', width: geometry.contentWidth, height: layout.height,
       viewBox: `0 0 ${Math.max(44, geometry.contentWidth)} ${Math.max(1, layout.height)}`, 'aria-hidden': 'true' }, rail);
+    // Transparent glyphs stay legible when an upper lane's leader crosses them.
+    // Only leaders use this mask; exact date anchors and ranges remain intact.
+    const maskId = `${prefix}-leaders`, mask = svgNode('mask', { id: maskId, maskUnits: 'userSpaceOnUse',
+      x: 0, y: 0, width: Math.max(44, geometry.contentWidth), height: Math.max(1, layout.height) }, svgNode('defs', {}, lines));
+    svgNode('rect', { width: Math.max(44, geometry.contentWidth), height: Math.max(1, layout.height), fill: 'white', stroke: 'none' }, mask);
+    for (const item of layout.items) svgNode('circle', { cx: item.left + 22, cy: item.lane * 44 + 22,
+      r: 13, fill: 'black', stroke: 'none' }, mask);
     const newRecords = new Map(), drawnDates = new Set();
     for (const item of layout.items) {
       let record = records.get(item.key);
@@ -184,6 +197,7 @@ export function createBookmarkRail({ container, tooltipLayer, geometry, bookmark
       const center = item.left + 22, top = item.lane * 44 + 35, bend = (top + layout.anchorY) / 2;
       const approximate = item.events.some(event => event.precision !== 'day');
       svgNode('path', { class: `ag-bookmark-leader${approximate ? ' ag-bookmark-approximate' : ''}`,
+        mask: `url(#${maskId})`,
         d: Math.abs(center - item.x) < .01 ? `M${center} ${top}V${layout.anchorY}` :
           `M${center} ${top}V${bend}H${item.x}V${layout.anchorY}`,
         'data-elbow': String(Math.abs(center - item.x) >= .01) }, lines, item.clustered ? null : bookmark);

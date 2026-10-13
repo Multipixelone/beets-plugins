@@ -39,10 +39,14 @@ export function createAtlasDataFromImageData(images, maxTextureSize = 16384) {
       (x + image.width) / layout.side, (y + image.height) / layout.side], index * 4);
     for (let dy = -GUTTER; dy < image.height + GUTTER; dy++) {
       const sourceY = Math.max(0, Math.min(image.height - 1, dy));
-      for (let dx = -GUTTER; dx < image.width + GUTTER; dx++) {
-        const sourceX = Math.max(0, Math.min(image.width - 1, dx));
-        const source = (sourceY * image.width + sourceX) * 4;
-        atlasData.set(image.data.subarray(source, source + 4), ((y + dy) * layout.side + x + dx) * 4);
+      const source = sourceY * image.width * 4, target = ((y + dy) * layout.side + x) * 4;
+      // Copy a complete row, including the repeated top/bottom gutter rows.
+      // Per-pixel subarrays otherwise allocate millions of views per rebuild.
+      atlasData.set(image.data.subarray(source, source + image.width * 4), target);
+      for (let gutter = 1; gutter <= GUTTER; gutter++) {
+        atlasData.set(image.data.subarray(source, source + 4), target - gutter * 4);
+        const last = source + (image.width - 1) * 4;
+        atlasData.set(image.data.subarray(last, last + 4), target + (image.width + gutter - 1) * 4);
       }
     }
   });

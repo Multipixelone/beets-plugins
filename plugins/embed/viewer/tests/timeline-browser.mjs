@@ -202,10 +202,11 @@ try {
     get graph() { return graph }, get selection() { return selection }, get data() { return data },
     get timeline() { return timeline }, get cutoff() { return timelineCutoffMs },
     get position() { return timelineCutoffMs === null ? null : timeline.bins.findIndex(bin => timelineCutoffMs > bin.start && timelineCutoffMs <= bin.end) },
-    get geometry() { return timelineView.geometry }, get aggregation() { return timelineAggregation },
+    get geometry() { return timelineView.geometry }, get aggregation() { return timelineView.aggregation },
+    get displayModel() { return timelineView.model },
     get inspection() { return timelineView.summaryIndex }, get view() { return timelineView },
     get gather() { return gather }, get historical() { return historical },
-    get segments() { return timelineSegments }, get colors() { return timelineColors },
+    get segments() { return timelineView.aggregation?.stacks }, get colors() { return timelineColors },
     get groupNames() { return groupNames },
     get labels() { return labelGroups }, get selected() { return selected },
     setCutoff: setTimelineCutoff,
@@ -284,7 +285,7 @@ try {
   await input('k', '3'); await sleep(500);
   await check(`JSON.stringify(t.timeline.bins.map(b => [b.start,b.end,b.count])) === structure &&
     t.timeline.maxCount === scale && !t.graph.isSimulationRunning && calls.start === 0 && calls.pause === 1`, 'worker repartition preserves bins, heights and historical suspension');
-  await check(`t.segments.every((segments,i)=>segments.reduce((sum,s)=>sum+s.count,0)===t.timeline.bins[i].count) &&
+  await check(`t.segments.every((segments,i)=>segments.reduce((sum,s)=>sum+s.count,0)===t.displayModel.bins[i].count) &&
     t.graph.getPointColors().every((channel,i)=>i%4===3 ||
       Math.abs(channel-Number(t.colors.get(t.groupNames[Math.floor(i/4)]).match(/\\d+/g)[i%4])/255)<1e-6)`, 'repartition rebuilds every community stack and recolors histogram and graph together');
   await input('search', firstTitle);

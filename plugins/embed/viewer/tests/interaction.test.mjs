@@ -42,7 +42,8 @@ class Surface extends EventTarget {
   contains(target) { return target === this; }
 }
 function fixture() {
-  const root = new Surface(), graph = new Surface(true), overlay = new Surface();
+  const root = new Surface(), graph = new Surface(true), overlay = new Surface(), chart = new Surface();
+  chart.independent = true;
   root.ownerDocument = new EventTarget(); root.ownerDocument.defaultView = new EventTarget();
   const calls = [], camera = {
     local: point => point, limits: () => limits, transform: () => camera.value,
@@ -53,14 +54,14 @@ function fixture() {
     apply(value) { camera.value = value; calls.push('apply'); }
   };
   const navigation = new TouchNavigation(root, { camera: () => camera,
-    isGraph: target => target.graph, onTakeover: () => calls.push('takeover') });
+    isGraph: target => target.graph, isIndependent: target => target.independent, onTakeover: () => calls.push('takeover') });
   const emit = (type, props = {}) => {
     const event = new Event(type, { cancelable: true });
     for (const [key, value] of Object.entries({ pointerType: 'touch', pointerId: 1,
       clientX: 100, clientY: 100, target: graph, ...props })) Object.defineProperty(event, key, { value });
     root.dispatchEvent(event); return event;
   };
-  return { root, graph, overlay, camera, navigation, calls, emit };
+  return { root, graph, overlay, chart, camera, navigation, calls, emit };
 }
 test('graph taps select once and suppress the native compatibility click', () => {
   const f = fixture();
@@ -132,6 +133,42 @@ test('mixed graph and overlay fingers share one camera gesture in either order',
     assert.equal(f.camera.value.k, 2); f.emit('pointerup', { pointerId: 2 }); f.emit('pointerup');
     assert.ok(!f.calls.includes('tap')); f.navigation.destroy();
   }
+});
+test('independent chart pinches pass through without graph takeover, including captured pointers and native gestures', () => {
+  const f = fixture(), received = [];
+  for (const type of ['pointerdown', 'pointermove', 'pointerup', 'pointercancel', 'touchstart', 'touchmove', 'touchend',
+    'gesturestart', 'gesturechange', 'gestureend']) f.root.addEventListener(type, event => received.push(event.type));
+  const pass = (type, props = {}) => {
+    const before = received.length;
+    assert.equal(f.emit(type, { target: f.chart, ...props }).defaultPrevented, false);
+    assert.equal(received.length, before + 1, `${type} reaches the chart's gesture owner`);
+  };
+  pass('pointerdown'); pass('pointerdown', { pointerId: 2, clientX: 200 });
+  const touches = [{ target: f.chart }, { target: f.chart }];
+  pass('touchstart', { touches, changedTouches: touches });
+  pass('pointermove', { pointerId: 2, clientX: 300, target: f.root });
+  pass('touchmove', { touches, changedTouches: touches });
+  for (const type of ['gesturestart', 'gesturechange', 'gestureend']) pass(type);
+  f.emit('lostpointercapture', { pointerId: 2, target: f.root });
+  assert.equal(f.navigation.independentPointers.has(2), true);
+  pass('pointerup', { target: f.root }); pass('pointercancel', { pointerId: 2, target: f.graph });
+  pass('touchend', { touches: [], changedTouches: touches });
+  assert.equal(f.navigation.pointers.size, 0); assert.equal(f.navigation.independentPointers.size, 0);
+  assert.equal(f.root.captures.size, 0); assert.deepEqual(f.calls, []); assert.ok(!f.navigation.touchBlocked);
+  f.emit('pointerdown'); f.emit('pointerdown', { pointerId: 2, clientX: 200 });
+  f.emit('pointermove', { pointerId: 2, clientX: 300 });
+  assert.equal(f.camera.value.k, 2, 'the following graph pinch still owns the camera');
+  f.emit('pointerup', { pointerId: 2 }); f.emit('pointerup'); f.navigation.destroy();
+});
+test('independent native touches do not prolong suppression after graph fingers end', () => {
+  const f = fixture(), chartTouch = { target: f.chart }, graphTouch = { target: f.graph };
+  f.emit('touchstart', { touches: [graphTouch, graphTouch], changedTouches: [graphTouch] });
+  assert.equal(f.navigation.touchBlocked, true);
+  f.emit('touchend', { touches: [chartTouch], changedTouches: [graphTouch] });
+  assert.equal(f.navigation.touchBlocked, false);
+  assert.equal(f.emit('touchend', { target: f.chart, touches: [], changedTouches: [chartTouch] }).defaultPrevented, false);
+  assert.equal(f.emit('touchstart', { target: f.overlay, touches: [{ target: f.overlay }] }).defaultPrevented, false);
+  f.navigation.destroy();
 });
 test('unexpected capture loss, resize, hiding and disposal finish dragging once', () => {
   for (const reason of ['lostpointercapture', 'resize', 'hidden', 'destroy']) {

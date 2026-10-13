@@ -105,6 +105,29 @@ test('collision displacement moves only badges and gives the shifted badge an el
   f.rail.destroy();
 });
 
+test('same-day leaders leave clear space around both glyphs without masking anchors or ranges', () => {
+  const bookmarks = [event('a', '2024-02-29', { end_date: '2024-03-10' }), event('b')], f = mount(bookmarks);
+  for (const width of [390, 1440]) {
+    const g = geometry(width); f.rail.update({ geometry: g });
+    const masks = descendants(f.container, node => node.tagName === 'mask');
+    assert.equal(masks.length, 1, 'resize replaces the previous mask');
+    const mask = masks[0], holes = mask.children.filter(node => node.tagName === 'circle');
+    assert.equal(mask.getAttribute('maskUnits'), 'userSpaceOnUse');
+    assert.equal(Number(mask.getAttribute('width')), g.contentWidth);
+    assert.deepEqual(holes.map(hole => Number(hole.getAttribute('cy'))), [22, 66]);
+    for (const hole of holes) {
+      near(Number(hole.getAttribute('cx')), g.xForTime(bookmarks[0].start));
+      assert.equal(hole.getAttribute('fill'), 'black');
+      assert.ok(Number(hole.getAttribute('r')) >= Math.hypot(8, 8), 'the complete 16px glyph stays clear');
+    }
+    assert.ok(withClass(f.container, 'ag-bookmark-leader').every(leader => leader.getAttribute('mask') === `url(#${mask.getAttribute('id')})`));
+    const dateMarks = [...withClass(f.container, 'ag-bookmark-anchor'), ...withClass(f.container, 'ag-bookmark-span')];
+    assert.ok(dateMarks.length >= 2);
+    assert.ok(dateMarks.every(mark => mark.getAttribute('mask') === null));
+  }
+  f.rail.destroy();
+});
+
 test('dense local clusters have chronological accessible lists and separate clusters stay local', () => {
   const bookmarks = [...Array.from({ length: 10 }, (_, i) => event(`a${i}`, '2024-01-10')),
     ...Array.from({ length: 10 }, (_, i) => event(`z${i}`, '2024-03-20'))];
@@ -192,6 +215,10 @@ test('list hover/focus reveal an individual date; selection closes and restores 
   const entry = entries.at(-1), id = entry.getAttribute('data-bookmark-id'), bookmark = bookmarks.find(b => b.id === id);
   entry.emit('pointerenter'); assert.equal(f.guides.at(-1), bookmark.start);
   entry.emit('pointerleave'); entry.focus(); assert.equal(f.guides.at(-1), bookmark.start);
+  assert.equal(f.tooltip().hidden, true, 'the event list already shows the date without a duplicate tooltip');
+  assert.equal(entry.children[0].textContent, bookmark.title);
+  assert.ok(entry.children[1].textContent.includes(`${bookmark.date} UTC`));
+  assert.equal(entry.getAttribute('aria-label'), bookmarkDetails(bookmark));
   near(Number(withClass(f.container, 'ag-bookmark-active-anchor')[0].children.at(-1).getAttribute('cx')), geometry(390).xForTime(bookmark.start));
   entry.emit('click', { pointerType: 'touch' });
   assert.deepEqual(f.selections, [bookmark.start + BOOKMARK_DAY]);
@@ -261,7 +288,9 @@ test('literal titles appear as text in pins, tooltip and list, never as markup',
   f.rail.update({ bookmarks: [bookmark, event('b'), event('c')] });
   f.pins().find(pin => pin.getAttribute('aria-haspopup') === 'dialog').emit('click');
   const entry = f.entries().find(entry => entry.getAttribute('data-bookmark-id') === 'literal');
-  assert.ok(entry.textContent.startsWith(title)); assert.equal(entry.children.length, 0);
+  assert.equal(entry.children[0].textContent, title); assert.equal(entry.children[0].children.length, 0);
+  assert.ok(entry.getAttribute('aria-label').startsWith(title));
+  assert.equal(descendants(f.overlays, node => node.tagName === 'img').length, 0);
   assert.equal(descendants(f.container, node => node.tagName === 'img').length, 0);
   assert.equal(globalThis.bookmarkInjected, undefined); f.rail.destroy();
 });

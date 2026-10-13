@@ -112,7 +112,8 @@ output { float: right; color: var(--accent); font-variant-numeric: tabular-nums;
 .swatch { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
 .sidebar-footer { color: var(--muted); font-size: 10px; padding-top: 22px; display: flex; flex-wrap: wrap; gap: 5px 7px; align-items: center; }
 .sidebar-footer a { color: var(--muted); font-size: 10px; text-decoration: none; }.sidebar-footer a:hover { text-decoration: underline; }
-main { flex: 1; min-width: 0; position: relative; overflow: hidden; isolation: isolate; }
+/* The map is a fixed viewport: focusing timeline controls must not scroll it. */
+main { flex: 1; min-width: 0; position: relative; overflow: clip; isolation: isolate; }
 main { --bottom-chrome-offset: 64px; --timeline-clearance: 64px; }
 #timeline { position: absolute; left: 12px; right: 12px; bottom: var(--bottom-chrome-offset); z-index: 3; display: flex; flex-direction: column; max-height: min(70%, calc(100% - var(--bottom-chrome-offset) - 64px)); padding: 8px 12px; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--card-shadow); touch-action: pan-x pan-y; font-size: 11px; }
 .timeline-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 36px; flex-shrink: 0; }
@@ -127,24 +128,23 @@ main { --bottom-chrome-offset: 64px; --timeline-clearance: 64px; }
 .timeline-chart-caption { display: flex; align-items: baseline; justify-content: space-between; flex-wrap: wrap; gap: 4px 12px; padding: 5px 0 10px; }
 #timeline-measure { font-weight: 500; }
 #timeline-peak { color: var(--muted); font-size: 10px; }
-.timeline-chart-layout { position: relative; padding-left: 34px; }
-#timeline-y-axis { position: absolute; left: 0; width: 28px; height: 120px; font: 10px var(--font-mono); color: var(--muted); }
-#timeline-y-axis span { position: absolute; right: 0; transform: translateY(-50%); }
-#timeline-stage { overflow-x: auto; overflow-y: hidden; overscroll-behavior-x: contain; touch-action: pan-x pan-y; scrollbar-gutter: auto; }
+.timeline-chart-layout { position: relative; }
+#timeline-stage { overflow: hidden; }
 #timeline-stage-content { position: relative; }
-#timeline-histogram { display: block; height: 120px; min-height: 120px; touch-action: pan-x pan-y; cursor: pointer; }
+#timeline-histogram { display: block; width: 100%; height: 220px; min-height: 220px; touch-action: none; }
 #timeline-histogram:focus-visible { outline-offset: -2px; }
-#timeline-selection { position: absolute; bottom: 16px; width: 0; height: 44px; border-left: 1px solid var(--accent); pointer-events: none; }
-.timeline-axis { position: relative; height: 28px; color: var(--muted); font: 10px var(--font-mono); }
-.timeline-tick { position: absolute; padding-top: 7px; transform: translateX(-50%); white-space: nowrap; }
-.timeline-tick::before { content: ''; position: absolute; top: 0; left: 50%; height: 4px; border-left: 1px solid var(--line); }
-.timeline-tick.first { transform: none; }
-.timeline-tick.last { transform: translateX(-100%); }
-.timeline-tick.first::before { left: 0; }
-.timeline-tick.last::before { left: 100%; }
-.timeline-scrubber { position: relative; height: 32px; }
-/* The range's travel area is the shared plot, including explicit thumb insets. */
-#timeline-playhead { position: absolute; margin: 0; padding: 0; height: 32px; appearance: none; -webkit-appearance: none; background: transparent; border: 0; border-radius: 0; touch-action: none; accent-color: var(--accent); }
+.timeline-explore-controls, .timeline-range-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; padding: 4px 0; }
+.timeline-explore-controls label, .timeline-range-controls label { display: flex; align-items: center; gap: 6px; margin: 0; color: var(--muted); font-size: 10px; }
+.timeline-explore-controls select, .timeline-range-controls input { width: auto; min-width: 0; margin: 0; padding: 5px 7px; min-height: 32px; font-size: 11px; }
+.timeline-zoom-buttons { display: flex; gap: 4px; margin-left: auto; }
+.timeline-explore-controls button, .timeline-range-controls button { min-height: 32px; padding: 4px 9px; font-size: 11px; }
+.timeline-zoom-buttons button:first-child, .timeline-zoom-buttons button:nth-child(2) { width: 32px; font-size: 16px; }
+#timeline-range-readout { color: var(--muted); font-size: 10px; }
+.timeline-snapshot { border-top: 1px solid var(--line); margin-top: 8px; padding-top: 8px; }
+.timeline-snapshot > label { display: flex; justify-content: space-between; font-size: 11px; }
+.timeline-snapshot > label span { color: var(--muted); font-size: 10px; }
+/* The snapshot covers full history independently of the chart's zoom window. */
+#timeline-playhead { display: block; width: 100%; margin: 0; padding: 0; height: 32px; appearance: none; -webkit-appearance: none; background: transparent; border: 0; border-radius: 0; touch-action: none; accent-color: var(--accent); }
 #timeline-playhead::-webkit-slider-runnable-track { height: 2px; background: var(--line); border: 0; }
 #timeline-playhead::-moz-range-track { height: 2px; background: var(--line); border: 0; }
 #timeline-playhead::-moz-range-progress { background: var(--line); height: 2px; }
@@ -158,6 +158,9 @@ main { --bottom-chrome-offset: 64px; --timeline-clearance: 64px; }
 #timeline-legend, #timeline-bin-groups { display: flex; flex-wrap: wrap; gap: 4px 12px; margin: 4px 0 7px; padding: 0; list-style: none; }
 #timeline-legend li, #timeline-bin-groups li { min-width: 0; overflow-wrap: anywhere; }
 #timeline-legend { font-size: 10px; }
+#timeline-legend button, #timeline-community-table button, #timeline-show-groups { border: 0; background: transparent; box-shadow: none; min-height: 28px; padding: 2px 0; font: inherit; color: var(--ink); text-align: left; }
+#timeline-legend button[aria-pressed=false], #timeline-community-table button[aria-pressed=false] { opacity: .45; text-decoration: line-through; }
+#timeline-show-groups { color: var(--accent); font-size: 10px; }
 .timeline-swatch { display: inline-block; width: 8px; height: 8px; border-radius: 1px; margin-right: 5px; vertical-align: baseline; }
 #timeline-readout { font-family: var(--font-mono); font-size: 10px; font-variant-numeric: tabular-nums; line-height: 1.6; }
 .timeline-period-summary { border-top: 1px solid var(--line); margin-top: 7px; padding-top: 5px; }
@@ -281,6 +284,14 @@ a:hover, .sidebar-footer a:hover { color: var(--accent-hover); }
   #timeline { left: 8px; right: 8px; padding: 6px 10px; }
   .timeline-heading { gap: 8px; flex-wrap: wrap; }
   #timeline-latest { min-height: 44px; }
+  .timeline-explore-controls { gap: 4px 8px; }
+  .timeline-explore-controls label { flex: 1; }
+  .timeline-explore-controls select { flex: 1; max-width: 150px; }
+  .timeline-zoom-buttons { margin-left: 0; }
+  .timeline-explore-controls button, .timeline-explore-controls select, .timeline-range-controls button, .timeline-range-controls input, #timeline-legend button { min-height: 44px; }
+  .timeline-range-controls { gap: 4px 8px; }
+  .timeline-range-controls input { max-width: 122px; }
+  #timeline-histogram { height: 220px; }
   .map-bottom { left: 10px; right: 10px; bottom: max(15px, env(safe-area-inset-bottom)); align-items: center; }
   .map-toolbar { transform: none; width: max-content; justify-content: center; }
   .map-toolbar button { height: 44px; }

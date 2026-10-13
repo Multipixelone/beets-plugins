@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { decodeColumn, soundGroup, selectionState, soundSections, groupLabels, visibleGroupLabels, labelPresentation, placeLabels, representativeLabelAnchors } from '../sound.mjs';
+import { decodeColumn, soundGroup, selectionState, soundSections, groupLabels, visibleGroupLabels, labelPresentation, placeLabels, representativeLabelAnchors, LabelFrameCache } from '../sound.mjs';
 import { groups, validateExport } from '../logic.mjs';
 const albums = [
   { album: 'One', albumartist: 'Finn', sound: { style: { labels: [{ label: 'Hip Hop---Boom Bap', score: .8 }], count: 1, total: 3 },
@@ -268,6 +268,46 @@ test('expanded searches still avoid obstacles across spatial bin boundaries', ()
   assert.equal(labels.length, 2);
   for (const { rect } of labels) for (const other of obstacles) assert.ok(
     rect.right + 6 <= other.left || rect.left >= other.right + 6 || rect.bottom + 6 <= other.top || rect.top >= other.bottom + 6);
+});
+test('cached label anchors follow every camera frame without repeating layout or scaling text offsets', () => {
+  const cache = new LabelFrameCache(80);
+  let time = 0, zoom = 2, pan = 10, layouts = 0;
+  const options = { moving: true, now: () => time,
+    layout: () => { layouts++; return [{ name: 'A', anchorX: 50, anchorY: 80, dx: 12, dy: -8, width: 100, height: 20 }]; },
+    toWorld: ([x, y]) => [(x - pan) / zoom, y / zoom],
+    toScreen: ([x, y]) => [x * zoom + pan, y * zoom] };
+  const first = cache.frame(options);
+  assert.deepEqual([first.labels[0].x, first.labels[0].y], [62, 72]);
+  time = 16; zoom = 3; pan = 25;
+  const next = cache.frame(options);
+  assert.equal(next.changed, false);
+  assert.deepEqual([next.labels[0].x, next.labels[0].y], [97, 112]);
+  assert.equal(next.labels[0].width, 100);
+  assert.equal(layouts, 1);
+  time = 79; cache.frame(options); assert.equal(layouts, 1);
+  time = 80; cache.frame(options); assert.equal(layouts, 2);
+});
+test('label cadence starts after expensive sampling completes and explicit invalidation refreshes immediately', () => {
+  const cache = new LabelFrameCache(80);
+  let time = 0, layouts = 0;
+  const options = { moving: true, now: () => time,
+    layout: () => { layouts++; time += 100; return []; },
+    toWorld: point => point, toScreen: point => point };
+  cache.frame(options);
+  time = 116; cache.frame(options); assert.equal(layouts, 1);
+  cache.invalidate(false);
+  time = 179; cache.frame(options); assert.equal(layouts, 1);
+  time = 180; cache.frame(options); assert.equal(layouts, 2);
+  cache.invalidate(); cache.frame(options); assert.equal(layouts, 3);
+  time = 1000; cache.frame({ ...options, moving: false }); assert.equal(layouts, 3);
+});
+test('clearing label samples cannot reuse anchors from a replaced export', () => {
+  const cache = new LabelFrameCache();
+  const options = { now: () => 0, toWorld: point => point, toScreen: point => point,
+    layout: () => [{ name: 'old', anchorX: 20, anchorY: 40, dx: 0, dy: 0 }] };
+  assert.equal(cache.frame(options).labels.length, 1);
+  cache.clear();
+  assert.deepEqual(cache.frame({ ...options, layout: () => [] }).labels, []);
 });
 test('v3 validates packed columns and still accepts v1/v2', () => {
   const album = { ...albums[0], id: 1, genre: '', year: 2001, track_count: 3, embedded_tracks: 1,

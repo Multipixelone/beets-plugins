@@ -63,9 +63,9 @@ export function graphTouchCamera(graph, onInteract) {
 }
 
 export class TouchNavigation {
-  constructor(root, { camera, isGraph, onTakeover = () => {} }) {
-    this.root = root; this.camera = camera; this.isGraph = isGraph; this.onTakeover = onTakeover;
-    this.pointers = new Map(); this.suppressedClicks = new Map(); this.listeners = [];
+  constructor(root, { camera, isGraph, isIndependent = () => false, onTakeover = () => {} }) {
+    this.root = root; this.camera = camera; this.isGraph = isGraph; this.isIndependent = isIndependent; this.onTakeover = onTakeover;
+    this.pointers = new Map(); this.independentPointers = new Set(); this.suppressedClicks = new Map(); this.listeners = [];
     const listen = (target, type, handler, options = { capture: true, passive: false }) => {
       target.addEventListener(type, handler, options);
       this.listeners.push(() => target.removeEventListener(type, handler, options));
@@ -74,19 +74,27 @@ export class TouchNavigation {
       listen(root, type, event => this.pointer(event));
     }
     for (const type of ['touchstart', 'touchmove', 'touchend', 'touchcancel']) listen(root, type, event => {
-      if (event.touches.length > 1) {
+      const independent = touch => this.isIndependent(touch.target ?? event.target);
+      const touches = [...event.touches], changed = [...(event.changedTouches ?? [])];
+      if ([...touches, ...changed].every(independent) &&
+          (touches.length || changed.length || this.isIndependent(event.target))) return;
+      // A chart finger must not turn an otherwise single graph finger into a
+      // graph pinch, or keep graph suppression alive after its fingers lift.
+      const graphTouches = touches.filter(touch => !independent(touch));
+      if (graphTouches.length > 1) {
         if (!this.touchBlocked && !this.claimed) this.onTakeover();
         this.touchBlocked = true;
       }
       if (this.touchBlocked || this.isGraph(event.target)) this.consume(event);
-      if (!event.touches.length) this.touchBlocked = false;
+      if (!graphTouches.length) this.touchBlocked = false;
     });
     // Safari's gesture events can target chrome rather than the canvas. Only
     // cancel the browser gesture here; Pointer Events drive the camera once.
     for (const type of ['gesturestart', 'gesturechange', 'gestureend']) listen(root, type, event => {
-      this.consume(event);
+      if (!this.isIndependent(event.target)) this.consume(event);
     });
     listen(root, 'click', event => {
+      if (this.isIndependent(event.target)) return;
       const now = Date.now();
       for (const [id, record] of this.suppressedClicks) if (record.until < now) this.suppressedClicks.delete(id);
       if ((event.pointerType === 'touch' && this.suppressedClicks.has(event.pointerId)) ||
@@ -119,6 +127,8 @@ export class TouchNavigation {
     const id = event.pointerId;
     if (event.type === 'pointerdown') {
       this.suppressedClicks.delete(id);
+      this.independentPointers.delete(id);
+      if (this.isIndependent(event.target)) { this.independentPointers.add(id); return; }
       const point = [event.clientX, event.clientY], pointer = { point, target: event.target };
       if (!this.pointers.size) {
         this.activeCamera = this.camera(); this.originGraph = this.isGraph(event.target);
@@ -143,6 +153,10 @@ export class TouchNavigation {
         if (this.mode === 'pinch') this.rebase();
       }
       if (this.claimed) { this.capture(id); this.consume(event); }
+      return;
+    }
+    if (this.independentPointers.has(id)) {
+      if (event.type === 'pointerup' || event.type === 'pointercancel') this.independentPointers.delete(id);
       return;
     }
     const pointer = this.pointers.get(id);
@@ -191,5 +205,5 @@ export class TouchNavigation {
     }
     this.mode = undefined; this.claimed = false; this.node = undefined; this.activeCamera = undefined;
   }
-  destroy() { this.reset(); for (const remove of this.listeners) remove(); this.listeners = []; }
+  destroy() { this.reset(); this.independentPointers.clear(); for (const remove of this.listeners) remove(); this.listeners = []; }
 }

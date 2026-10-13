@@ -72,6 +72,7 @@ test('renderer boosts dots and artwork without changing collision sizes, and res
     const appearance = new GatherAppearance(), output = {};
     const context = {
       graphReady: true, coverActive, coverGeometry: '', geometryScale: 1, gatherScale: .8,
+      zooming: false, labelWorldMoving: () => false, scheduleLabels() {},
       selected: 0, atlasEntries: [], data: { albums: albums.map(album => ({ ...album, cover: 'cover.jpg' })) },
       selection: selectionState(albums, { phraseScores: [.5, 4, null] }),
       gather: { saved: new Map([[0, []], [1, []]]) }, gatherAppearance: appearance,

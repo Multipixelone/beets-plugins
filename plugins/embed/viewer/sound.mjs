@@ -313,6 +313,31 @@ function* placementAttempts(last, anchors, offsets, nearby, width, height, gap) 
   }
   for (const offset of offsets) for (const anchor of anchors) yield { ...offset, anchor };
 }
+// Collision placement and GPU position sampling are expensive. Retain world
+// anchors between samples so the camera can still project labels every frame.
+export class LabelFrameCache {
+  constructor(interval = 1000 / 15) { this.interval = interval; this.clear(); }
+  clear() {
+    this.labels = []; this.lastUpdate = -Infinity;
+    this.dirty = this.immediate = true;
+  }
+  invalidate(immediate = true) {
+    this.dirty = true; this.immediate ||= immediate;
+  }
+  frame({ moving = false, layout, toWorld, toScreen, now = () => performance.now() }) {
+    const changed = this.immediate || (this.dirty || moving) && now() - this.lastUpdate >= this.interval;
+    if (changed) {
+      this.labels = layout().map(label => ({ ...label, worldAnchor: toWorld([label.anchorX, label.anchorY]) }));
+      // Measure from completion: a slow GPU readback must not make the next
+      // frame immediately eligible for another readback.
+      this.lastUpdate = now(); this.dirty = this.immediate = false;
+    }
+    return { changed, labels: this.labels.map(label => {
+      const [x, y] = toScreen(label.worldAnchor);
+      return { ...label, x: x + label.dx, y: y + label.dy };
+    }) };
+  }
+}
 // Placement is separate from camera projection: retain dx/dy while the camera
 // moves, then use previous offsets first on the next placement pass.
 export function placeLabels(candidates, width, height, zoom, limit = 24,

@@ -1,6 +1,4 @@
 // Export-wide composition, independent of viewport, inspection and map filters.
-// null is an aggregation key, never a sound community identity.
-export const OTHER_COMMUNITIES = null;
 
 export function timelineCountScale(maxCount) {
   const target = Math.max(1, maxCount / 3);
@@ -23,17 +21,13 @@ export function aggregateTimeline(model, names, order) {
     }
     return [...counts].map(([name, count]) => ({ name, count, percent: count / bin.count * 100 })).sort(compare);
   });
-  const majorCommunities = [...totals].map(([name, count]) => ({ name, count })).sort(compare).slice(0, 5);
-  const major = new Set(majorCommunities.map(group => group.name));
+  const communities = [...totals].map(([name, count]) => ({ name, count })).sort(compare);
+  const majorCommunities = communities.slice(0, 5);
   const stacks = breakdowns.map(groups => {
     const counts = new Map(groups.map(group => [group.name, group.count]));
-    const segments = majorCommunities.flatMap(({ name }) => counts.has(name) ? [{ name, count: counts.get(name) }] : []);
-    const other = groups.reduce((sum, group) => sum + (major.has(group.name) ? 0 : group.count), 0);
-    if (other) segments.push({ name: OTHER_COMMUNITIES, count: other });
-    return segments;
+    return communities.flatMap(({ name }) => counts.has(name) ? [{ name, count: counts.get(name) }] : []);
   });
-  const otherCount = [...totals].reduce((sum, [name, count]) => sum + (major.has(name) ? 0 : count), 0);
-  return { majorCommunities, otherCount, stacks, breakdowns, scale: timelineCountScale(model.maxCount),
+  return { communities, majorCommunities, stacks, breakdowns, scale: timelineCountScale(model.maxCount),
     peakIndex: model.maxCount > 0 ? model.bins.findIndex(bin => bin.count === model.maxCount) : -1 };
 }
 

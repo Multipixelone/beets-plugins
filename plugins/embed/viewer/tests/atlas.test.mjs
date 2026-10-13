@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
-import { atlasLayout, createAtlasDataFromImageData } from '../atlas.mjs';
+import { atlasLayout, createAtlasDataFromImageData, GUTTER } from '../atlas.mjs';
 import { patchCosmosAtlas } from '../cosmos-atlas-patch.mjs';
 
 test('atlas packs mixed sizes with stable input indices, correct pixels and extruded gutters', () => {
@@ -22,6 +22,34 @@ test('atlas packs mixed sizes with stable input indices, correct pixels and extr
   assert.deepEqual([...packed.atlasCoords.slice(12)], [-1, -1, -1, -1]);
   assert.equal(createAtlasDataFromImageData([], 2048), null);
   assert.equal(atlasLayout([{ width: 256, height: 256 }], 128), null);
+});
+test('row packing preserves every RGBA byte, edge pixel, corner and unused atlas cell', () => {
+  const images = [[1, 1], [1, 17], [19, 1], [3, 5], [5, 3], [16, 16], [32, 32], [64, 64]].map(([width, height], index) => ({
+    width, height, data: Uint8ClampedArray.from({ length: width * height * 4 }, (_, byte) =>
+      (index * 53 + Math.floor(byte / 4) * 17 + byte % 4 * 71) % 256)
+  }));
+  const originals = images.map(image => image.data.slice());
+  const layout = atlasLayout(images), packed = createAtlasDataFromImageData(images);
+  const expected = new Uint8Array(layout.bytes);
+  // Independent pixel/channel oracle also checks transparent alpha and the
+  // untouched space between cells, rather than only solid-color thumbnails.
+  images.forEach((image, index) => {
+    const [x, y] = layout.positions[index];
+    for (let dy = -GUTTER; dy < image.height + GUTTER; dy++) {
+      for (let dx = -GUTTER; dx < image.width + GUTTER; dx++) {
+        const sourceX = Math.max(0, Math.min(image.width - 1, dx));
+        const sourceY = Math.max(0, Math.min(image.height - 1, dy));
+        for (let channel = 0; channel < 4; channel++) {
+          expected[((y + dy) * layout.side + x + dx) * 4 + channel] =
+            image.data[(sourceY * image.width + sourceX) * 4 + channel];
+        }
+      }
+    }
+    assert.deepEqual(image.data, originals[index], 'packing does not modify source pixels');
+    assert.deepEqual([...packed.atlasCoords.slice(index * 4, index * 4 + 4)],
+      [x, y, x + image.width, y + image.height].map(value => Math.fround(value / layout.side)));
+  });
+  assert.deepEqual(packed.atlasData, expected);
 });
 test('pinned Cosmos adapter replaces exactly its atlas helper and rejects changed versions/bundles', async () => {
   const source = await readFile(new URL('../node_modules/@cosmos.gl/graph/dist/index.js', import.meta.url), 'utf8');

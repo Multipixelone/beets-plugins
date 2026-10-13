@@ -2,7 +2,7 @@ import { Graph, defaultConfigValues } from '@cosmos.gl/graph';
 import { validateExport, groups, communityColor, pointSizes, artworkSizes, seedLayout, layoutSpaceSize, layoutParameters, showCovers, coverCandidates } from './logic.mjs';
 
 import { CoverLoader, decodeCover, coverPolicy, drawnCoverPixels, constrainedCovers, coverPriority, mipTier, decodeOverview } from './covers.mjs';
-import { decodeColumn, selectionState, soundSections, groupLabels, visibleGroupLabels, labelPresentation, placeLabels } from './sound.mjs';
+import { decodeColumn, selectionState, soundSections, groupLabels, visibleGroupLabels, labelPresentation, placeLabels, LabelFrameCache } from './sound.mjs';
 import { atlasLayout } from './atlas.mjs';
 import { DRAG_ALPHA, dragAlpha, communityLayout, communityLinkStrengths } from './physics.mjs';
 import { FilterPositions, bridgeLinks, edgeStyles } from './visibility.mjs';
@@ -11,9 +11,8 @@ import { vibeLinkOpacity, matchBounds, GatherAppearance, GATHER_SIZE_MULTIPLIER,
 import { VibeGraph } from './cosmos-vibe.mjs';
 import { GatherPositions, gatherRings } from './gather.mjs';
 import { renderLibraryStats, appendAlbumMetadata, appendAlbumTitle, appendAlbumSubline } from './library-stats.mjs';
-import { buildTimeline, timelineMembership, applyTimeline, bookmarkLabel,
+import { buildTimeline, timelineMembership, applyTimeline, bookmarkLabel, albumTimelineDate,
   readTimelineDockPreference, saveTimelineDockPreference, timelineDocked } from './timeline.mjs';
-import { aggregateTimeline, OTHER_COMMUNITIES } from './timeline-aggregation.mjs';
 import { TimelineView } from './timeline-view.mjs';
 import { graphTouchCamera, TouchNavigation } from './interaction.mjs';
 
@@ -43,6 +42,8 @@ let coverLimits, coverDpr = 1, overviewController, coverTiers = new Map();
 let labelFrame, labelGroups = [], labelDefinitions = [], trackedKey, hovered;
 let labelElements = new Map(), labelOffsets = new Map(), labelObstacles = [];
 let labelFootprints = new Float32Array();
+const labelFrames = new LabelFrameCache();
+let labelPositions, labelPositionsDirty = true;
 let communityGeometry = '', communityModel;
 let groupNames = [], groupIds = new Map(), lensOptions = new Map();
 let selection = { active: false, states: [], matches: [], visibleIndices: [] }, lensScores, currentLens;
@@ -50,12 +51,15 @@ let filterPositions, vibeGraph, renderedSizes = [], layoutGeometryKey = '', vibe
 let gatherAppearance = new GatherAppearance();
 let gather = new GatherPositions(), gatherEnabled = false, gatherScale = 1, gatherFrame, dragIndex, edgeStrengths = [];
 let timeline, timelineCutoffMs = null, historical = false, timelineRestore;
-let timelineSegments = [], timelineCommunities = [], timelineColors = new Map(), timelineNames = new Map();
-let timelineAggregation, timelinePartition, timelineFrame, timelinePending, timelineAnnouncementTimer, viewRevision = 0;
+let timelineRange = null, timelineGroupings = new Map();
+let timelineCommunities = [], timelineColors = new Map(), timelineNames = new Map();
+let timelinePartition, timelineFrame, timelinePending, timelineAnnouncementTimer, viewRevision = 0;
 const sortedGroupNames = names => [...new Set(names)].sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
 const timelineView = new TimelineView({ document, onSelect: setTimelineCutoff, onScrub: queueTimelineCutoff,
   onCancel: cancelTimelineScrub, onAnnounce: bookmark => announceTimeline(true, bookmark),
-  theme: { ink: themeValue('--ink'), accent: themeValue('--accent'), grid: themeValue('--line') } });
+  onRange: range => { timelineRange = range; updateSearch(); },
+  theme: { ink: themeValue('--ink'), accent: themeValue('--accent'), grid: themeValue('--line'),
+    muted: themeValue('--muted'), panel: themeValue('--panel') } });
 function cancelTimelineScrub() {
   cancelAnimationFrame(timelineFrame); timelineFrame = undefined; timelinePending = undefined;
 }
@@ -65,7 +69,8 @@ function resetTimeline() {
   clearTimeout(timelineAnnouncementTimer); timelineAnnouncementTimer = undefined;
   if (timelineRestore) $('group').value = timelineRestore.group;
   historical = false; timelineRestore = undefined; timelineCutoffMs = null; timeline = undefined;
-  timelineSegments = []; timelineAggregation = undefined; timelinePartition = undefined; timelineCommunities = [];
+  timelineRange = null; timelineGroupings = new Map();
+  timelinePartition = undefined; timelineCommunities = [];
   timelineColors.clear(); timelineNames.clear(); viewRevision++;
   $('group').disabled = false; $('pause').disabled = false;
   if ($('timeline').contains(document.activeElement)) $('timeline-toggle').focus({ preventScroll: true });
@@ -127,9 +132,17 @@ function rebuildTimelineStacks() {
     [name, `rgb(${color(index).slice(0, 3).map(channel => Math.round(channel * 255)).join(' ')})`]));
   const definitions = groupLabels(data.albums, names, () => true, { edges, mode: 'cluster' });
   timelineNames = new Map(definitions.map(group => [group.name, labelPresentation(group).displayName]));
-  timelineColors.set(OTHER_COMMUNITIES, themeValue('--muted'));
-  timelineAggregation = aggregateTimeline(timeline, names, timelineCommunities);
-  timelineSegments = timelineAggregation.stacks;
+  timelineGroupings = new Map([['cluster', { values: names, order: timelineCommunities, colors: timelineColors, names: timelineNames }]]);
+  for (const mode of ['genre', 'albumartist', 'source']) {
+    const values = mode === 'source' ? data.albums.map(album => {
+      const source = albumTimelineDate(album).source;
+      return source === 'lastfm' ? 'First play (Last.fm)' : source === 'added' ? 'Library added' : 'First play (source unknown)';
+    }) : groups(data.albums, mode, clusters);
+    const order = sortedGroupNames(values);
+    const colors = new Map(order.map((name, index) =>
+      [name, `rgb(${color(index).slice(0, 3).map(channel => Math.round(channel * 255)).join(' ')})`]));
+    timelineGroupings.set(mode, { values, order, colors, names: new Map(order.map(name => [name, name])) });
+  }
   drawTimeline();
 }
 function drawTimeline() {
@@ -146,8 +159,8 @@ function updateTimelineReadout() {
   if (!timeline) return;
   $('timeline-dock').hidden = false;
   $('timeline').hidden = timelineDocked(timelineDockPreference);
-  timelineView.update({ model: timeline, aggregation: timelineAggregation, colors: timelineColors,
-    names: timelineNames, cutoff: timelineCutoffMs, ready: graphReady,
+  timelineView.update({ model: timeline, groupings: timelineGroupings, rangeFilter: timelineRange,
+    cutoff: timelineCutoffMs, ready: graphReady,
     snapshotCount: timelineMembership(timeline.dates, timelineCutoffMs).count, shownCount: selection.visibleIndices.length });
   $('timeline-toggle').title = `${$('timeline-toggle').getAttribute('aria-label')} · ${$('timeline-compact').textContent}`;
   if (timelineView.readoutChanged) announceTimeline();
@@ -194,14 +207,38 @@ const phraseSearch = new PhraseSearch({
     $('phrase-status').textContent = message; updateSearch();
   }
 });
-function scheduleLabels() {
+function scheduleLabels(immediate = true) {
+  labelFrames.invalidate(immediate !== false); labelPositionsDirty = true;
   if (!labelFrame) labelFrame = requestAnimationFrame(() => { labelFrame = undefined; refreshLabels(); });
+}
+function labelWorldMoving() {
+  return dragging || gatherFrame !== undefined || gather.transitions.size > 0 ||
+    gatherAppearance.transitions.size > 0 || graph?.transition?.isActive ||
+    !!graph?.store.isSimulationRunning && !zooming;
 }
 function refreshLabels() {
   if (!graphReady) return;
   $('map-labels').hidden = !$('show-labels').checked;
   if (!$('show-labels').checked) return;
-  const positions = graph.getTrackedPointPositionsMap();
+  const { changed, labels } = labelFrames.frame({ moving: zooming || labelWorldMoving(),
+    layout: placeMapLabels, toWorld: point => graph.screenToSpacePosition(point),
+    toScreen: point => graph.spaceToScreenPosition(point) });
+  if (changed) {
+    const shown = new Set(labels.map(label => label.name));
+    for (const [name, element] of labelElements) element.style.visibility = shown.has(name) ? 'visible' : 'hidden';
+  }
+  for (const label of labels) {
+    const element = labelElements.get(label.name);
+    if (!element) continue;
+    const transform = `translate(${label.x - label.width / 2}px, ${label.y - label.height / 2}px)`;
+    if (element.style.transform !== transform) element.style.transform = transform;
+  }
+}
+function placeMapLabels() {
+  if (labelPositionsDirty || labelWorldMoving() || !labelPositions) {
+    labelPositions = graph.getTrackedPointPositionsMap(); labelPositionsDirty = false;
+  }
+  const positions = labelPositions;
   const { width, height } = $('graph').getBoundingClientRect();
   const candidates = [];
   for (const group of labelGroups) {
@@ -240,13 +277,10 @@ function refreshLabels() {
   }
   const placed = placeLabels(candidates, width, height, zoom, zoom < .4 ? 12 : 24,
     { obstacles, previous: labelOffsets, minZoom: 0 });
-  const shown = new Set(placed.map(label => label.name));
-  for (const [name, element] of labelElements) element.style.visibility = shown.has(name) ? 'visible' : 'hidden';
   for (const label of placed) {
-    const element = labelElements.get(label.name);
-    element.style.transform = `translate(${label.x - label.width / 2}px, ${label.y - label.height / 2}px)`;
     labelOffsets.set(label.name, { anchorId: label.anchorId, dx: label.dx, dy: label.dy });
   }
+  return placed;
 }
 function updateColors() {
   if (!graphReady) return;
@@ -262,7 +296,7 @@ function updateLabelTracking() {
   const definitions = selection.active ? visibleGroupLabels(data.albums, labelDefinitions, visibleAlbum, { edges }) : labelDefinitions;
   labelGroups = definitions.filter(group => group.indices.length > 1).slice(0, 96);
   // Track obstacles too: pan/zoom must not uncover untracked covers underneath
-  // a label. The readback is shared once per rendered frame and cached at rest.
+  // a label. Sampling is bounded while moving and reused during camera motion.
   labelObstacles = data.albums.flatMap((_, index) => visibleAlbum(index) ? [index] : []);
   const names = new Set(labelGroups.map(group => group.name));
   for (const [name, element] of labelElements) if (!names.has(name)) { element.remove(); labelElements.delete(name); labelOffsets.delete(name); }
@@ -433,6 +467,7 @@ function updateCoverSizes() {
     vibeGraph.collisionSizes(collisionSizes);
     graph.setPointImageSizes(imageSizes); graph.setPointShapes(shapes); graph.setPointSizes(sizes);
     coverGeometry = geometry;
+    scheduleLabels(!(zooming || labelWorldMoving()));
   }
 }
 function resizeArtwork() {
@@ -444,9 +479,10 @@ function resizeArtwork() {
 function updateAtlas() {
   if (!graphReady || !coverLoader) return;
   if (dragging || zooming) { scheduleAtlas(); return; }
-  const keys = [...new Set(data.albums.flatMap((album, i) => album.cover &&
-    visibleAlbum(i) ? [coverURL(album.cover)] : []))];
-  const wanted = coverLoader.wanted.filter(request => keys.includes(request.key));
+  const keySet = new Set(data.albums.flatMap((album, i) => album.cover &&
+    visibleAlbum(i) ? [coverURL(album.cover)] : []));
+  const keys = [...keySet];
+  const wanted = coverLoader.wanted.filter(request => keySet.has(request.key));
   const entries = coverLoader.atlasEntries(keys, wanted, coverLimits.maxTextureSize);
   // One atomic atlas replacement; the previous sprite remains until decode completes.
   const atlasChanged = entries.length !== atlasEntries.length || entries.some(([url, image], i) =>
@@ -653,8 +689,10 @@ function animateGather() {
       updateGatherPhysics();
     }
     if (appearanceChanging) updateHighlights();
-    scheduleCovers(); scheduleLabels();
-    if (gather.transitions.size || gatherAppearance.transitions.size || rotating) gatherFrame = requestAnimationFrame(frame);
+    scheduleCovers();
+    if (gather.transitions.size || gatherAppearance.transitions.size || rotating) {
+      gatherFrame = requestAnimationFrame(frame); scheduleLabels(false);
+    } else scheduleLabels();
   };
   gatherFrame = requestAnimationFrame(frame);
 }
@@ -897,6 +935,8 @@ function updateSearch() {
     vocal: $('vocal').value, includeUnknown: $('include-unknown').checked });
   if (timeline) selection = applyTimeline(selection,
     timelineMembership(timeline.dates, timelineCutoffMs));
+  if (timeline && timelineRange) selection = applyTimeline(selection, { historical: true,
+    eligible: Array.from(timeline.dates, date => Number.isFinite(date) && date >= timelineRange.startMs && date < timelineRange.endMs) });
   if (graphReady) {
     if (selection.active) initialFitPending = false;
     const visible = data.albums.map((_, i) => visibleAlbum(i));
@@ -963,6 +1003,7 @@ async function load(exported, name, label = name) {
     graphReady = false; dragging = zooming = false;
     cancelAnimationFrame(labelFrame); labelFrame = undefined; labelGroups = []; labelDefinitions = []; groupNames = [];
     labelElements.clear(); labelOffsets.clear(); labelObstacles = []; communityGeometry = ''; communityModel = undefined;
+    labelFrames.clear(); labelPositions = undefined; labelPositionsDirty = true;
     cancelAnimationFrame(gatherFrame); gatherFrame = undefined;
     gather = new GatherPositions(); gatherAppearance = new GatherAppearance(); gatherEnabled = false; gatherScale = 1;
     trackedKey = hovered = undefined;
@@ -1046,7 +1087,7 @@ async function load(exported, name, label = name) {
         dragIndex = undefined;
         if (!paused && !historical) graph.start(simulationAlpha = dragAlpha(simulationAlpha, true));
       },
-      onZoomStart: event => { if (event?.sourceEvent) initialFitPending = false; zooming = true; hover(undefined); },
+      onZoomStart: event => { if (event?.sourceEvent) initialFitPending = false; zooming = true; hover(undefined); scheduleLabels(); },
       onZoom: scheduleEdges,
       onZoomEnd: () => { zooming = false; scheduleCovers(); scheduleLabels(); },
       onRenderFrame: refreshLabels,
@@ -1151,6 +1192,10 @@ $('cover-zoom').addEventListener('input', () => {
   $('cover-zoom-value').value = Number($('cover-zoom').value).toFixed(2); refreshCovers();
 });
 window.addEventListener('resize', () => { scheduleCovers(); scheduleLabels(); if (gatherEnabled) layoutGather(); });
+const labelGeometryObserver = new ResizeObserver(() => scheduleLabels());
+for (const element of [$('timeline'), document.querySelector('.map-toolbar'), document.querySelector('.map-footer')]) {
+  labelGeometryObserver.observe(element);
+}
 document.fonts?.addEventListener('loadingdone', scheduleLabels);
 let dprQuery;
 function watchDpr() {
@@ -1198,6 +1243,7 @@ $('pause').addEventListener('click', () => {
   if (graphReady) {
     graph.setConfigPartial({ enableSimulation: !paused });
     if (paused) graph.pause(); else { graph.start(0.3); animateGather(); }
+    scheduleLabels();
   }
 });
 $('timeline-latest').addEventListener('click', () => {
@@ -1283,6 +1329,7 @@ document.addEventListener('keydown', event => {
 const touchNavigation = new TouchNavigation(document.body, {
   camera: () => graphReady ? touchCamera : undefined,
   isGraph: target => !!target.closest('#graph'),
+  isIndependent: target => !!target.closest('#timeline-histogram'),
   onTakeover: () => {
     timelineView.cancelGesture();
   }
