@@ -1,5 +1,7 @@
 import { createTimelineGeometry } from './timeline-geometry.mjs';
-import { aggregateTimeline, periodIndexForCutoff, cutoffForTimelineKey, nearestTimelineCutoff } from './timeline-aggregation.mjs';
+import { aggregateTimeline, periodIndexForCutoff, cutoffForTimelineKey, nearestTimelineCutoff,
+  timelineTasteShifts, selectTasteShifts, tasteShiftExamples } from './timeline-aggregation.mjs';
+import { albumTimelineDate } from './timeline.mjs';
 import { TimelineChart, TIMELINE_CHART_LEFT, TIMELINE_CHART_RIGHT } from './timeline-chart.mjs';
 import { rebinTimeline, timelineExplorerRange } from './timeline-explorer.mjs';
 import { createBookmarkRail } from './timeline-bookmarks.mjs';
@@ -14,14 +16,15 @@ const period = (bin, model) => model.unit === 'month' ? month.format(bin.start) 
   String(new Date(bin.start).getUTCFullYear()) : model.unit === 'week' ? `${date.format(bin.start)}–${date.format(bin.end - 1)}` : date.format(bin.start);
 
 export class TimelineView {
-  constructor({ document, onSelect, onScrub, onCancel, onAnnounce, onRange, theme }) {
+  constructor({ document, onSelect, onScrub, onCancel, onAnnounce, onRange, renderAlbum, theme }) {
     this.document = document; this.onSelect = onSelect; this.onScrub = onScrub;
     this.onCancel = onCancel; this.onAnnounce = onAnnounce; this.onRange = onRange; this.theme = theme;
+    this.renderAlbum = renderAlbum;
     this.$ = id => document.getElementById(id);
     this.stage = this.$('timeline-stage'); this.canvas = this.$('timeline-histogram'); this.playhead = this.$('timeline-playhead');
     this.hoverIndex = this.keyboardIndex = this.guideTime = null; this.hiddenGroups = new Set();
     for (const id of ['timeline-group', 'timeline-interval', 'timeline-mode']) this.$(id).addEventListener('change', () => {
-      if (id === 'timeline-group') this.hiddenGroups = new Set();
+      if (id === 'timeline-group') { this.hiddenGroups = new Set(); this.selectedTaste = null; }
       this.rebuild();
     });
     this.$('timeline-zoom-in').addEventListener('click', () => this.zoom(.5));
@@ -36,6 +39,7 @@ export class TimelineView {
     this.$('timeline-filter-range').addEventListener('click', () => { if (this.ready) this.onRange({ ...this.range }); });
     this.$('timeline-clear-range').addEventListener('click', () => this.onRange(null));
     this.$('timeline-show-groups').addEventListener('click', () => { this.hiddenGroups = new Set(); this.refreshComposition(); });
+    this.$('timeline-clear-highlight').addEventListener('click', () => this.selectTasteShift(null));
     this.$('timeline-breakdown').addEventListener('toggle', () => {
       if (this.$('timeline-breakdown').open) this.renderBreakdown();
     });
@@ -77,14 +81,17 @@ export class TimelineView {
     this.hoverIndex = this.keyboardIndex = this.guideTime = null; this.hiddenGroups = new Set();
     this.summaryAggregation = undefined; this.legendAggregation = undefined;
     this.modelBase = this.activeGrouping = this.inspectionGroups = this.breakdownGroups = this.breakdownHidden = undefined;
+    this.tasteModel = this.tasteGrouping = this.tasteCandidates = this.tasteHighlights = undefined;
+    this.selectedTaste = null; this.albums = [];
     this.hideTooltips();
   }
 
   cancelGesture() { this.onCancel(); this.hoverIndex = null; this.hideTooltips(); this.renderInspection(); this.renderPlayhead(); }
 
-  update({ model, groupings, cutoff, ready, snapshotCount, shownCount, rangeFilter }) {
+  update({ model, groupings, cutoff, ready, snapshotCount, shownCount, rangeFilter, albums = [], exportedAt }) {
     const changed = this.baseModel !== model || this.groupings !== groupings;
     this.baseModel = model; this.groupings = groupings; this.cutoff = cutoff; this.ready = ready;
+    this.albums = albums; this.exportedAt = exportedAt;
     this.rangeFilter = rangeFilter;
     const bins = model.bins, count = model.total;
     this.$('timeline-empty').hidden = !!bins.length; this.$('timeline-controls').hidden = !bins.length;
@@ -129,7 +136,60 @@ export class TimelineView {
     this.canvas.setAttribute('aria-label', `${this.$('timeline-measure').textContent}. Left and Right inspect a period; Enter selects its snapshot.`);
     const peak = this.aggregation.peakIndex >= 0 ? this.model.bins[this.aggregation.peakIndex] : null;
     this.$('timeline-peak').textContent = peak ? `Peak: ${period(peak, this.model)} · ${number(peak.count)} albums` : 'No dated albums in this window';
-    this.renderLegend(); this.measure(); this.renderPlayhead(); this.renderInspection(); this.renderRange();
+    this.renderTasteShifts(); this.renderLegend(); this.measure(); this.renderPlayhead(); this.renderInspection(); this.renderRange();
+  }
+
+  renderTasteShifts() {
+    if (this.tasteModel !== this.baseModel || this.tasteGrouping !== this.activeGrouping) {
+      this.tasteModel = this.baseModel; this.tasteGrouping = this.activeGrouping;
+      this.tasteCandidates = this.$('timeline-group').value === 'source' ? [] :
+        timelineTasteShifts(this.baseModel, this.activeGrouping.values, { through: Date.parse(this.exportedAt) });
+      this.selectedTaste = null;
+    }
+    this.tasteHighlights = selectTasteShifts(this.tasteCandidates, this.range, this.hiddenGroups);
+    if (!this.tasteHighlights.includes(this.selectedTaste)) this.selectedTaste = null;
+    const cards = this.$('timeline-taste-cards'); cards.replaceChildren();
+    this.tasteHighlights.forEach((shift, index) => {
+      const button = this.document.createElement('button'); button.type = 'button';
+      button.dataset.tasteStart = shift.start;
+      button.setAttribute('aria-pressed', String(shift === this.selectedTaste));
+      const when = this.document.createElement('span'); when.className = 'timeline-taste-date';
+      when.textContent = `${index + 1} · ${month.format(shift.start)} · ${shift.firstAppearance ? 'First recorded' : 'Growing share'}`;
+      const title = this.document.createElement('strong'); title.append(this.swatch(shift.name), this.names.get(shift.name) ?? shift.name);
+      const change = this.document.createElement('span'); change.className = 'timeline-taste-change';
+      change.textContent = `${percent(shift.previousShare * 100)} → ${percent(shift.share * 100)} · ${number(shift.count)} albums`;
+      const source = this.document.createElement('span'); source.className = 'timeline-taste-date';
+      const fallback = shift.indices.filter(index => albumTimelineDate(this.albums[index] ?? {}).source === 'added').length;
+      source.textContent = fallback ? `${number(fallback)} use library-added dates` : 'First-play dates';
+      button.append(when, title, change, source);
+      button.addEventListener('click', () => this.selectTasteShift(shift)); cards.append(button);
+    });
+    const empty = this.$('timeline-taste-empty'); empty.hidden = !!this.tasteHighlights.length;
+    empty.textContent = this.$('timeline-group').value === 'source' ?
+      'Choose a sound, genre or artist grouping to explore changes in your discoveries.' :
+      'No clear shifts in this window with enough albums to compare. Try a wider date range or another grouping.';
+    this.renderTasteDetail();
+  }
+
+  selectTasteShift(shift) {
+    this.selectedTaste = shift;
+    this.hoverIndex = this.keyboardIndex = null;
+    for (const button of this.$('timeline-taste-cards').querySelectorAll('button'))
+      button.setAttribute('aria-pressed', String(!!shift && Number(button.dataset.tasteStart) === shift.start));
+    this.renderTasteDetail(); this.renderInspection();
+  }
+
+  renderTasteDetail() {
+    const shift = this.selectedTaste;
+    this.$('timeline-clear-highlight').hidden = !shift;
+    this.$('timeline-taste-detail').hidden = !shift;
+    const albums = this.$('timeline-taste-albums'); albums.replaceChildren();
+    if (!shift) return;
+    const name = this.names.get(shift.name) ?? shift.name;
+    const fallback = shift.indices.filter(index => albumTimelineDate(this.albums[index] ?? {}).source === 'added').length;
+    this.$('timeline-taste-evidence').textContent = `${name}: ${number(shift.count)} of ${number(shift.total)} arrivals in ${month.format(shift.start)} (${percent(shift.share * 100)}), up from ${number(shift.previousCount)} of ${number(shift.previousTotal)} in ${month.format(shift.previousStart)}–${month.format(shift.start - 1)} (${percent(shift.previousShare * 100)}). ${shift.firstAppearance ? 'No earlier albums in this group are dated in this export. ' : ''}${fallback ? `${number(fallback)} of the highlighted albums use library-added dates. ` : ''}This group is highlighted across the chart. Examples from this month:`;
+    for (const index of tasteShiftExamples(shift, this.albums, this.baseModel.dates))
+      if (this.renderAlbum) albums.append(this.renderAlbum(index));
   }
 
   setRange(range) {
@@ -202,7 +262,7 @@ export class TimelineView {
     const focused = this.document.activeElement, group = focused?.dataset.timelineGroup;
     const container = focused?.closest('#timeline-legend, #timeline-community-table')?.id;
     this.summaryAggregation = undefined; this.legendAggregation = undefined;
-    this.renderLegend(); this.renderInspection();
+    this.renderTasteShifts(); this.renderLegend(); this.renderInspection();
     if (group !== undefined && container) {
       [...this.$(container).querySelectorAll('button')].find(button => button.dataset.timelineGroup === group)?.focus({ preventScroll: true });
     }
@@ -235,7 +295,8 @@ export class TimelineView {
 
   renderInspection() {
     if (!this.model?.bins.length || !this.aggregation) return;
-    const index = this.hoverIndex ?? this.keyboardIndex ?? periodIndexForCutoff(this.model, this.cutoff);
+    const index = this.hoverIndex ?? this.keyboardIndex ??
+      periodIndexForCutoff(this.model, this.selectedTaste ? this.selectedTaste.start + 1 : this.cutoff);
     this.$('timeline-bin-summary').setAttribute('aria-live', this.keyboardIndex === null ? 'off' : 'polite');
     if (this.summaryIndex !== index || this.summaryAggregation !== this.aggregation) {
       this.summaryIndex = index; this.summaryAggregation = this.aggregation;
@@ -276,6 +337,8 @@ export class TimelineView {
     if (!this.geometry || !this.aggregation || !this.chart || this.$('timeline').hidden) return;
     this.chart.update({ model: this.model, aggregation: this.aggregation, colors: this.colors, names: this.names,
       domain: this.domain, range: this.range, mode: this.$('timeline-mode').value, hiddenGroups: this.hiddenGroups,
+      tasteHighlights: this.tasteHighlights, focusedGroup: this.selectedTaste?.name ?? null,
+      tasteRange: this.selectedTaste,
       cutoff: this.cutoff, inspectedIndex: this.hoverIndex ?? this.keyboardIndex, guideTime: this.guideTime });
   }
 

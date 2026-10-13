@@ -27,9 +27,12 @@ export function timelineRangeFromPercent(domain, { start, end }) {
 
 // Filtering and normalization happen before drawing so hidden groups leave no
 // holes, and a percentage column always describes the groups still visible.
-export function timelineChartData(model, aggregation, hiddenGroups = new Set(), mode = 'count') {
+export function timelineChartData(model, aggregation, hiddenGroups = new Set(), mode = 'count', focusedGroup = null) {
   const rows = model.bins.map((bin, index) => {
     const groups = aggregation.stacks[index].filter(group => !hiddenGroups.has(group.name));
+    // Anchor the highlighted sound at zero, so its shape can be compared across
+    // periods instead of floating on top of unrelated parts of the stack.
+    if (focusedGroup !== null) groups.sort((a, b) => Number(b.name === focusedGroup) - Number(a.name === focusedGroup));
     const total = groups.reduce((sum, group) => sum + group.count, 0);
     let bottom = 0;
     const segments = groups.map(group => {
@@ -117,7 +120,7 @@ export class TimelineChart {
   }
 
   bars() {
-    const prepared = this.prepared, colors = this.colors;
+    const prepared = this.prepared, colors = this.colors, focusedGroup = this.focusedGroup;
     return { id: 'timeline-bars', type: 'custom', name: 'Albums', coordinateSystem: 'cartesian2d',
       animation: false, progressive: 0, emphasis: { disabled: true },
       dimensions: ['start', 'end', 'total', 'bin'], encode: { x: [0, 1], y: 2, tooltip: [2] },
@@ -132,7 +135,8 @@ export class TimelineChart {
         for (const segment of row.segments) {
           const top = api.coord([row.start, segment.top])[1], bottom = api.coord([row.start, segment.bottom])[1];
           const shape = graphic.clipRectByRect({ x: start + gap, y: top, width: end - start - 2 * gap, height: bottom - top }, bounds);
-          if (shape) children.push({ type: 'rect', shape, style: { fill: colors.get(segment.name) } });
+          if (shape) children.push({ type: 'rect', shape, style: { fill: colors.get(segment.name),
+            opacity: focusedGroup == null || segment.name === focusedGroup ? 1 : .16 } });
         }
         return { type: 'group', children };
       } };
@@ -145,13 +149,29 @@ export class TimelineChart {
       this.inspectionShape = new graphic.Rect({ silent: true, z: 5 });
       this.guideShape = new graphic.Line({ silent: true, z: 6 });
       this.cutoffShape = new graphic.Line({ silent: true, z: 6 });
-      for (const shape of [this.inspectionShape, this.guideShape, this.cutoffShape]) this.overlayGroup.add(shape);
+      this.tasteShape = new graphic.Rect({ silent: true, z: 4 });
+      this.tasteMarkers = Array.from({ length: 3 }, () => new graphic.Text({ silent: true, z: 7 }));
+      for (const shape of [this.tasteShape, this.inspectionShape, this.guideShape, this.cutoffShape, ...this.tasteMarkers]) this.overlayGroup.add(shape);
       this.chart.getZr().add(this.overlayGroup);
     }
     const bounds = { x: TIMELINE_CHART_LEFT, y: GRID_TOP,
       width: this.chart.getWidth() - TIMELINE_CHART_LEFT - TIMELINE_CHART_RIGHT,
       height: this.chart.getHeight() - GRID_TOP - GRID_BOTTOM };
     const pixel = time => this.chart.convertToPixel({ xAxisIndex: 0 }, time);
+    const taste = this.tasteRange;
+    const tasteShape = taste && graphic.clipRectByRect({ x: pixel(taste.start), y: bounds.y,
+      width: pixel(taste.end) - pixel(taste.start), height: bounds.height }, bounds);
+    this.tasteShape.attr({ ignore: !tasteShape, ...(tasteShape ? { shape: tasteShape } : {}),
+      style: { fill: 'rgba(255,158,66,.10)', stroke: this.theme.accent ?? '#ff9e42', lineWidth: 1 } });
+    let lastMarker = -Infinity;
+    this.tasteMarkers.forEach((marker, index) => {
+      const shift = this.tasteHighlights?.[index], x = shift ? pixel((shift.start + shift.end) / 2) : NaN;
+      const visible = Number.isFinite(x) && x >= bounds.x && x <= bounds.x + bounds.width && x - lastMarker >= 18;
+      marker.attr({ ignore: !visible, style: { x, y: bounds.y + 2, text: String(index + 1),
+        fill: this.theme.accent ?? '#ff9e42', backgroundColor: this.theme.panel ?? '#242019',
+        padding: [2, 4], borderRadius: 3, font: '11px ui-monospace, monospace', align: 'center' } });
+      if (visible) lastMarker = x;
+    });
     const selected = this.model.bins[this.inspectedIndex];
     const shape = selected && graphic.clipRectByRect({ x: pixel(selected.start) + .5, y: bounds.y + .5,
       width: pixel(selected.end) - pixel(selected.start) - 1, height: bounds.height - 1 }, bounds);
@@ -167,15 +187,17 @@ export class TimelineChart {
   }
 
   update({ model, aggregation, colors, names, domain, range, mode = 'count', hiddenGroups = new Set(),
-    cutoff = null, guideTime = null, inspectedIndex = null }) {
+    cutoff = null, guideTime = null, inspectedIndex = null, tasteHighlights, focusedGroup = null, tasteRange = null }) {
     if (this.disposed) return;
     const hiddenKey = JSON.stringify([...hiddenGroups].sort()), previous = this.composition;
     const changed = !previous || previous.model !== model || previous.aggregation !== aggregation || previous.colors !== colors ||
-      previous.mode !== mode || previous.hiddenKey !== hiddenKey || !sameRange(this.domain, domain);
+      previous.mode !== mode || previous.hiddenKey !== hiddenKey || previous.focusedGroup !== focusedGroup || !sameRange(this.domain, domain);
     const rangeChanged = !sameRange(this.range, range);
-    const overlaysChanged = changed || this.cutoff !== cutoff || this.guideTime !== guideTime || this.inspectedIndex !== inspectedIndex;
+    const overlaysChanged = changed || this.cutoff !== cutoff || this.guideTime !== guideTime || this.inspectedIndex !== inspectedIndex ||
+      this.tasteHighlights !== tasteHighlights || this.tasteRange !== tasteRange;
     this.model = model; this.colors = colors; this.names = names; this.domain = { ...domain }; this.range = { ...range };
     this.cutoff = cutoff; this.guideTime = guideTime; this.inspectedIndex = inspectedIndex;
+    this.tasteHighlights = tasteHighlights; this.focusedGroup = focusedGroup; this.tasteRange = tasteRange;
     if (!changed && !rangeChanged && !overlaysChanged) return;
     // ECharts setOption performs the complete series update even when only an
     // overlay series changed. Retained ZRender shapes avoid rerunning the bars.
@@ -183,8 +205,8 @@ export class TimelineChart {
     const option = {};
     if (changed) {
       this.lastInspect = undefined;
-      this.composition = { model, aggregation, colors, mode, hiddenKey };
-      this.prepared = timelineChartData(model, aggregation, hiddenGroups, mode);
+      this.composition = { model, aggregation, colors, mode, hiddenKey, focusedGroup };
+      this.prepared = timelineChartData(model, aggregation, hiddenGroups, mode, focusedGroup);
       const ink = this.theme.ink ?? '#e8e2d8', muted = this.theme.muted ?? '#9e9486', grid = this.theme.grid ?? '#3b342c';
       Object.assign(option, { animation: false, useUTC: true, backgroundColor: 'transparent',
         textStyle: { color: ink, fontFamily: 'ui-monospace, monospace', fontSize: 10 },

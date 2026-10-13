@@ -128,6 +128,25 @@ main { --bottom-chrome-offset: 64px; --timeline-clearance: 64px; }
 .timeline-chart-caption { display: flex; align-items: baseline; justify-content: space-between; flex-wrap: wrap; gap: 4px 12px; padding: 5px 0 10px; }
 #timeline-measure { font-weight: 500; }
 #timeline-peak { color: var(--muted); font-size: 10px; }
+.timeline-taste { margin: 8px 0; padding: 8px 0; border-block: 1px solid var(--line); }
+.timeline-taste-heading { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; margin-bottom: 6px; }
+.timeline-taste-heading > span { color: var(--muted); font-size: 10px; }
+#timeline-clear-highlight { margin-left: auto; padding: 3px 7px; font-size: 10px; min-height: 28px; }
+#timeline-taste-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 210px), 1fr)); gap: 6px; }
+#timeline-taste-cards button { display: flex; flex-direction: column; align-items: flex-start; gap: 5px; padding: 9px 10px; text-align: left; min-width: 0; background: transparent; border-color: var(--line); }
+#timeline-taste-cards button[aria-pressed=true] { border-color: var(--accent); background: var(--selection-bg); }
+#timeline-taste-cards strong { font-size: 12px; font-weight: 500; overflow-wrap: anywhere; }
+.timeline-taste-date { color: var(--muted); font-size: 10px; }
+.timeline-taste-change { font: 10px var(--font-mono); color: var(--accent); }
+.timeline-taste-method summary { padding: 5px 18px 2px 0; color: var(--muted); font-size: 10px; font-weight: 400; }
+.timeline-taste-method summary::after { top: 1px; }
+.timeline-taste-method p, #timeline-taste-evidence { font-size: 11px; line-height: 1.6; color: var(--muted); }
+#timeline-taste-detail { padding-top: 5px; }
+#timeline-taste-albums { display: flex; flex-wrap: wrap; gap: 6px 14px; list-style: none; margin: 7px 0 0; padding: 0; }
+#timeline-taste-albums li { display: flex; align-items: center; gap: 7px; flex: 1 1 180px; min-width: 0; font-size: 11px; }
+#timeline-taste-albums li > span:last-child { overflow-wrap: anywhere; }
+.timeline-taste-cover { width: 32px; height: 32px; flex-shrink: 0; object-fit: cover; border-radius: 2px; }
+.timeline-taste-cover.cover-fallback { display: grid; place-items: center; background: var(--paper); }
 .timeline-chart-layout { position: relative; }
 #timeline-stage { overflow: hidden; }
 #timeline-stage-content { position: relative; }

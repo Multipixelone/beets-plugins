@@ -2,13 +2,88 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { buildTimeline, timelineMembership } from '../timeline.mjs';
 import { aggregateTimeline, timelineCountScale, periodIndexForCutoff, cutoffForTimelineKey,
-  nearestTimelineCutoff } from '../timeline-aggregation.mjs';
+  nearestTimelineCutoff, timelineTasteShifts, selectTasteShifts, tasteShiftExamples } from '../timeline-aggregation.mjs';
 import { createTimelineGeometry } from '../timeline-geometry.mjs';
 import { TimelineChart,
   timelineChartData, timelineRangePercent, timelineRangeFromPercent } from '../timeline-chart.mjs';
 
 const at = date => Date.parse(`${date}T00:00:00Z`);
 const album = date => ({ first_played: date });
+function tasteFixture(months) {
+  const albums = [], names = [];
+  months.forEach((groups, month) => {
+    for (const [name, count] of Object.entries(groups)) for (let i = 0; i < count; i++) {
+      albums.push({ first_played: `2024-${String(month + 1).padStart(2, '0')}-15`, albumartist: `Artist ${i % 3}` });
+      names.push(name);
+    }
+  });
+  return { albums, names, model: buildTimeline(albums) };
+}
+
+test('taste shifts compare shares with the previous three months, not raw growth', () => {
+  const { model, names } = tasteFixture([{ jazz: 5, rock: 15 }, { jazz: 5, rock: 15 }, { jazz: 5, rock: 15 },
+    { jazz: 25, rock: 75 }, { jazz: 12, rock: 8 }]);
+  const shifts = timelineTasteShifts(model, names, { through: at('2024-06-01') });
+  assert.equal(shifts.length, 1, 'five times as many arrivals with an unchanged mix is not a taste shift');
+  const shift = shifts[0];
+  assert.equal(shift.name, 'jazz'); assert.equal(shift.start, at('2024-05-01'));
+  assert.equal(shift.count, 12); assert.equal(shift.total, 20);
+  assert.equal(shift.previousCount, 35); assert.equal(shift.previousTotal, 140);
+  assert.equal(shift.share, .6); assert.equal(shift.previousShare, .25);
+  assert.equal(shift.firstAppearance, false);
+});
+
+test('a return after an absence is distinguished from a first recorded group', () => {
+  const { model, names } = tasteFixture([{ jazz: 5, rock: 15 }, { rock: 20 }, { rock: 20 }, { rock: 20 },
+    { jazz: 10, soul: 10 }]);
+  const shifts = timelineTasteShifts(model, names, { through: at('2024-06-01') });
+  assert.equal(shifts.find(shift => shift.name === 'jazz').firstAppearance, false);
+  assert.equal(shifts.find(shift => shift.name === 'soul').firstAppearance, true);
+  assert.ok(shifts.filter(shift => shift.start === at('2024-05-01')).every(shift => shift.previousShare === 0));
+});
+
+test('an exact five percentage point increase is included despite floating point rounding', () => {
+  const { model, names } = tasteFixture([{ jazz: 5, rock: 15 }, { jazz: 5, rock: 15 }, { jazz: 5, rock: 15 },
+    { jazz: 6, rock: 14 }]);
+  assert.equal(timelineTasteShifts(model, names, { through: at('2024-05-01') })[0].name, 'jazz');
+});
+
+test('incomplete months, sparse samples, unknown groups and undated records cannot create highlights', () => {
+  for (const last of [{ jazz: 4, rock: 16 }, { jazz: 5, rock: 4 }, { Unknown: 20 }, { 'Unknown genre': 20 }]) {
+    const { model, names } = tasteFixture([{ rock: 20 }, { rock: 20 }, { rock: 20 }, last]);
+    assert.deepEqual(timelineTasteShifts(model, names, { through: at('2024-05-01') }), []);
+  }
+  const { albums, names } = tasteFixture([{ rock: 20 }, { rock: 20 }, { rock: 20 }, { jazz: 20 }]);
+  albums.push({ first_played: 'invalid' }); names.push('jazz');
+  const model = buildTimeline(albums);
+  assert.deepEqual(timelineTasteShifts(model, names, { through: at('2024-04-30') }), []);
+  assert.deepEqual(timelineTasteShifts(model, names), [], 'without an export date the latest observed month is conservatively incomplete');
+  assert.equal(timelineTasteShifts(model, names, { through: at('2024-05-01') })[0].count, 20);
+  const sparse = tasteFixture([{ rock: 3 }, { rock: 3 }, { rock: 3 }, { jazz: 20 }]);
+  assert.deepEqual(timelineTasteShifts(sparse.model, sparse.names, { through: at('2024-05-01') }), []);
+  assert.deepEqual(timelineTasteShifts(buildTimeline([album(null)]), ['jazz']), []);
+});
+
+test('unknown metadata stays in share denominators and hidden groups never change the evidence', () => {
+  const { model, names } = tasteFixture([{ rock: 20 }, { rock: 20 }, { rock: 20 }, { jazz: 5, Unknown: 15 }]);
+  const candidates = timelineTasteShifts(model, names, { through: at('2024-05-01') });
+  const before = JSON.stringify(candidates), range = { startMs: at('2024-04-01'), endMs: at('2024-05-01') };
+  assert.equal(candidates[0].share, .25);
+  assert.deepEqual(selectTasteShifts(candidates, range, new Set(['jazz'])), []);
+  assert.equal(selectTasteShifts(candidates, range, new Set(['Unknown']))[0].share, .25);
+  assert.equal(JSON.stringify(candidates), before);
+  assert.deepEqual(selectTasteShifts(candidates, { startMs: at('2024-05-01'), endMs: at('2024-06-01') }), []);
+});
+
+test('highlight selection avoids duplicate groups and months; examples use distinct artists in date order', () => {
+  const candidates = [
+    { name: 'jazz', start: 4, end: 5 }, { name: 'jazz', start: 5, end: 6 },
+    { name: 'rock', start: 4, end: 5 }, { name: 'soul', start: 2, end: 3 }, { name: 'folk', start: 7, end: 8 }
+  ];
+  assert.deepEqual(selectTasteShifts(candidates, { startMs: 0, endMs: 10 }).map(x => x.name), ['soul', 'jazz', 'folk']);
+  const albums = [{ albumartist: 'a' }, { albumartist: 'a' }, { albumartist: 'b' }, { albumartist: 'c' }];
+  assert.deepEqual(tasteShiftExamples({ indices: [0, 1, 2, 3] }, albums, [3, 1, 4, 5]), [1, 2, 3]);
+});
 const geometry = (model, viewportWidth) => createTimelineGeometry({ viewportWidth, thumbInset: 8,
   domainStartMs: model.bins[0].start, domainEndMs: model.bins.at(-1).end,
   bins: model.bins.map(bin => ({ startMs: bin.start, endMs: bin.end })) });

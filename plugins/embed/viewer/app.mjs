@@ -58,6 +58,12 @@ const sortedGroupNames = names => [...new Set(names)].sort((a, b) => a.localeCom
 const timelineView = new TimelineView({ document, onSelect: setTimelineCutoff, onScrub: queueTimelineCutoff,
   onCancel: cancelTimelineScrub, onAnnounce: bookmark => announceTimeline(true, bookmark),
   onRange: range => { timelineRange = range; updateSearch(); },
+  renderAlbum: index => {
+    const album = data.albums[index], item = document.createElement('li');
+    const label = document.createElement('span');
+    label.textContent = `${album.albumartist} — ${album.album}`;
+    item.append(coverElement(album, 'timeline-taste-cover'), label); return item;
+  },
   theme: { ink: themeValue('--ink'), accent: themeValue('--accent'), grid: themeValue('--line'),
     muted: themeValue('--muted'), panel: themeValue('--panel') } });
 function cancelTimelineScrub() {
@@ -133,7 +139,7 @@ function rebuildTimelineStacks() {
   const definitions = groupLabels(data.albums, names, () => true, { edges, mode: 'cluster' });
   timelineNames = new Map(definitions.map(group => [group.name, labelPresentation(group).displayName]));
   timelineGroupings = new Map([['cluster', { values: names, order: timelineCommunities, colors: timelineColors, names: timelineNames }]]);
-  for (const mode of ['genre', 'albumartist', 'source']) {
+  for (const mode of ['genre', 'style', 'mood', 'flavor', 'albumartist', 'source']) {
     const values = mode === 'source' ? data.albums.map(album => {
       const source = albumTimelineDate(album).source;
       return source === 'lastfm' ? 'First play (Last.fm)' : source === 'added' ? 'Library added' : 'First play (source unknown)';
@@ -160,6 +166,7 @@ function updateTimelineReadout() {
   $('timeline-dock').hidden = false;
   $('timeline').hidden = timelineDocked(timelineDockPreference);
   timelineView.update({ model: timeline, groupings: timelineGroupings, rangeFilter: timelineRange,
+    albums: data.albums, exportedAt: data.exported_at,
     cutoff: timelineCutoffMs, ready: graphReady,
     snapshotCount: timelineMembership(timeline.dates, timelineCutoffMs).count, shownCount: selection.visibleIndices.length });
   $('timeline-toggle').title = `${$('timeline-toggle').getAttribute('aria-label')} · ${$('timeline-compact').textContent}`;
@@ -1247,12 +1254,14 @@ $('pause').addEventListener('click', () => {
   }
 });
 $('timeline-latest').addEventListener('click', () => {
+  timelineView.selectTasteShift(null);
   timelineView.hoverIndex = timelineView.keyboardIndex = null;
   setTimelineCutoff(null); timelineView.renderInspection(); announceTimeline(true);
 });
 
 function timelineEscape(event) {
   if (event.key !== 'Escape') return;
+  timelineView.selectTasteShift(null);
   timelineView.hoverIndex = timelineView.keyboardIndex = null;
   timelineView.hideTooltips();
   event.preventDefault(); event.stopPropagation(); setTimelineCutoff(null); timelineView.renderInspection(); announceTimeline(true);

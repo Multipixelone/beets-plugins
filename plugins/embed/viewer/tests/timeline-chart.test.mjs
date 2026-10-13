@@ -56,6 +56,30 @@ test('identical dimensions skip ECharts resize; a real resize rerenders and repo
   } finally { adapter.dispose(); }
 });
 
+test('taste highlights emphasize a group without changing counts or percentage denominators', () => {
+  const { adapter, input } = fixture();
+  try {
+    input.aggregation.stacks = input.model.bins.map(() => [{ name: 'a', count: 1 }, { name: 'b', count: 3 }]);
+    const taste = { name: 'b', start: start + DAY * 3, end: start + DAY * 4 };
+    adapter.update({ ...input, mode: 'percent', focusedGroup: 'b', tasteRange: taste, tasteHighlights: [taste] });
+    assert.equal(adapter.prepared.rows[0].total, 4);
+    assert.equal(adapter.prepared.rows[0].segments[0].name, 'b');
+    assert.equal(adapter.prepared.rows[0].segments[0].bottom, 0);
+    assert.equal(adapter.prepared.rows[0].segments[0].top, 75);
+    assert.equal(input.aggregation.stacks[0][0].name, 'a', 'source stack order is preserved');
+    assert.equal(adapter.tasteShape.ignore, false); assert.equal(adapter.tasteMarkers[0].ignore, false);
+    assert.equal(adapter.tasteMarkers[1].ignore, true);
+    const series = adapter.bars(), row = adapter.prepared.rows[0];
+    const rendered = series.renderItem({ coordSys: { x: 0, y: 0, width: 100, height: 100 } }, {
+      value: dimension => series.data[0][dimension],
+      coord: ([time, count]) => [(time - row.start) / DAY * 100, 100 - count] });
+    assert.deepEqual(rendered.children.slice(1).map(rect => rect.style.opacity), [1, .16]);
+    adapter.update(input);
+    assert.equal(adapter.prepared.rows[0].segments[0].name, 'a', 'clearing restores the normal stack order');
+    assert.equal(adapter.tasteShape.ignore, true); assert.equal(adapter.tasteMarkers[0].ignore, true);
+  } finally { adapter.dispose(); }
+});
+
 test('zoom moves retained guides even when the same calendar bins and counts are reused', () => {
   const { adapter, input } = fixture();
   try {
@@ -75,7 +99,7 @@ test('panning within calendar boundaries reuses aggregation while retaining the 
     groupings: new Map([['cluster', { values: ['a', 'b', 'a'], order: ['a', 'b'], colors: new Map(), names: new Map() }]]),
     range: { startMs: Date.UTC(2024, 0, 5), endMs: Date.UTC(2024, 2, 10) },
     $: id => controls[id], canvas: { setAttribute() {} },
-    renderLegend() {}, measure() {}, renderPlayhead() {}, renderInspection() {}, renderRange() {} });
+    renderTasteShifts() {}, renderLegend() {}, measure() {}, renderPlayhead() {}, renderInspection() {}, renderRange() {} });
   view.rebuild(); const model = view.model, aggregation = view.aggregation;
   view.range = { startMs: Date.UTC(2024, 0, 6), endMs: Date.UTC(2024, 2, 11) };
   view.rebuild();

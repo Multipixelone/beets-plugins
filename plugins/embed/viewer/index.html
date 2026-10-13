@@ -435,11 +435,17 @@
             <p id="timeline-empty" hidden>No albums in this export have a first-play or added date.</p>
             <div id="timeline-controls">
               <div class="timeline-explore-controls">
-                <label>Group by <select id="timeline-group"><option value="cluster">Sound community</option><option value="genre">Genre</option><option value="albumartist">Artist</option><option value="source">Date source</option></select></label>
+                <label>Group by <select id="timeline-group"><option value="cluster">Sound community</option><option value="genre">Genre</option><option value="style">Style</option><option value="mood">Mood</option><option value="flavor">Texture</option><option value="albumartist">Artist</option><option value="source">Date source</option></select></label>
                 <label>Interval <select id="timeline-interval"><option value="auto">Auto</option><option value="day">Day</option><option value="week">Week</option><option value="month">Month</option><option value="year">Year</option></select></label>
                 <label>Measure <select id="timeline-mode"><option value="count">Album count</option><option value="percent">Share (%)</option></select></label>
                 <div class="timeline-zoom-buttons"><button id="timeline-zoom-in" type="button" aria-label="Zoom timeline in">+</button><button id="timeline-zoom-out" type="button" aria-label="Zoom timeline out">−</button><button id="timeline-reset-zoom" type="button">All dates</button></div>
               </div>
+              <section class="timeline-taste" aria-label="Taste shifts">
+                <div class="timeline-taste-heading"><strong>Taste shifts</strong><span>Monthly mix vs. previous 3 months · Select to highlight</span><button id="timeline-clear-highlight" type="button" hidden>Clear highlight</button></div>
+                <p id="timeline-taste-empty" class="muted" hidden></p>
+                <div id="timeline-taste-cards"></div>
+                <details class="timeline-taste-method"><summary>How these highlights work</summary><p>Completed months compared with the previous three months, using all album arrivals in this export. At least 10 albums in the month, 20 in the comparison, 5 in the highlighted group, and a rise of 5 percentage points. Highlights follow the date window and grouping; shares include hidden groups. First appearances mean first recorded here. These describe discoveries, not repeat listening. Sound labels use current metadata.</p></details>
+              </section>
               <div class="timeline-chart-caption">
                 <strong id="timeline-measure">Albums by month</strong><span id="timeline-peak"></span>
               </div>
@@ -453,6 +459,10 @@
                       aria-label="Albums by month" aria-describedby="timeline-bin-summary timeline-inspection-help"></div>
                   </div>
                 </div>
+              </div>
+              <div id="timeline-taste-detail" hidden>
+                <p id="timeline-taste-evidence" aria-live="polite" aria-atomic="true"></p>
+                <ul id="timeline-taste-albums" aria-label="Example albums from this shift"></ul>
               </div>
               <div class="timeline-range-controls">
                 <label>From <input id="timeline-from" type="date" /></label><label>Through <input id="timeline-through" type="date" /></label>

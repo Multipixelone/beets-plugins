@@ -1,4 +1,65 @@
 // Export-wide composition, independent of viewport, inspection and map filters.
+import { rebinTimeline } from './timeline-explorer.mjs';
+
+// Compare completed calendar months with the previous three months. Work from
+// the complete export so zoom, chart bins and hidden groups cannot invent a shift.
+// These are descriptive leads for exploration, not significance tests or a
+// reconstruction of repeat listening. Unknown labels remain in the denominator.
+export function timelineTasteShifts(model, names, { through } = {}) {
+  const monthly = rebinTimeline(model, { unit: 'month' });
+  const counts = monthly.bins.map(bin => {
+    const groups = new Map();
+    for (const index of bin.indices) groups.set(names[index], (groups.get(names[index]) ?? 0) + 1);
+    return groups;
+  });
+  const seen = new Set(), candidates = [];
+  let lastDate = -Infinity;
+  for (const time of model.dates) if (Number.isFinite(time)) lastDate = Math.max(lastDate, time);
+  const end = Number.isFinite(through) ? through : lastDate;
+  monthly.bins.forEach((bin, index) => {
+    const previous = monthly.bins.slice(Math.max(0, index - 3), index);
+    const previousTotal = previous.reduce((sum, item) => sum + item.count, 0);
+    if (index >= 3 && bin.end <= end && bin.count >= 10 && previousTotal >= 20) {
+      for (const [name, count] of counts[index]) {
+        if (!name || /^unknown\b/i.test(name) || count < 5) continue;
+        const previousCount = counts.slice(index - 3, index).reduce((sum, groups) => sum + (groups.get(name) ?? 0), 0);
+        const share = count / bin.count, previousShare = previousCount / previousTotal;
+        const lift = share - previousShare;
+        if (lift + Number.EPSILON < .05) continue;
+        candidates.push({ name, start: bin.start, end: bin.end, count, total: bin.count,
+          previousStart: previous[0].start, previousCount, previousTotal, share, previousShare,
+          lift, firstAppearance: !seen.has(name), score: lift * Math.sqrt(Math.min(count, 20)),
+          indices: bin.indices.filter(albumIndex => names[albumIndex] === name) });
+      }
+    }
+    for (const name of counts[index].keys()) seen.add(name);
+  });
+  return candidates.sort((a, b) => b.score - a.score || b.count - a.count || a.start - b.start ||
+    String(a.name).localeCompare(String(b.name), 'en'));
+}
+
+export function selectTasteShifts(candidates, range, hiddenGroups = new Set()) {
+  const selected = [];
+  for (const candidate of candidates) {
+    if (candidate.start >= range.endMs || candidate.end <= range.startMs || hiddenGroups.has(candidate.name)) continue;
+    // A few distinct leads are more useful than three adjacent months of one phase.
+    if (selected.some(item => item.name === candidate.name || item.start === candidate.start)) continue;
+    selected.push(candidate);
+    if (selected.length === 3) break;
+  }
+  return selected.sort((a, b) => a.start - b.start);
+}
+
+export function tasteShiftExamples(shift, albums, dates) {
+  const artists = new Set(), examples = [];
+  for (const index of [...shift.indices].sort((a, b) => dates[a] - dates[b] || a - b)) {
+    const album = albums[index];
+    if (!album || artists.has(album.albumartist)) continue;
+    artists.add(album.albumartist); examples.push(index);
+    if (examples.length === 3) break;
+  }
+  return examples;
+}
 
 export function timelineCountScale(maxCount) {
   const target = Math.max(1, maxCount / 3);
