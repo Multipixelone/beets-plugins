@@ -10,7 +10,7 @@ Synthetic stores and libraries only; no network, no Plex, no model weights.
 - **Clustering:** two well-separated synthetic blobs (sizes 40/20) → two clusters; single blob → one cluster; singleton merge rule; determinism across runs.
 - **Allocation:** largest-remainder with minimum one; clusters > N; shortfall roll-over when an artist cap starves a cluster.
 - **Ranking:** a candidate near many seeds outranks one near a single seed; ties deterministic.
-- **Steering:** with `w = 0`, order equals unsteered; steering never introduces items outside the pool.
+- **Steering:** with `w = 0`, order equals unsteered for the same eligible population (supplying steering still requires candidate text vectors, even at zero weight); steering never introduces items outside the pool.
 - **Artist cap:** albumartist fallback; cap counted across clusters.
 - **Apply:** already-present IDs skipped; non-Plex-linked refused per item; smart playlist and ambiguous title fail the command; a single `addItems` call with IDs in the requested order (Plex client mocked).
 - **JSON:** output validates against the documented `beets-mix.proposal.v1` / `beets-mix.apply.v1` shapes; no token in any output or error.
