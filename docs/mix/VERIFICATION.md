@@ -21,14 +21,18 @@ A dev-only harness (`python -m beets_mix.evaluate`, not a beets subcommand) that
 
 For each evaluation playlist, over 20 seeded random trials:
 
-1. Hide 20% of the playlist's resolvable tracks (minimum 2).
-2. Run `extend` on the remaining tracks with N = 15 and N = 50, treating hidden tracks as eligible candidates.
-3. Record **track recall** (hidden tracks proposed) and **album recall** (a proposed track shares an album with a hidden one) at 15 and 50.
+1. Sort and deduplicate supplied playlist IDs; retain only resolved, current-style-vector IDs for splitting. Hide `max(2, ceil(0.2 * usable_count))`; skip and report trials with fewer than one training seed remaining. Derive playlist/trial streams from SHA-256, not Python hash or input ordering. Fix splits across the complete threshold/K grid and N values.
+2. Run the shared `extend` ranking kernel on remaining usable seeds with N = 15 and N = 50. Remove heldouts from remaining originals, but keep all other original rows (including unavailable vectors) as exclusions. Heldouts are ordinary candidates subject to the same natural filters; use training-only length floors and duplicate checks against remaining originals. Load read-only Store data once per evaluation run.
+3. Primary **track recall** is recovered hidden IDs / all hidden IDs, including filtered positives in the denominator. Report eligible-only track recall separately (null, with reason, when none are eligible), hidden filter counts, and actual recommendation counts. **Album recall** is unique recovered hidden album keys / all unique hidden album keys; use an optional positive `album_id`, otherwise a unique item-ID fallback.
 
 Compare against two baselines on the same splits:
 
-- **Centroid:** top-N tracks by cosine to the mean seed vector (what `beet similar` does, at track level).
-- **Random:** N eligible tracks uniformly at random.
+- **Centroid:** uncapped top-N tracks by cosine to the normalized mean training seed vector, with item-ID ties; a zero mean ties all candidates by ID.
+- **Random:** uncapped N eligible tracks uniformly without replacement; an independent playlist/trial stream yields identical draws across grid points and stable prefixes across N.
+
+All methods consume the exact same eligible pool. Baselines are intentionally canonical and uncapped; Mix retains its global artist cap and fixed neighbourhood pools. Disclose this constraint asymmetry rather than silently cap-match baselines. Aggregate trials within each playlist, then macro-average playlist means, excluding nulls with explicit valid/null counts instead of converting them to zero.
+
+The dev-only input is explicit JSON `{items: [complete snapshots, optional album_id], playlists: {name: [local item IDs]}}`, plus a read-only Store path and explicit threshold/K grids. Defaults are 20 trials, RNG seed 0 and N = 15/50; no threshold or K grid is guessed. Rank the **exploratory best observed** grid pair by macro track@15, album@15, track@50, album@50, then smaller threshold and smaller K. This report never changes production defaults or establishes validated tuning from synthetic fixtures.
 
 Evaluation playlists (Plex, manual): `morning eggs` (61), `03 jazz i dig` (101), `park hang` (164), `07 city pop` (93). Use the run to choose `cluster_threshold` and K; record the chosen values and the results table in the implementation PR/commit body and in `plugins/mix/README.md`.
 

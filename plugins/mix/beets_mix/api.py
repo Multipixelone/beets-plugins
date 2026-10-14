@@ -105,6 +105,25 @@ def metadata(value, *, seed):
     return result
 
 
+def _eligible_candidates(tracks, originals, usable, style, top_styles, *, text=None, plex_target=False):
+    return filter_candidates(list(tracks.values()), playlist_tracks=list(originals.values()),
+        vectors=style, text_vectors=text, top_styles=top_styles, plex_target=plex_target,
+        shortest_seed_length=min(tracks[i]["length"] for i in usable))
+
+
+def _prepared_proposal(tracks, usable, style, eligible, *, cluster_threshold, n, k,
+                       text=None, steer_vector=None, steer_weight=d.STEER_WEIGHT,
+                       fresh=d.FRESH, max_per_artist=d.MAX_PER_ARTIST):
+    """Shared in-process ranking kernel; callers own validation/preparation."""
+    clusters = cluster_seeds(usable, style, distance_threshold=cluster_threshold)
+    shares = allocate_shares(clusters, n)
+    pools = [rerank_pool(rank_cluster(eligible, ids, style, k=k), share, tracks,
+                       text_vectors=text, steer_vector=steer_vector, weight=steer_weight, fresh=fresh)
+             for ids, share in zip(clusters, shares)]
+    selected, capped = select(pools, shares, clusters, tracks, max_per_artist=max_per_artist)
+    return selected, clusters, shares, capped
+
+
 def extend(items, seed_item_ids, *, store, cluster_threshold, n=d.N, k=d.K,
            playlist_tracks=None, seed_metadata=None, target_metadata=None,
            style_model_id=None, steer_vector=None, text_model_id=None,
@@ -160,15 +179,12 @@ def extend(items, seed_item_ids, *, store, cluster_threshold, n=d.N, k=d.K,
     finally:
         if owned:
             store.close()
-    eligible, counts = filter_candidates(list(tracks.values()), playlist_tracks=list(originals.values()),
-        vectors=style, text_vectors=text, top_styles=top_styles, plex_target=target.get("plex", False),
-        shortest_seed_length=min(tracks[i]["length"] for i in usable))
-    clusters = cluster_seeds(usable, style, distance_threshold=cluster_threshold)
-    shares = allocate_shares(clusters, n)
-    pools = [rerank_pool(rank_cluster(eligible, ids, style, k=k), share, tracks,
-                       text_vectors=text, steer_vector=steer_vector, weight=steer_weight, fresh=fresh)
-             for ids, share in zip(clusters, shares)]
-    selected, counts["artist_cap"] = select(pools, shares, clusters, tracks, max_per_artist=max_per_artist)
+    eligible, counts = _eligible_candidates(tracks, originals, usable, style, top_styles,
+                                          text=text, plex_target=target.get("plex", False))
+    selected, clusters, shares, counts["artist_cap"] = _prepared_proposal(
+        tracks, usable, style, eligible, cluster_threshold=cluster_threshold, n=n, k=k,
+        text=text, steer_vector=steer_vector, steer_weight=steer_weight,
+        fresh=fresh, max_per_artist=max_per_artist)
     rows = []
     for index, (cluster_id, row) in enumerate(selected, 1):
         track = tracks[row["item_id"]]

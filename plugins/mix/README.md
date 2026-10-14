@@ -1,13 +1,14 @@
-# Mix: phase 1 foundation
+# Mix: foundation and phase 2 evaluation harness
 
 An importable, stateless proposal engine over **explicit complete item snapshots**
 and supplied seed IDs. It reads current embeddings; it does not import beets UI,
 resolve playlists, contact Plex/network services, encode text, write the library
 or embedding store, persist proposals, or implement `apply`.
 
-This is not a complete production plugin. Hold-out evaluation, threshold/K
-tuning, beets/Plex adapters, CLI, apply safety, Nix wiring, skill and deployment
-remain pending. No empirical tuning or real-library latency is claimed.
+This is not a complete production plugin. An offline evaluation harness is now
+available; real-library evaluation/threshold/K tuning, beets/Plex adapters,
+production CLI, apply safety, Nix wiring, skill and deployment remain pending.
+No empirical tuning or real-library latency is claimed.
 
 ## Reproduce the synthetic tests
 
@@ -176,3 +177,108 @@ integers; threshold is finite [0,2], weight finite [0,1], fresh boolean.
 - `elapsed_ms`: measured duration; the only intentionally nondeterministic field.
 
 This data seam is suitable for later adapters, not authorization to apply.
+
+## Phase 2: dev-only hold-out evaluation
+
+`python -m beets_mix.evaluate` is an offline development tool, not a beets
+subcommand or a playlist resolver. It does not read a beets database, fetch Plex
+playlists, encode text, contact services, or accept credentials. Supply a local
+JSON export explicitly:
+
+```json
+{"items": [{"id": 1, "path": "/local/audio.wav", "artist": "Artist",
+  "albumartist": "", "title": "Song", "album": "Album", "year": 2000,
+  "length": 180, "mb_trackid": "", "plex_ratingkey": null,
+  "plex_userrating": 0, "plex_skipcount": 0, "plex_viewcount": 0,
+  "album_id": 10}], "playlists": {"example": [1, 2, 3]}}
+```
+
+Include the **complete library candidate snapshot**, not just playlist rows.
+Snapshot fields use the exact `extend` contract above; optional `album_id` is
+a positive integer or null/absent. Album IDs are captured by the evaluator
+before the ordinary snapshot copy discards extra fields. Repeated album IDs
+share identity; absent IDs use unique `('item', id)` identities, never a shared
+imaginary album. Playlist values must be local positive integer ID lists.
+Names and IDs are sorted; duplicate playlist IDs are removed. Unknown playlist
+IDs and originals with unavailable style vectors are reported, not fabricated.
+The one-row example illustrates the format only and has insufficient usable
+seeds to evaluate.
+
+Callable API:
+
+```python
+from beets_mix.evaluate import evaluate
+result = evaluate(data, store=store_path, thresholds=explicit_threshold_grid,
+                  ks=explicit_k_grid, trials=20, seed=0, ns=(15, 50),
+                  style_model_id=None)
+```
+
+The Store path is opened read-only; supplied Stores need the same query-only
+guard as `extend`. Input snapshots and arrays are copied during preparation and
+not mutated. Current style vectors and compact candidate head labels are loaded
+**once per run**, not once per trial/grid/N. Preparation is ephemeral in-process
+data, not a persistent cache. `extend` and evaluation use the same internal
+eligibility/proposal kernel; steering/fresh are off and Mix uses its existing
+default proposal cap. No alternate ranking implementation is used for Mix.
+
+From the repository root, with available Python 3.14 and NumPy, this illustrative
+synthetic grid demonstrates command syntax, **not tuned parameter values**:
+
+```sh
+PYTHONDONTWRITEBYTECODE=1 PYTHONPATH="plugins/mix:plugins/embed:$PYTHONPATH" python3.14 -m beets_mix.evaluate --input evaluation-input.json --store embeddings.sqlite3 --thresholds 0.1 0.2 --ks 50 100 --trials 20 --seed 0 --ns 15 50
+```
+
+Both grids are required: there is no guessed default threshold/K grid. The
+callable allows other positive N values, but exploratory selection is null if
+the required valid Mix metrics at both 15 and 50 are absent. CLI output is one
+strict finite JSON object on stdout. Input/store paths and snapshot text/Plex
+keys are not echoed. Errors use a generic stderr message and exit 2 without
+tracebacks or input values; `--help` explains arguments. Descriptive playlist
+names are reported, so callers must not put credentials in names.
+
+### Frozen evaluation protocol and result meaning
+
+- Use sorted unique resolved **current style-vector** playlist IDs. Hold out
+  `max(2, ceil(.2 * usable_count))`; skip if fewer than one training seed remains.
+  SHA-256 over JSON `[seed, playlist_name, trial_index, stream]` seeds NumPy's
+  `default_rng`, with independent `split`/`random` streams. Reordering input does
+  not change a run; splits are fixed across grid points and N.
+- Remove heldout rows from originals. Exclude **all remaining original rows**,
+  including ones without vectors. Only remaining usable seeds determine the
+  adaptive floor, clustering, and support. Heldouts are ordinary candidates,
+  never forced eligible; duplicate checks consider remaining originals only.
+- Mix, centroid, and random share one naturally eligible pool per trial.
+  Centroid ranks cosine to the unit-normalized training mean, then item ID;
+  a zero mean gives all candidates equal scores. Random uses a uniform
+  permutation without replacement and stable prefixes across N/grid points.
+  Baselines are explicitly **uncapped**. Mix retains its artist cap and fixed
+  pools, so recommendation counts can differ: this is disclosed, not silently
+  adjusted. No method pads or repeats IDs.
+- Primary track recall = hits / **all hidden IDs**. Filtered positives remain in
+  that denominator. Eligible-only recall is a secondary diagnostic, null with
+  `no_eligible_hidden_tracks` when its denominator is empty. Album recall counts
+  **unique recovered hidden album keys / all unique hidden album keys**; several
+  recommendations from one hidden album recover it only once.
+- `playlists` reports original/resolved/usable counts, unresolved/no-vector
+  IDs/counts and skipped trials. Successful `trials` expose training/hidden/
+  remaining-original/eligible IDs, eligible hidden IDs/counts, hidden filter
+  reasons, common exclusions, and `results` for each method/N/configuration.
+  Each result includes recommendation IDs/count, constraint label, recall/hit
+  metrics, album denominator and eligible-recall null reason.
+- `summary` reports means over trials within each playlist and equal-weight
+  playlist macro means for every method/N/configuration. Every mean carries
+  `valid`/`null` counts; nulls and skipped playlists are not coerced to zero.
+  Baseline results repeat across configurations to make comparisons explicit.
+- `best_observed` ranks macro Mix track@15, album@15, track@50, album@50, then
+  smaller threshold and smaller K. It is labeled **exploratory_only**, not a
+  validated optimum; no production defaults are changed. Empty evaluation
+  sets yield null selection and an explicit reason. Top-level `protocol`,
+  `models`, `inputs`, and `skipped_trials` preserve context. There are no timing
+  fields in the evaluation result identity.
+
+Offline synthetic regressions cover reproducibility, hidden-positive recovery,
+natural losses/denominators, shared pools, baseline asymmetry, kernel parity
+against `extend`, one-time preparation, album identity, aggregation and CLI
+safety. Full validation belongs to the independent runner. A real link run is
+blocked until approved access or complete explicit local inputs are available;
+no live results table, selected production knobs, or quality claim is invented.
