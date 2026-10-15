@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "beets-mix"
 version = "0.1.0"
-description = "Read-only snapshot-based music mix proposals"
+description = "Stateless music mix proposals and explicitly approved playlist appends"
 requires-python = ">=3.13"
 license = "AGPL-3.0-or-later"
 dependencies = ["numpy", "beets-embed", "beets", "plexapi", "requests"]

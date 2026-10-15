@@ -5,8 +5,8 @@
 Source-level `mix-extend` passed independent offline validation and its review gate:
 119 Mix tests, 25 embed core tests and 13 isolated actual CLI cases.
 [Setup and output semantics](../../plugins/mix/README.md#phase-3a-read-only-mix-extend)
-describe explicit threshold/K flags, source namespace paths and the not-yet-wired
-worker. Read-only extend remains unchanged by the new phase 3B entry point.
+describe explicit threshold/K flags, source namespace paths and the worker now
+wired by phase 4. Read-only extend remains unchanged by the phase 3B entry point.
 
 Focused mocked command checks cover inert import/construction, exactly-one-source
 and finite knob validation before command I/O, preserved native query tokens,
@@ -58,8 +58,75 @@ no host data/service access. Entry fault-injection tests cover partial permissio
 installation, interruption before the scope body, zero unauthorized dispatches
 and subsequent deliberate append on the same open client.
 [Full contract](../../plugins/mix/README.md#phase-3b-explicit-id-mix-apply).
-Nix, built-wheel proof, skill, deployment and separately approved live apply are
-not covered by source tests or this implementation claim.
+Installed packaging/skill evidence, deployment and separately approved live apply
+are not covered by these source-level tests.
+
+## Phase 4 repository packaging and skill (accepted)
+
+The [self-contained skill](../../skills/mix/SKILL.md), synthetic prompt fixtures
+and durable stdlib-only checks under `skills/mix/tests/` are repository artifacts.
+Repository packaging and skill delivery are complete: **Gate 7 accepted and
+structure review PASS**. Validation establishes **x86_64-linux only**; incompatible
+non-x86 systems were omitted, not validated. Earlier 161-Mix/25-embed (186 total)
+tests, 12 CLI/SDK fake-HTTP cases and 74 focused cleanup tests remain historical
+phase-3 evidence, not new phase-4 coverage.
+
+Both explicit CI commands passed:
+
+```sh
+nix flake check --print-build-logs
+nix build .#packages.x86_64-linux.default --print-build-logs --no-link
+```
+
+The final standard flake check passed in **76 seconds**, with **164 freshly run
+Mix tests, zero failures/errors/skips**, a built/installed wheel, successful
+runtime-dependency, import and metadata hooks, and the complete installed check.
+The separate exact default build passed in **4 seconds**, legitimately reusing
+the matching already-built output, not replaying those tests. Its derivation
+was `q7lmaf8z39fnws0vxrxvc04lxxihq82s-python3.14-beets-63b69fa.drv`, with output
+`cm84z30sc9bc07a251lly7a68iyrm8d3-python3.14-beets-63b69fa` under `/nix/store`.
+The upstream beets dependency separately reported **2667 passed, 163 skipped,
+3 deselected, 225 warnings**; these are not extra Mix tests or a zero-skip closure.
+Earlier cache-failure and obsolete false-smoke-guard reports remain retained as
+historical failures, not rewritten successes.
+
+Independent static authoring check (eight checks previously passed):
+
+```sh
+PYTHONDONTWRITEBYTECODE=1 python3 skills/mix/tests/test_contract.py -v
+```
+
+The test entry point also accepts absolute `--skill` and `--cli` source paths.
+It checks the generated YAML scalar format, self-containment, registered CLI
+flags via AST, explicit protocol clauses and synthetic approval arithmetic.
+It does not import/run the CLI or prove agent behavior. The three realistic
+prompts in `skills/mix/evals/evals.json` are not executed by these checks;
+separate offline simulated-tool evidence consists of six fake-tool text traces
+for three paired cases. Independent grading found **9/9 assertions, 3/3 cases
+with the skill**, versus **7/9 assertions, 2/3 cases without it**. This is not real
+CLI/OpenClaw runtime, statistical compliance or prompt-injection proof. The
+graded traces predate the renderer-stable ordinal clarification; no new model
+test of that formatting is claimed. The fixture JSON remains plans, not results.
+Required cases include proposal-only initial requests, imperative metadata,
+original-number subset mapping, absent threshold/context, changed targets,
+query's empty target, and no retry after uncertain/nonzero apply outcomes.
+
+The installed check used built outputs, not checkout PYTHONPATH, and verified
+module origins, four callable public exports and both commands. Pure imports
+and plugin construction/registration were inert under **SQLite-connect DENY and
+Popen DENY**, leaving no catalog/music state. Real native beets help children
+opened **only the explicitly configured disposable database**: after each,
+`items=0` and `albums=0`, with no music directory. JSON separately reports
+`import_constructor_library_io=false` and
+`native_cli_disposable_library_opened=true`; help is not globally database-free.
+
+The exact shared absolute worker path and executable metadata were verified:
+`/nix/store/x6i44rznh4fvglbl04lyc639iwb1r92z-beets-embed-worker/bin/beets-embed-worker`.
+It was **never executed**; no worker probe, model load or inference was performed.
+Realizing the existing worker closure may fetch existing pinned runtime/model
+assets; no new model pins were introduced. No host deployment, workspace skill
+installation/activation, OpenClaw runtime, live Plex apply, production latency or
+tuning claim follows. K remains 100 and the threshold explicitly user-chosen.
 
 ## Unit tests (offline, in the Nix check phase)
 
@@ -107,11 +174,16 @@ This informs tuning; it does **not** gate the build. Mix should clearly beat ran
 
 ## Live checks (on link, after deploy)
 
-1. `beet mix-extend --plex-playlist "morning eggs" --json` → valid proposal, 15 items, all Plex-linked, none already in the playlist, elapsed time reported. If over 30 s, open the vector-cache follow-up.
-2. Same with `--steer "sleepier"` → still 15, CLAP model ID reported, order differs.
+These are future separately authorized checks, not part of phase-4 execution.
+The example threshold **0.25 is illustrative and user-chosen, not a production
+default**; substitute Finn's explicit value or an applicable already approved
+context value. Missing threshold requires clarification, not exploratory tuning.
+
+1. `beet mix-extend --cluster-threshold 0.25 --plex-playlist "morning eggs" --json` → valid proposal with actual returned count/losses, all proposed tracks Plex-linked and absent from the playlist, elapsed time reported. If over 30 s, open the vector-cache follow-up.
+2. Same with `--steer "sleepier"`, only with matching configured worker readiness → text model ID reported; inspect the actual resulting proposal rather than assuming exactly N picks.
 3. Beets-query seed (`artist:Khruangbin`) → proposal without a target.
 4. Plex playlist with a duplicated title (`Weekly-Exploration`) → clear ambiguity error.
-5. `beet mix-apply` is run **only after Finn approves a specific proposal** in chat. Verify the reported count matches Plex and that rerunning the identical apply reports everything as already present.
+5. `beet mix-apply` is run **only after Finn subsequently approves a specific proposal/subset** in chat. Check added/already-present/refused outcomes and the actual observed count. No automatic rerun follows an uncertain or nonzero outcome; sequential-repeat/idempotence checks remain synthetic unless a further live write is separately authorized. The CLI resolves by title, not by an expected proposal-key argument; known key/title mismatch stops the workflow, and a returned-key mismatch requires inspection, not correction/retry.
 
 ## Infra checks
 

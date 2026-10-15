@@ -6,24 +6,39 @@ resolve playlists, contact Plex/network services, encode text, write the library
 or embedding store, or persist proposals. The separate `apply` API uses an
 explicit injected client and approved item IDs; it is not part of ranking.
 
-This is not a complete production plugin. An offline evaluation harness is now
+Repository packaging and the conversational skill are complete, with Gate 7
+accepted and structure review passed on the repository delivery. An offline evaluation harness is
 available, and the authorized exploratory real-library run completed on
 2026-10-15: [dated results](../../docs/mix/EVALUATION.md). Its 0.1/K=200 winner
 is not validated production tuning; K remains 100 and threshold explicit.
 Phase 3A provides source-level beets/Plex read adapters and `mix-extend`, with
 independent offline integration validation and its review gate passed. Phase 3B
-now adds the source-level explicit-ID apply API and `mix-apply`, pending combined
-independent validation, structure review and Gate 6. Nix wiring, skill and
-deployment remain later work; no live apply is authorized and no production
-extend-latency claim is made. Built-wheel integration remains unverified.
+adds the explicit-ID apply API and `mix-apply`; its independent evidence and
+Gate 6 re-review are accepted. Phase 4 repository packaging/worker wiring and the
+[self-contained Mix skill](../../skills/mix/SKILL.md) have passed installed
+closure checks, skill validation and both CI commands on **x86_64-linux only**;
+non-x86 systems were omitted, not validated. Repository
+artifacts do not activate a host plugin or install a workspace skill. No live
+apply is authorized and no production extend-latency claim is made.
+
+The package interface is `nix build .#mix --no-link`; the package was built by
+the final standard flake check. See [validation evidence](../../docs/mix/VERIFICATION.md#phase-4-repository-packaging-and-skill-accepted).
+Host configuration, routing, symlinks and deployment remain separate work.
+Skill authoring checks and synthetic prompt plans live under `skills/mix/tests/`
+and `skills/mix/evals/`. Eight static checks and six separately graded fake-tool
+text traces are distinct evidence, not actual OpenClaw behavior or a safety guarantee.
+The skill binds approval to the original proposal numbers and title/key context,
+but `mix-apply` still takes only a title: no expected-proposal-key CLI guard or
+atomic cross-turn binding is implied. Known mismatches stop the workflow;
+returned-key differences require inspection without corrective retry.
 
 ## Phase 3A: read-only `mix-extend`
 
 Enable `mix` in an explicitly selected beets configuration, using an environment
 with the declared runtime dependencies (`beets`, `numpy`, `beets-embed`,
 `plexapi`, `requests`). Namespace discovery includes `beetsplug.mix` alongside
-the pure library. No Nix/flake wiring, worker substitution or deployment is
-included yet. With available Python 3.14 and compatible NumPy, source-run syntax
+the pure library. Phase-4 Nix wiring and installed namespace/worker-path evidence
+passed; no host deployment is included. With available Python 3.14 and compatible NumPy, source-run syntax
 from this repository root is:
 
 ```sh
@@ -49,7 +64,7 @@ at most 240 characters after trimming); `--steer-weight` finite [0,1] (default
 validates options before command-owned I/O; beets itself supplies an already-open
 library. No exploratory evaluation result is promoted to a production default.
 
-Mix settings, with defaults shown:
+Mix source settings, with defaults shown (the package replaces the worker marker):
 
 ```yaml
 plugins: [mix]
@@ -60,9 +75,13 @@ mix:
   plex_timeout: 15
 ```
 
-`--store` overrides `mix.store`. Before packaging, steering requires replacing
-the marker with an explicitly configured **trusted packaged worker executable
-matching the installed embed model manifest**. The helper does not claim to
+`--store` overrides `mix.store`. Source development requires an explicitly
+configured **trusted packaged worker executable matching the installed embed
+model manifest** for steering; the phase-4 package substitutes
+the marker with the existing matching worker. `mix.worker` is not a CLI flag.
+Realizing that existing runtime closure may realize/fetch already pinned model
+assets; this is distinct from running inference. Package/skill checks must not
+launch the worker or encode text. The helper does not claim to
 verify worker identity: encode-text reports vectors, not a model ID. It uses
 CPU-only, bounded subprocess execution, temporary manifest/runtime/cache state,
 offline flags, group cleanup on interruption/timeout, strict finite 512-f32
@@ -229,8 +248,9 @@ actual CLI/PlexAPI 4.18.2 fake-HTTP scenarios. Review found a scope-entry cleanu
 gap; the corrected boundary then passed 74 focused transport/API/CLI tests,
 including entry interruptions and recovery on the same open client. Gate 6
 accepted the correction; the earlier full-suite and integration evidence was
-reused, not rerun. No live apply occurred. Nix/skill/deployment, built-wheel proof
-and live approval are separate work. K100 and the explicit extend threshold
+reused, not rerun. These historical 186 combined tests, 12 SDK cases and 74 focused
+tests are not new phase-4 coverage. Phase-4 package/skill evidence is separate;
+deployment and live approval remain separate work. K100 and the explicit extend threshold
 remain unchanged.
 
 ## Reproduce the synthetic tests
@@ -245,7 +265,7 @@ PYTHONDONTWRITEBYTECODE=1 PYTHONPATH="plugins/mix:plugins/embed:$PYTHONPATH" pyt
 For long validation on Linux, load `agent-run-long` and run that command through
 its helper. Full foundation validation is assigned to an independent runner.
 The package follows embed's setuptools/Python >=3.13 convention and declares
-NumPy and `beets-embed`; it does not add Nix wiring at this phase.
+NumPy and `beets-embed`; phase 4 adds the Nix wiring and installed checks.
 
 ## Exact API
 

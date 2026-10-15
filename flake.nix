@@ -96,6 +96,10 @@
           worker = embed-worker;
           viewer = beets-album-graph;
         };
+        mix = pkgs.callPackage ./plugins/mix {
+          inherit beets pythonPackages embed;
+          worker = embed-worker;
+        };
 
         # beets & plugins
         beets-plugins = (beets.override {
@@ -136,6 +140,10 @@
             embed = {
               enable = system == "x86_64-linux";
               propagatedBuildInputs = pkgs.lib.optionals (system == "x86_64-linux") [ embed ];
+            };
+            mix = {
+              enable = system == "x86_64-linux";
+              propagatedBuildInputs = pkgs.lib.optionals (system == "x86_64-linux") [ mix ];
             };
             # filetote = {
             #   enable = true;
@@ -194,7 +202,30 @@
 
           default = beets-plugins;
         } // pkgs.lib.optionalAttrs (system == "x86_64-linux") {
-          inherit embed embed-worker beets-embed-worker-rocm beets-embed-style-benchmark;
+          inherit embed mix embed-worker beets-embed-worker-rocm beets-embed-style-benchmark;
+        };
+        checks = pkgs.lib.optionalAttrs (system == "x86_64-linux") {
+          inherit mix;
+          mix-installed =
+            let
+              smokePython = pythonPackages.python.withPackages (_: [ beets mix ]);
+            in
+            pkgs.runCommand "beets-mix-installed-smoke" { } ''
+              export HOME="$TMPDIR/home" XDG_CONFIG_HOME="$TMPDIR/xdg-config"
+              export XDG_CACHE_HOME="$TMPDIR/xdg-cache" XDG_DATA_HOME="$TMPDIR/xdg-data"
+              export BEETSDIR="$XDG_CONFIG_HOME/beets"
+              export PYTHONDONTWRITEBYTECODE=1 PYTHONNOUSERSITE=1
+              export HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 HF_DATASETS_OFFLINE=1
+              export OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1
+              mkdir -p "$HOME" "$XDG_CONFIG_HOME" "$XDG_CACHE_HOME" "$XDG_DATA_HOME" "$BEETSDIR"
+              unset PYTHONPATH PYTHONHOME
+              ${smokePython}/bin/python ${./plugins/mix/tests/installed_smoke.py} \
+                --mix-out ${mix} \
+                --embed-out ${embed} \
+                --beet ${beets-plugins}/bin/beet \
+                --worker ${embed-worker}/bin/beets-embed-worker
+              touch "$out"
+            '';
         };
         devShells.default = env;
       }
