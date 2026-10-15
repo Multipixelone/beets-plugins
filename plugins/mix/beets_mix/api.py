@@ -11,7 +11,8 @@ from beets_embed.store import Store, model_ids
 from . import defaults as d
 from .cluster import cluster_seeds
 from .filters import filter_candidates
-from .rank import allocate_shares, positive_integer, rank_cluster, rerank_pool, select
+from .rank import (_candidate_matrix, _rank_cluster_ks, allocate_shares,
+                   positive_integer, rerank_pool, select)
 from .vectors import load_head_metadata, load_vectors, normalized, validate_model
 
 FIELDS = ("id", "path", "artist", "albumartist", "title", "album", "year", "length",
@@ -111,16 +112,37 @@ def _eligible_candidates(tracks, originals, usable, style, top_styles, *, text=N
         shortest_seed_length=min(tracks[i]["length"] for i in usable))
 
 
+def _rank_threshold(prepared, usable, style, *, cluster_threshold, ks):
+    """Retain scalar rankings for one threshold; one cluster's arrays at a time."""
+    clusters = cluster_seeds(usable, style, distance_threshold=cluster_threshold)
+    rankings = {k: [] for k in ks}
+    for ids in clusters:
+        per_k = _rank_cluster_ks(prepared, ids, style, ks)
+        for k in ks:
+            rankings[k].append(per_k[k])
+    return clusters, rankings
+
+
+def _select_ranked(tracks, clusters, ranked, *, n, text=None, steer_vector=None,
+                   steer_weight=d.STEER_WEIGHT, fresh=d.FRESH, max_per_artist=d.MAX_PER_ARTIST):
+    """Fresh N-dependent allocation, calibrated pools, cap and rollover state."""
+    shares = allocate_shares(clusters, n)
+    pools = [rerank_pool(rows, share, tracks,
+                       text_vectors=text, steer_vector=steer_vector, weight=steer_weight, fresh=fresh)
+             for rows, share in zip(ranked, shares)]
+    selected, capped = select(pools, shares, clusters, tracks, max_per_artist=max_per_artist)
+    return selected, shares, capped
+
+
 def _prepared_proposal(tracks, usable, style, eligible, *, cluster_threshold, n, k,
                        text=None, steer_vector=None, steer_weight=d.STEER_WEIGHT,
                        fresh=d.FRESH, max_per_artist=d.MAX_PER_ARTIST):
-    """Shared in-process ranking kernel; callers own validation/preparation."""
-    clusters = cluster_seeds(usable, style, distance_threshold=cluster_threshold)
-    shares = allocate_shares(clusters, n)
-    pools = [rerank_pool(rank_cluster(eligible, ids, style, k=k), share, tracks,
-                       text_vectors=text, steer_vector=steer_vector, weight=steer_weight, fresh=fresh)
-             for ids, share in zip(clusters, shares)]
-    selected, capped = select(pools, shares, clusters, tracks, max_per_artist=max_per_artist)
+    """Single-configuration wrapper around the same trial/grid kernel."""
+    prepared = _candidate_matrix(eligible, style)
+    clusters, rankings = _rank_threshold(prepared, usable, style, cluster_threshold=cluster_threshold, ks=[k])
+    selected, shares, capped = _select_ranked(tracks, clusters, rankings[k], n=n,
+        text=text, steer_vector=steer_vector, steer_weight=steer_weight,
+        fresh=fresh, max_per_artist=max_per_artist)
     return selected, clusters, shares, capped
 
 

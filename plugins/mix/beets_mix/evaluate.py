@@ -14,9 +14,9 @@ from beets_embed.retrieval import unit
 from beets_embed.store import Store, model_ids
 
 from . import defaults as d
-from .api import _eligible_candidates, _prepared_proposal, snapshots
+from .api import _eligible_candidates, _rank_threshold, _select_ranked, snapshots
 from .filters import filter_candidates
-from .rank import positive_integer
+from .rank import _candidate_matrix, positive_integer
 from .vectors import load_head_metadata, load_vectors, validate_model
 
 METRICS = ("track_recall", "album_recall", "eligible_track_recall")
@@ -182,17 +182,23 @@ def evaluate(data, *, store, thresholds, ks, trials=20, seed=0, ns=(15, 50), sty
             centroid = centroid_rank(eligible_ids, training, vectors)
             random = random_rank(eligible_ids, seed=seed, playlist=name, trial=trial)
             results = []
-            for config in configurations:
-                for n in ns:
-                    selected, _, _, capped = _prepared_proposal(tracks, training, vectors, eligible,
-                        cluster_threshold=config["cluster_threshold"], k=config["k"], n=n, fresh=False)
-                    for method, recommended in (("mix", [row["item_id"] for _, row in selected]),
-                                                ("centroid", centroid[:n]), ("random", random[:n])):
-                        results.append({"configuration": dict(config), "n": n, "method": method,
-                            "constraints": "mix_cap_and_fixed_pools" if method == "mix" else "uncapped_baseline",
-                            "recommendation_ids": recommended, "recommendation_count": len(recommended),
-                            "artist_cap_count": capped if method == "mix" else None,
-                            **recall(recommended, hidden, eligible_hidden, albums)})
+            prepared = _candidate_matrix(eligible, vectors)
+            for threshold in thresholds:
+                clusters, rankings = _rank_threshold(prepared, training, vectors,
+                    cluster_threshold=threshold, ks=ks)
+                for k in ks:
+                    config = {"cluster_threshold": threshold, "k": k}
+                    for n in ns:
+                        selected, _, capped = _select_ranked(tracks, clusters, rankings[k], n=n, fresh=False)
+                        for method, recommended in (("mix", [row["item_id"] for _, row in selected]),
+                                                    ("centroid", centroid[:n]), ("random", random[:n])):
+                            results.append({"configuration": dict(config), "n": n, "method": method,
+                                "constraints": "mix_cap_and_fixed_pools" if method == "mix" else "uncapped_baseline",
+                                "recommendation_ids": recommended, "recommendation_count": len(recommended),
+                                "artist_cap_count": capped if method == "mix" else None,
+                                **recall(recommended, hidden, eligible_hidden, albums)})
+                del rankings  # Do not retain another threshold's rankings while building the next.
+            del prepared  # The sole candidate matrix cannot survive into the next trial.
             report["trials"].append({"trial": trial, "status": "ok", "training_ids": training,
                 "hidden_ids": hidden, "remaining_original_ids": sorted(originals),
                 "hidden_count": len(hidden), "eligible_ids": eligible_ids, "eligible_count": len(eligible),

@@ -48,27 +48,54 @@ def zscores(values):
     return (values - values.mean()) / std if std > d.ZSCORE_EPSILON else np.zeros_like(values)
 
 
+def _candidate_matrix(candidates, vectors):
+    """Trial-local sorted IDs and their sole, legacy-layout candidate matrix."""
+    ids = sorted(t["id"] for t in candidates)
+    return ids, np.stack([vectors[i] for i in ids]) if ids else None
+
+
+def _rank_cluster_ks(prepared, seed_ids, vectors, ks):
+    """One cluster multiplication/full sort, exact seed-ordered support per K.
+
+    Only scalar row dictionaries escape; no similarity slices/views are retained.
+    """
+    ks = sorted(set(ks))
+    for k in ks:
+        positive_integer(k, "k")
+    ids, matrix = prepared
+    seeds = sorted(seed_ids)
+    if not ks or not ids or not seeds:
+        return {k: [] for k in ks}
+    # Keep this multiplication's seed order, shape, dtype and layout unchanged.
+    similarities = matrix @ np.stack([vectors[i] for i in seeds]).T
+    orders = []
+    for column in range(len(seeds)):
+        orders.append(sorted(range(len(ids)), key=lambda i: (-float(similarities[i, column]), ids[i]))[:max(ks)])
+    rankings = {}
+    for k in ks:
+        support = np.zeros(len(ids), dtype="f8")
+        endorsed = np.zeros(len(ids), dtype=bool)
+        for column, order in enumerate(orders):
+            prefix = order[:k]
+            support[prefix] += similarities[prefix, column]
+            endorsed[prefix] = True
+        result = []
+        for i, item_id in enumerate(ids):
+            if endorsed[i]:
+                # The nearest seed need not be one of this candidate's endorsers.
+                nearest = int(np.argmax(similarities[i]))
+                result.append({"item_id": item_id, "support": float(support[i] / len(seeds)),
+                               "max_similarity": float(similarities[i, nearest]), "nearest_seed_id": seeds[nearest]})
+        rankings[k] = sorted(result, key=lambda r: (-r["support"], -r["max_similarity"], r["item_id"]))
+    return rankings
+
+
 def rank_cluster(candidates, seed_ids, vectors, *, k=d.K):
     positive_integer(k, "k")
-    ids = sorted(t["id"] for t in candidates)
     seeds = sorted(seed_ids)
-    if not ids or not seeds:
+    if not seeds:
         return []
-    matrix = np.stack([vectors[i] for i in ids])
-    similarities = matrix @ np.stack([vectors[i] for i in seeds]).T
-    support = np.zeros(len(ids), dtype="f8")
-    endorsed = np.zeros(len(ids), dtype=bool)
-    for column in range(len(seeds)):
-        order = sorted(range(len(ids)), key=lambda i: (-float(similarities[i, column]), ids[i]))[:k]
-        support[order] += similarities[order, column]
-        endorsed[order] = True
-    result = []
-    for i, item_id in enumerate(ids):
-        if endorsed[i]:
-            nearest = int(np.argmax(similarities[i]))
-            result.append({"item_id": item_id, "support": float(support[i] / len(seeds)),
-                           "max_similarity": float(similarities[i, nearest]), "nearest_seed_id": seeds[nearest]})
-    return sorted(result, key=lambda r: (-r["support"], -r["max_similarity"], r["item_id"]))
+    return _rank_cluster_ks(_candidate_matrix(candidates, vectors), seeds, vectors, [k])[k]
 
 
 def rerank_pool(ranked, share, tracks, *, text_vectors=None, steer_vector=None,

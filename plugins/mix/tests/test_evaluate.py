@@ -13,7 +13,7 @@ import numpy as np
 from beets_embed.store import Store, fingerprint, model_ids
 
 from beets_mix import extend
-from beets_mix.api import _prepared_proposal
+from beets_mix.api import _select_ranked
 from beets_mix.evaluate import (aggregate, best_observed, centroid_rank, evaluate,
                                 main, make_split, random_rank, recall)
 from beets_mix.vectors import load_vectors
@@ -146,7 +146,7 @@ class Evaluation(unittest.TestCase):
             self.assertNotIn(8, row["recommendation_ids"])
 
     def test_fresh_explicitly_disabled_in_prepared_calls(self):
-        with patch("beets_mix.evaluate._prepared_proposal", wraps=_prepared_proposal) as proposal:
+        with patch("beets_mix.evaluate._select_ranked", wraps=_select_ranked) as proposal:
             result = evaluate(self.data, store=self.store, thresholds=[.1], ks=[100], trials=1)
         self.assertEqual(proposal.call_count, 2)
         self.assertTrue(all(call.kwargs["fresh"] is False for call in proposal.call_args_list))
