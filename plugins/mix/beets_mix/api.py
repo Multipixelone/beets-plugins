@@ -1,4 +1,4 @@
-"""Stateless proposal API over complete snapshots; no beets/Plex imports."""
+"""Proposal and explicit-ID apply APIs; no beets UI or PlexAPI imports."""
 
 from dataclasses import dataclass
 from collections.abc import Mapping
@@ -7,6 +7,8 @@ from pathlib import Path
 from time import perf_counter
 
 from beets_embed.store import Store, model_ids
+
+from .apply import ApplyResult, apply
 
 from . import defaults as d
 from .cluster import cluster_seeds

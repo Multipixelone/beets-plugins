@@ -1,5 +1,5 @@
-"""Read-only, snapshot-based Mix foundation (no adapters or apply operation)."""
+"""Mix proposal library and explicit-ID apply over an injected client."""
 
-from .api import Proposal, extend
+from .api import ApplyResult, Proposal, apply, extend
 
-__all__ = ["Proposal", "extend"]
+__all__ = ["Proposal", "extend", "ApplyResult", "apply"]

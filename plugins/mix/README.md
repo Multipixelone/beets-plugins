@@ -1,18 +1,21 @@
-# Mix: foundation, evaluator and read-only extend command
+# Mix: foundation, evaluator and explicit proposal/apply commands
 
 The pure `beets_mix.extend` API is a stateless proposal engine over **explicit complete item snapshots**
 and supplied seed IDs. It reads current embeddings; it does not import beets UI,
 resolve playlists, contact Plex/network services, encode text, write the library
-or embedding store, persist proposals, or implement `apply`.
+or embedding store, or persist proposals. The separate `apply` API uses an
+explicit injected client and approved item IDs; it is not part of ranking.
 
 This is not a complete production plugin. An offline evaluation harness is now
 available, and the authorized exploratory real-library run completed on
 2026-10-15: [dated results](../../docs/mix/EVALUATION.md). Its 0.1/K=200 winner
 is not validated production tuning; K remains 100 and threshold explicit.
 Phase 3A provides source-level beets/Plex read adapters and `mix-extend`, with
-independent offline integration validation and its review gate passed. Phase 3B apply safety,
-Nix wiring, skill and deployment remain pending; no production extend-latency
-claim is made. `mix-apply` is not registered and no write path is implemented.
+independent offline integration validation and its review gate passed. Phase 3B
+now adds the source-level explicit-ID apply API and `mix-apply`, pending combined
+independent validation, structure review and Gate 6. Nix wiring, skill and
+deployment remain later work; no live apply is authorized and no production
+extend-latency claim is made. Built-wheel integration remains unverified.
 
 ## Phase 3A: read-only `mix-extend`
 
@@ -70,9 +73,10 @@ needed or launched. Timeouts must be positive finite numbers.
 Plex mode reads only the existing typed global `plex.host`, `plex.token`, and
 optional integer `plex.port` (default 32400), plus `mix.plex_timeout`. It does not
 initialize plexsync, reload configuration, or print settings. The owned transport
-is GET-only and bound to the configured HTTP(S) origin, with TLS verification,
-no redirects/retries/proxy or netrc inheritance, and session cleanup. No PUT or
-other mutation capability is enabled in 3A.
+is GET-only by default and bound to the configured HTTP(S) origin, with TLS
+verification, no redirects/retries/proxy or netrc inheritance, and session
+cleanup. `mix-extend` never enables a write; explicitly invoked apply uses only
+the narrow one-use capability described below.
 
 The command captures the full complete library snapshot and, for query mode,
 the selected query IDs in bounded pages. It finishes all snapshot transactions
@@ -118,8 +122,116 @@ snapshot/close, resolution/Plex cleanup, steering and kernel/diagnostic assembly
 before output serialization/printing**. Pure API `elapsed_ms` retains its
 original engine-only meaning; its schema/implementation were not changed.
 
-This command proposes only. Apply, approvals, write safety and registration of
-`mix-apply` remain phase 3B and are not implied or authorized by read-only output.
+This command proposes only. Read-only output does not authorize applying it.
+
+## Phase 3B: explicit-ID `mix-apply`
+
+**No live playlist write has been approved by this implementation.** A caller
+must obtain separate approval of a specific proposal/subset before invoking
+apply. There is no proposal cache, approval file, remembered selection or new
+interactive confirmation mechanism: the explicit ordered item IDs are the API
+approval boundary. The following source-run syntax uses illustrative IDs and
+is not permission to execute it against a live service:
+
+```sh
+PYTHONDONTWRITEBYTECODE=1 PYTHONPATH="plugins/mix:plugins/embed:$PYTHONPATH" python3.14 -m beets -c mix-source.yaml mix-apply --plex-playlist "approved target" --json 101 102
+```
+
+Only `--plex-playlist TITLE`, explicit positive ASCII decimal item-ID tokens and
+optional `--json` are accepted. Blank titles, empty requests, zero, signed,
+nondecimal/Unicode-number and boolean IDs are rejected before command I/O.
+Duplicate IDs are deduplicated in first-occurrence order. Unlike extend, no
+threshold, K, query, Store or steering option is involved.
+
+Public seam (also re-exported from `beets_mix.api`):
+
+```python
+from beets_mix import apply, ApplyResult
+result = apply(all_current_identity_rows, approved_ids,
+               client=explicit_client, plex_playlist=approved_title)
+payload = result.to_dict()
+```
+
+**Supply the full current library's identity rows**, not just requested tracks:
+each row needs unique positive built-in integer `id` and raw `plex_ratingkey`
+(explicit null means unlinked). Global collisions cannot be detected from an
+approved subset alone. No complete engine/history/vector snapshot is required.
+The API owns canonical identity copies and output; `ApplyResult.data` and a
+deep-copied `to_dict()` follow the Proposal pattern. Importing this seam does not
+import beets UI or PlexAPI, or perform service work; client methods are called
+only when apply is explicitly invoked.
+
+The CLI's `link_snapshot` performs bounded 512-ID identity-only raw SQL reads,
+independent of optional key normalizers. It fails closed on duplicate raw key
+attributes/identity inconsistencies and does not load paths, history, vectors,
+or a Store. Malformed unrelated ratings therefore do not block apply. The
+library is closed in a finally block **before** reading connection settings or
+calling the client. Only the existing typed Plex host/token/optional port and
+`mix.plex_timeout` are read; Store/worker configuration is not consulted.
+
+### Preflight, exactly-one append and observation
+
+1. Resolve a **fresh** exact unique manual audio playlist and validate all current
+   entry keys. Missing/ambiguous/smart/non-audio/foreign or malformed targets
+   abort the batch with no append. A current entry with an unverifiable key also
+   fails closed: a complete existing-key check cannot otherwise be made.
+2. Classify requested IDs against every current local link. Missing IDs are
+   `item_not_found`; invalid/unlinked keys are `not_plex_linked`; any canonical
+   key shared by multiple local IDs is `ambiguous_plex_link`. Leading zeroes are
+   canonicalized, not treated as different recordings. Never choose the first
+   ambiguous row. Unique keys already in the initial playlist are skipped
+   without fetching, retaining initial raw occurrence multiplicity for counts.
+3. Fetch/preflight **all** other requested tracks before mutation, in request
+   order. The client validates audio type, exact returned key and same server
+   object identity. Per-item reasons are `wrong_server`, `wrong_media_type`,
+   `track_identity_mismatch`, or generic `plex_track_unavailable` for other
+   missing/read failures. Refused fetches do not prevent valid IDs being added.
+   No proposal/history/vector/version filters are reapplied to approved IDs.
+4. When anything remains accepted, call `append(snapshot, ordered_tracks)` once.
+   The transport contract grants only a scoped **one-use PUT** to the original
+   configured-base-path `/playlists/<canonical-key>/items` around one validated
+   `addItems` call. Permission is consumed before dispatch and revoked on exit;
+   other methods, origins and paths remain refused. Reads/connect/extend never
+   gain ambient writes. No retry, corrective append, removal or reordering is
+    introduced.
+5. After success, reread **by the original playlist key and expected title**,
+   not a cached handle or title reselection. Every accepted key's count must
+   increase relative to the captured initial Counter. Only then report added
+   IDs. `playlist_tracks_after` is the actual fresh raw entry count, including
+   concurrent extra entries, not `old_count + accepted_count`.
+
+Empty accepted sets (all present/refused) perform zero appends/PUTs and report
+the initial fresh raw count. Sequential repeated apply skips keys already
+present. This is **not atomic idempotence under concurrency**: another actor can
+race the initial check, change counts, or remove/add entries. Increased observed
+counts are not a proof that this client caused every increase.
+
+Append failure/interruption, partial/missing post-observation, wrong post target,
+or post-read failure/interruption returns fixed `write_outcome_unknown`, with
+no success result and no automatic retry. Inspect/reread the playlist before
+deciding what to do. The CLI preserves that warning if cleanup masks an unknown
+write or fails after an observed successful append. These are safe categories,
+not raw upstream errors, URLs or credential-bearing responses.
+
+### Apply output
+
+`--json` emits strict finite, ASCII-escaped `beets-mix.apply.v1` data:
+`playlist`, canonical `plex_ratingkey`, ordered `added`, ordered
+`already_present`, `refused: [{item_id, reason}]`, and actual
+`playlist_tracks_after`. Handles, transport/config objects and exception strings
+are never returned. Per-item refusals can coexist with success and exit zero;
+unknown outcomes fail without printing a result. Text output is one line with
+added/already-present/refused counts and the observed playlist size. The
+accepted standard/native logger and discarded-stream guard remains in use.
+
+Independent validation passed 161 Mix and 25 embed core tests, plus 12 isolated
+actual CLI/PlexAPI 4.18.2 fake-HTTP scenarios. Review found a scope-entry cleanup
+gap; the corrected boundary then passed 74 focused transport/API/CLI tests,
+including entry interruptions and recovery on the same open client. Gate 6
+accepted the correction; the earlier full-suite and integration evidence was
+reused, not rerun. No live apply occurred. Nix/skill/deployment, built-wheel proof
+and live approval are separate work. K100 and the explicit extend threshold
+remain unchanged.
 
 ## Reproduce the synthetic tests
 

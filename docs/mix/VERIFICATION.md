@@ -6,7 +6,7 @@ Source-level `mix-extend` passed independent offline validation and its review g
 119 Mix tests, 25 embed core tests and 13 isolated actual CLI cases.
 [Setup and output semantics](../../plugins/mix/README.md#phase-3a-read-only-mix-extend)
 describe explicit threshold/K flags, source namespace paths and the not-yet-wired
-worker. Phase 3B `mix-apply` is **not** registered or implemented.
+worker. Read-only extend remains unchanged by the new phase 3B entry point.
 
 Focused mocked command checks cover inert import/construction, exactly-one-source
 and finite knob validation before command I/O, preserved native query tokens,
@@ -21,6 +21,45 @@ reads), plus pre-bound standard/native beets handlers, `extra_debug` and exact
 guard restoration on success/error/interruption. Independent validation
 must retain all helper/kernel/evaluator regressions. No live connection, worker
 inference, playlist mutation or deployment is authorized by these mocked checks.
+
+## Phase 3B explicit-ID apply
+
+Source-level `apply`/`ApplyResult` and `mix-apply` are implemented against the
+frozen client seams. Combined validation passed 161 Mix and 25 embed core tests,
+plus 12 isolated real-CLI/PlexAPI fake-HTTP scenarios. Gate 6 identified a
+scope-entry interruption cleanup defect. Its correction passed 74 independent
+focused transport/API/CLI tests, and Gate 6 accepted the re-review. The earlier
+full-suite and process-probe evidence was reused, not rerun. No live playlist
+mutation is authorized.
+
+- Identity/request validation before client I/O; full-library canonical key
+  collisions including off-playlist rows; ordered deduplication, missing/unlinked
+  refusals and owned output; no engine/history/vector eligibility recheck.
+- Fresh exact/manual/audio/same-server target, fail-closed malformed current
+  entry keys, all track preflight before one ordered append, fixed per-item
+  refusal reasons, all-present/all-refused zero-write results.
+- Scoped exact-origin/path one-use PUT in the transport; revocation on all
+  exits, no ambient write capability, redirect/proxy/TLS/retry policy retained.
+- Fresh original-key/title post-read, per-key Counter increases, actual observed
+  length including concurrent additions, partial/missing/failing/interrupted
+  writes or observation as `write_outcome_unknown`, never an inferred success or
+  automatic retry. Sequential idempotence only; no atomic concurrency claim.
+- Real temporary-library identity-only raw snapshots (bad unrelated history
+  must not block apply), bounded pages, duplicate raw attributes fail closed,
+  read-only SQL dumps and close-before-config/client. No Store/worker settings,
+  full history snapshot, path stats, worker or extend calls in apply.
+- Strict JSON/text/no-op/mixed refusal output, safe sentinel failures and
+  supported standard/native logging restoration; only command registration
+  assertions in prior tests change from one command to two.
+
+Independent evidence includes actual isolated CLI and installed PlexAPI/fake-HTTP
+probes for ordered one-PUT dispatch, permission revocation, unknown outcome and
+no host data/service access. Entry fault-injection tests cover partial permission
+installation, interruption before the scope body, zero unauthorized dispatches
+and subsequent deliberate append on the same open client.
+[Full contract](../../plugins/mix/README.md#phase-3b-explicit-id-mix-apply).
+Nix, built-wheel proof, skill, deployment and separately approved live apply are
+not covered by source tests or this implementation claim.
 
 ## Unit tests (offline, in the Nix check phase)
 

@@ -76,3 +76,25 @@ def snapshot(lib, query=()):
                          **{field: item.get(field, default) for field, default in DEFAULTS.items() if field not in NUMERIC_FIELDS},
                          **_numeric_fields(numeric.get(item["id"], []))})
     return sorted(rows, key=lambda row: row["id"])
+
+
+def link_snapshot(lib):
+    """Owned raw identity-only links; no Item normalizers, history or path work."""
+    with lib.transaction() as transaction:
+        maximum = transaction.query("SELECT MAX(id) AS maximum FROM items")[0]["maximum"] or 0
+    rows, seen = [], set()
+    for first in range(0, maximum + 1, 512):
+        with lib.transaction() as transaction:
+            page = transaction.query(
+                "SELECT items.id AS id,item_attributes.value AS plex_ratingkey "
+                "FROM items LEFT JOIN item_attributes ON item_attributes.entity_id=items.id "
+                "AND lower(item_attributes.key)=? "
+                "WHERE items.id>=? AND items.id<? ORDER BY items.id",
+                ("plex_ratingkey", first, first + 512))
+        for row in page:
+            item_id = row["id"]
+            if type(item_id) is not int or item_id <= 0 or item_id in seen:
+                raise ValueError("Invalid or ambiguous identity snapshot") from None
+            seen.add(item_id)
+            rows.append({"id": item_id, "plex_ratingkey": row["plex_ratingkey"]})
+    return rows

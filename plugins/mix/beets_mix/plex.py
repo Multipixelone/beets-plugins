@@ -1,9 +1,11 @@
-"""Read-only Plex boundary. Importing this module does not import PlexAPI."""
+"""Origin-bound Plex reads and explicitly scoped append; no PlexAPI import work."""
 
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 import math
 import ipaddress
 import re
+from threading import get_ident
 from urllib.parse import urlsplit, urlunsplit
 
 
@@ -19,6 +21,9 @@ _MESSAGES = {
     "invalid_playlist": "Plex playlist identity is invalid",
     "wrong_media_type": "Plex playlist entry is not an audio track",
     "wrong_server": "Plex object belongs to another server",
+    "invalid_track": "Plex track identity is invalid",
+    "track_identity_mismatch": "Plex track identity does not match the requested key",
+    "write_outcome_unknown": "Plex write outcome is unknown; re-read the playlist before retrying",
 }
 
 
@@ -40,10 +45,14 @@ def canonical_key(value):
 
 
 class ControlledSession:
-    """GET-only PlexAPI session bound to one explicitly configured origin."""
+    """GET-only by default; append can grant one exact-path PUT on this thread."""
 
     def __init__(self, base_url=None):
         self._origin = _url_origin(base_url) if base_url is not None else None
+        self._base_path = urlsplit(base_url).path.rstrip("/") if base_url is not None else None
+        self._closed = False
+        self._append_scope_path = None
+        self._append_grant = None
         import requests
         from requests.adapters import HTTPAdapter
 
@@ -56,16 +65,23 @@ class ControlledSession:
         self._session.mount("https://", HTTPAdapter(max_retries=0))
 
     def request(self, method, url, **kwargs):
-        if not isinstance(method, str) or method.upper() != "GET":
+        if self._closed or not isinstance(method, str) or method.upper() not in ("GET", "PUT"):
             raise PlexError("transport_refused") from None
+        method = method.upper()
         if self._origin is None or _url_origin(url) != self._origin:
             raise PlexError("transport_refused") from None
         if (kwargs.get("proxies") or kwargs.get("auth") is not None
                 or kwargs.get("verify", True) is not True):
             raise PlexError("transport_refused") from None
+        if method == "PUT":
+            if self._append_grant != (urlsplit(url).path, get_ident()):
+                raise PlexError("transport_refused") from None
         kwargs.update(allow_redirects=False, proxies={}, verify=True)
         try:
-            response = self._session.request("GET", url, **kwargs)
+            if method == "PUT":
+                # Consume immediately before dispatch, even when dispatch raises.
+                self._append_grant = None
+            response = self._session.request(method, url, **kwargs)
             if 300 <= response.status_code < 400:
                 response.close()
                 raise PlexError("transport_refused")
@@ -73,12 +89,36 @@ class ControlledSession:
         except PlexError:
             raise
         except Exception:
-            raise PlexError("read_failed") from None
+            raise PlexError("write_outcome_unknown" if method == "PUT" else "read_failed") from None
 
     def get(self, url, **kwargs):
         return self.request("GET", url, **kwargs)
 
+    def put(self, url, **kwargs):
+        return self.request("PUT", url, **kwargs)
+
+    @contextmanager
+    def _append_scope(self, key):
+        if (self._closed or self._origin is None or self._append_scope_path is not None
+                or type(key) is not str or canonical_key(key) != key
+                or type(self._base_path) is not str
+                or not re.fullmatch(r"(?:/[A-Za-z0-9._~-]+)*", self._base_path)
+                or any(part in (".", "..") for part in self._base_path.split("/"))):
+            raise PlexError("transport_refused") from None
+        path = f"{self._base_path}/playlists/{key}/items"
+        try:
+            self._append_scope_path = path
+            self._append_grant = (path, get_ident())
+            yield
+            if self._closed or self._append_grant is not None:
+                raise PlexError("transport_refused")
+        finally:
+            self._append_grant = None
+            self._append_scope_path = None
+
     def close(self):
+        self._closed = True
+        self._append_grant = None
         self._session.close()
 
 
@@ -148,7 +188,7 @@ class PlaylistSnapshot:
 class PlexClient:
     def __init__(self, server):
         self._server = server
-        self._session = None
+        self._session: ControlledSession | None = None
 
     @classmethod
     def connect(cls, host, token, *, port=32400, timeout=15):
@@ -201,27 +241,108 @@ class PlexClient:
                        if p.title == title]
             if len(matches) != 1:
                 raise PlexError("playlist_ambiguous" if matches else "playlist_not_found")
-            playlist = matches[0]
-            if playlist._server is not self._server:
-                raise PlexError("wrong_server")
-            if playlist.playlistType != "audio":
-                raise PlexError("wrong_playlist_type")
-            if playlist.smart is not False:
-                raise PlexError("smart_playlist")
-            key = canonical_key(playlist.ratingKey)
-            if key is None:
-                raise PlexError("invalid_playlist")
-            entries = []
-            for track in playlist.items():
-                if track._server is not self._server:
-                    raise PlexError("wrong_server")
-                if track.type != "track" or track.listType != "audio":
-                    raise PlexError("wrong_media_type")
-                track_title = getattr(track, "title", "")
-                entries.append({"plex_ratingkey": canonical_key(getattr(track, "ratingKey", None)),
-                                "title": track_title if type(track_title) is str else ""})
-            return PlaylistSnapshot(title, key, tuple(entries), playlist)
+            return self._snapshot(matches[0], title)
         except PlexError:
             raise
         except Exception:
             raise PlexError("read_failed") from None
+
+    def _playlist_key(self, playlist, title, expected_key=None):
+        if playlist._server is not self._server:
+            raise PlexError("wrong_server")
+        if playlist.playlistType != "audio":
+            raise PlexError("wrong_playlist_type")
+        if playlist.smart is not False:
+            raise PlexError("smart_playlist")
+        key = canonical_key(playlist.ratingKey)
+        if (key is None or playlist.title != title
+                or expected_key is not None and (key != expected_key
+                    or getattr(playlist, "key", None) != f"/playlists/{expected_key}")):
+            raise PlexError("invalid_playlist")
+        return key
+
+    def _snapshot(self, playlist, title, expected_key=None):
+        key = self._playlist_key(playlist, title, expected_key)
+        entries = []
+        for track in playlist.items():
+            if track._server is not self._server:
+                raise PlexError("wrong_server")
+            if track.type != "track" or track.listType != "audio":
+                raise PlexError("wrong_media_type")
+            track_title = getattr(track, "title", "")
+            entries.append({"plex_ratingkey": canonical_key(getattr(track, "ratingKey", None)),
+                            "title": track_title if type(track_title) is str else ""})
+        return PlaylistSnapshot(title, key, tuple(entries), playlist)
+
+    def _track_key(self, track, expected_key=None):
+        if getattr(track, "_server", None) is not self._server:
+            raise PlexError("wrong_server")
+        if getattr(track, "type", None) != "track" or getattr(track, "listType", None) != "audio":
+            raise PlexError("wrong_media_type")
+        key = canonical_key(getattr(track, "ratingKey", None))
+        if key is None:
+            raise PlexError("invalid_track")
+        if expected_key is not None and key != expected_key:
+            raise PlexError("track_identity_mismatch")
+        return key
+
+    def track(self, key):
+        key = canonical_key(key)
+        if key is None:
+            raise PlexError("invalid_track") from None
+        try:
+            track = self._server.fetchItem(f"/library/metadata/{key}")
+            self._track_key(track, key)
+            return track
+        except PlexError:
+            raise
+        except Exception:
+            raise PlexError("read_failed") from None
+
+    def playlist_by_key(self, key, *, expected_title):
+        key = canonical_key(key)
+        if key is None or type(expected_title) is not str or not expected_title.strip():
+            raise PlexError("invalid_playlist") from None
+        try:
+            playlist = self._server.fetchItem(f"/playlists/{key}")
+            return self._snapshot(playlist, expected_title, key)
+        except PlexError:
+            raise
+        except Exception:
+            raise PlexError("read_failed") from None
+
+    def append(self, snapshot, tracks):
+        try:
+            if (not isinstance(snapshot, PlaylistSnapshot) or type(snapshot.title) is not str
+                    or not snapshot.title.strip() or type(snapshot.plex_ratingkey) is not str
+                    or canonical_key(snapshot.plex_ratingkey) != snapshot.plex_ratingkey):
+                raise PlexError("invalid_playlist")
+            handle = snapshot._handle
+            if handle is None:
+                raise PlexError("invalid_playlist")
+            key = self._playlist_key(handle, snapshot.title, snapshot.plex_ratingkey)
+            add_items = getattr(handle, "addItems", None)
+            if not callable(add_items):
+                raise PlexError("invalid_playlist")
+            ordered = list(tracks)
+            for track in ordered:
+                self._track_key(track)
+            if not ordered:
+                return
+            session = self._session
+            if (type(session) is not ControlledSession or session._closed
+                    or getattr(self._server, "_session", None) is not session):
+                raise PlexError("transport_refused")
+        except PlexError:
+            raise
+        except Exception:
+            raise PlexError("read_failed") from None
+        failed = False
+        try:
+            with session._append_scope(key):
+                add_items(ordered)
+        except BaseException:
+            failed = True
+        if failed:
+            # Outside the handler: do not retain even a suppressed raw context.
+            raise PlexError("write_outcome_unknown") from None

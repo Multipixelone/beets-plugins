@@ -1,4 +1,4 @@
-"""Thin read-only mix-extend command; apply is deliberately not registered."""
+"""Thin read-only proposal and explicitly invoked ID-based append commands."""
 
 from contextlib import contextmanager, redirect_stderr, redirect_stdout
 from copy import deepcopy
@@ -13,10 +13,10 @@ from beets import ui
 from beets.plugins import BeetsPlugin
 
 from beets_mix import defaults as d
-from beets_mix.api import extend
+from beets_mix.api import apply, extend
 from beets_mix.plex import PlexClient, PlexError
 from beets_mix.seeds import from_plex, from_query
-from .snapshot import snapshot
+from .snapshot import link_snapshot, snapshot
 from .worker import encode_steer
 
 
@@ -65,6 +65,22 @@ def _validate(opts, args):
     if opts.store is not None:
         _text(opts.store, "store path")
     return plex
+
+
+def _validate_apply(opts, args):
+    _text(opts.plex_playlist, "playlist title")
+    if type(opts.json) is not bool or not args:
+        raise ui.UserError("Apply requires explicit positive item IDs")
+    ids = []
+    for token in args:
+        if type(token) is not str or not token or not token.isascii() or not token.isdecimal():
+            raise ui.UserError("Apply requires positive ASCII decimal item IDs")
+        try:
+            value = int(token)
+        except (ValueError, OverflowError):
+            raise ui.UserError("Invalid apply item ID") from None
+        ids.append(_positive(value, "item ID"))
+    return ids
 
 
 @contextmanager
@@ -136,7 +152,11 @@ class MixPlugin(BeetsPlugin):
         command.parser.add_option("--store")
         command.parser.add_option("--json", action="store_true", default=False)
         command.func = self.run
-        return [command]
+        append = ui.Subcommand("mix-apply", help="append an explicitly approved ordered item-ID subset")
+        append.parser.add_option("--plex-playlist", help="exact manual audio playlist title")
+        append.parser.add_option("--json", action="store_true", default=False)
+        append.func = self.run_apply
+        return [command, append]
 
     def _settings(self, opts, plex):
         settings = {"store": _text(opts.store if opts.store is not None else self.config["store"].get(str), "store path")}
@@ -201,3 +221,55 @@ class MixPlugin(BeetsPlugin):
             ui.print_(output)
         except Exception:
             raise ui.UserError("Mix output failed") from None
+
+    def _apply_settings(self):
+        # Unlike extend, apply reads no Store/worker settings and only obtains
+        # connection settings after identity capture has closed the library.
+        port = _positive(beets.config["plex"]["port"].get() if beets.config["plex"]["port"].exists() else 32400, "Plex port")
+        if port > 65535:
+            raise ValueError("Invalid Plex port")
+        return {"host": _text(beets.config["plex"]["host"].get(str), "Plex host"),
+                "token": _text(beets.config["plex"]["token"].get(str), "Plex token"), "port": port,
+                "timeout": _finite(self.config["plex_timeout"].get(), "Plex timeout", positive=True)}
+
+    def run_apply(self, lib, opts, args):
+        ids = _validate_apply(opts, args)
+        stage = "identity snapshot"
+        try:
+            with _quiet_boundaries():
+                try:
+                    items = link_snapshot(lib)
+                finally:
+                    lib._close()
+                stage = "apply configuration"
+                settings = self._apply_settings()
+                stage = "apply"
+                result, uncertain = None, False
+                try:
+                    with PlexClient.connect(**settings) as client:
+                        try:
+                            result = apply(items, ids, client=client, plex_playlist=opts.plex_playlist)
+                        except PlexError as error:
+                            uncertain = error.code == "write_outcome_unknown"
+                            raise
+                except (Exception, KeyboardInterrupt, SystemExit):
+                    # Preserve the unknown-write warning even if context cleanup
+                    # masks the original error, or fails after observed success.
+                    if uncertain or result is not None and result.data["added"]:
+                        raise PlexError("write_outcome_unknown") from None
+                    raise
+                payload = result.to_dict()
+                stage = "apply output"
+                serialized = json.dumps(payload, ensure_ascii=True, allow_nan=False)
+                output = serialized if opts.json else (
+                    f"Mix apply: {len(payload['added'])} added; {len(payload['already_present'])} already present; "
+                    f"{len(payload['refused'])} refused; {payload['playlist_tracks_after']} observed playlist tracks")
+        except PlexError as error:
+            safe = PlexError(error.code if type(error.code) is str else "read_failed")
+            raise ui.UserError(f"{safe} [{safe.code}]") from None
+        except Exception:
+            raise ui.UserError(f"Mix {stage} failed") from None
+        try:
+            ui.print_(output)
+        except Exception:
+            raise ui.UserError("Mix apply output failed") from None
