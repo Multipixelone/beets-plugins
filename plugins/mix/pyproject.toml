@@ -8,8 +8,8 @@ version = "0.1.0"
 description = "Read-only snapshot-based music mix proposals"
 requires-python = ">=3.13"
 license = "AGPL-3.0-or-later"
-dependencies = ["numpy", "beets-embed"]
+dependencies = ["numpy", "beets-embed", "beets", "plexapi", "requests"]
 
 [tool.setuptools.packages.find]
-include = ["beets_mix*"]
+include = ["beets_mix*", "beetsplug.mix*"]
 namespaces = true

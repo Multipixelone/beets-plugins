@@ -1,5 +1,27 @@
 # Mix verification plan
 
+## Phase 3A read-only command integration
+
+Source-level `mix-extend` passed independent offline validation and its review gate:
+119 Mix tests, 25 embed core tests and 13 isolated actual CLI cases.
+[Setup and output semantics](../../plugins/mix/README.md#phase-3a-read-only-mix-extend)
+describe explicit threshold/K flags, source namespace paths and the not-yet-wired
+worker. Phase 3B `mix-apply` is **not** registered or implemented.
+
+Focused mocked command checks cover inert import/construction, exactly-one-source
+and finite knob validation before command I/O, preserved native query tokens,
+complete snapshot/query capture and library close before all external boundaries,
+real synthetic Store/engine query composition, query isolation from Plex/worker,
+Plex occurrence counts/global collision quarantine, safe connection/read/cleanup
+errors, strict JSON and ordinary grouped text output. CLI `elapsed_ms` includes
+composition, unlike the unchanged pure API engine timer. Independent validation
+must cover persisted numeric Plex history with Mix-only configuration (including
+normal populated nonseeds, strict malformed-value rejection and bounded raw
+reads), plus pre-bound standard/native beets handlers, `extra_debug` and exact
+guard restoration on success/error/interruption. Independent validation
+must retain all helper/kernel/evaluator regressions. No live connection, worker
+inference, playlist mutation or deployment is authorized by these mocked checks.
+
 ## Unit tests (offline, in the Nix check phase)
 
 Synthetic stores and libraries only; no network, no Plex, no model weights.

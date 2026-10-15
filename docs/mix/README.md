@@ -10,7 +10,10 @@ These documents capture the agreed v1 design (grilled 2026-10-13/14) before impl
 the authorized full exploratory run completed. See the [dated evaluation
 results](./EVALUATION.md) for the full grid, mapping losses and limitations.
 Threshold 0.1/K=200 is exploratory only; production defaults remain unchanged.
-Adapters, production CLI/apply and packaging remain later work.
+Phase 3A now includes a source-level read-only `mix-extend` command and read
+adapters, with independent offline validation and review passed; see the [command setup and
+contracts](../../plugins/mix/README.md#phase-3a-read-only-mix-extend).
+Phase 3B apply/write safety and later packaging/deployment remain pending.
 
 - [Domain language](./CONTEXT.md)
 - [Design](./DESIGN.md)

@@ -1,6 +1,6 @@
-# Mix: foundation and phase 2 evaluation harness
+# Mix: foundation, evaluator and read-only extend command
 
-An importable, stateless proposal engine over **explicit complete item snapshots**
+The pure `beets_mix.extend` API is a stateless proposal engine over **explicit complete item snapshots**
 and supplied seed IDs. It reads current embeddings; it does not import beets UI,
 resolve playlists, contact Plex/network services, encode text, write the library
 or embedding store, persist proposals, or implement `apply`.
@@ -9,8 +9,117 @@ This is not a complete production plugin. An offline evaluation harness is now
 available, and the authorized exploratory real-library run completed on
 2026-10-15: [dated results](../../docs/mix/EVALUATION.md). Its 0.1/K=200 winner
 is not validated production tuning; K remains 100 and threshold explicit.
-Beets/Plex adapters, production CLI, apply safety, Nix wiring, skill and
-deployment remain pending; no production extend-latency claim is made.
+Phase 3A provides source-level beets/Plex read adapters and `mix-extend`, with
+independent offline integration validation and its review gate passed. Phase 3B apply safety,
+Nix wiring, skill and deployment remain pending; no production extend-latency
+claim is made. `mix-apply` is not registered and no write path is implemented.
+
+## Phase 3A: read-only `mix-extend`
+
+Enable `mix` in an explicitly selected beets configuration, using an environment
+with the declared runtime dependencies (`beets`, `numpy`, `beets-embed`,
+`plexapi`, `requests`). Namespace discovery includes `beetsplug.mix` alongside
+the pure library. No Nix/flake wiring, worker substitution or deployment is
+included yet. With available Python 3.14 and compatible NumPy, source-run syntax
+from this repository root is:
+
+```sh
+PYTHONDONTWRITEBYTECODE=1 PYTHONPATH="plugins/mix:plugins/embed:$PYTHONPATH" python3.14 -m beets -c mix-source.yaml mix-extend --cluster-threshold 0.1 --k 100 -n 15 --json artist:Khruangbin
+PYTHONDONTWRITEBYTECODE=1 PYTHONPATH="plugins/mix:plugins/embed:$PYTHONPATH" python3.14 -m beets -c mix-source.yaml mix-extend --cluster-threshold 0.1 --plex-playlist "morning eggs" --json
+```
+
+`mix-source.yaml` is a caller-supplied configuration, not a repository artifact
+or a credential location. These are command syntax examples, not authorization
+to connect to a live service or a recommendation of threshold 0.1 as a default.
+Use **exactly one** nonempty `--plex-playlist TITLE` or positional native beets
+query tokens. Query tokens are not rejoined/reparsed as a shell string. Query
+mode has no implicit target, never reads Plex settings and never connects to
+Plex. Plex mode resolves one fresh, exact case-sensitive manual audio playlist;
+missing/ambiguous titles, smart/non-audio playlists and foreign-server objects
+are refused safely.
+
+Options: required `--cluster-threshold` finite in [0,2]; `--k` positive integer
+(default **100**); `-n` positive integer (default 15); `--steer TEXT` (nonblank,
+at most 240 characters after trimming); `--steer-weight` finite [0,1] (default
+0.3); `--fresh`; `--max-per-artist` positive integer (default 2); optional
+`--store`; `--json`. Booleans are not accepted as numeric values. The handler
+validates options before command-owned I/O; beets itself supplies an already-open
+library. No exploratory evaluation result is promoted to a production default.
+
+Mix settings, with defaults shown:
+
+```yaml
+plugins: [mix]
+mix:
+  store: ~/.local/share/beets/embeddings.sqlite3
+  worker: '@embed-worker@'
+  worker_timeout: 120
+  plex_timeout: 15
+```
+
+`--store` overrides `mix.store`. Before packaging, steering requires replacing
+the marker with an explicitly configured **trusted packaged worker executable
+matching the installed embed model manifest**. The helper does not claim to
+verify worker identity: encode-text reports vectors, not a model ID. It uses
+CPU-only, bounded subprocess execution, temporary manifest/runtime/cache state,
+offline flags, group cleanup on interruption/timeout, strict finite 512-f32
+output validation and the current manifest text model ID. No persistent phrase
+cache is used. Without `--steer`, neither the worker nor its configuration is
+needed or launched. Timeouts must be positive finite numbers.
+
+Plex mode reads only the existing typed global `plex.host`, `plex.token`, and
+optional integer `plex.port` (default 32400), plus `mix.plex_timeout`. It does not
+initialize plexsync, reload configuration, or print settings. The owned transport
+is GET-only and bound to the configured HTTP(S) origin, with TLS verification,
+no redirects/retries/proxy or netrc inheritance, and session cleanup. No PUT or
+other mutation capability is enabled in 3A.
+
+The command captures the full complete library snapshot and, for query mode,
+the selected query IDs in bounded pages. It finishes all snapshot transactions
+and calls `lib._close()` (also after a capture failure) **before** Plex, worker,
+Store opening or vector/file-stat work. Persisted `plex_userrating`,
+`plex_skipcount` and `plex_viewcount` text is decoded strictly from bounded
+512-ID/three-key attribute reads, without loading plexsync or relying on optional
+Item numeric type registrations. Only absence defaults to zero. Present values
+must use finite, nonnegative JSON-number text (rating at most 10); blank/null,
+boolean text, malformed/whitespace/underscore spellings and nonfinite values
+fail safely, never silently becoming zero. Other fields retain native beets
+accessor/query semantics. The existing pure `extend` API/kernel is invoked
+unchanged; its original rows still exclude tracks missing usable vectors.
+
+### Command output and resolution semantics
+
+`--json` emits one finite, ASCII-escaped JSON proposal without headers or upstream
+stdout/stderr/logging. A scoped shared logger-emission guard covers standard
+and native beets loggers, including `extra_debug`/direct `_log` and pre-bound
+handlers, restoring methods/streams on exit; discarded text is not buffered.
+This command-scoped global suppression is not a concurrent logging sandbox.
+The command copies `Proposal.to_dict()` and adds a
+top-level `resolution` mapping. Errors use fixed option messages, fixed Plex
+categories, or generic boundary categories; raw exceptions, URLs, configuration
+values and worker streams are not relayed. Without JSON, output is a numbered
+cluster-grouped text list with top styles, support and nearest-seed explanation.
+
+For Plex, **`seed.tracks` means raw playlist occurrences**; `seed.resolved` and
+`seed.with_vectors` remain unique item counts. `resolution` explains
+`raw_entries`, `resolved_occurrences`, `resolved_unique`,
+`duplicate_resolved_occurrences`, unresolved/ambiguous/unmapped rows and counts,
+`ambiguous_key_count`, and sorted `quarantined_item_ids`/`quarantined_count`.
+Every raw occurrence either resolves uniquely or appears in unresolved data.
+All rows whose canonical Plex key is nonunique anywhere in the full snapshot
+are quarantined from seeds and candidates, including collisions absent from
+the selected playlist. This is intentionally stronger than phase 2's
+selected-key-only quarantine; no arbitrary first mapping is chosen.
+
+Query output has `target: {}`, source `query`, unique resolved counts and empty
+quarantine diagnostics. `resolution` does not replace vector-loss diagnostics.
+For both sources, **CLI `elapsed_ms` measures whole command composition through
+snapshot/close, resolution/Plex cleanup, steering and kernel/diagnostic assembly,
+before output serialization/printing**. Pure API `elapsed_ms` retains its
+original engine-only meaning; its schema/implementation were not changed.
+
+This command proposes only. Apply, approvals, write safety and registration of
+`mix-apply` remain phase 3B and are not implied or authorized by read-only output.
 
 ## Reproduce the synthetic tests
 
