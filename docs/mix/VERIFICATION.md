@@ -17,6 +17,12 @@ Synthetic stores and libraries only; no network, no Plex, no model weights.
 
 ## Hold-out evaluation (on link, real library, read-only)
 
+**2026-10-15 status:** The authorized full 20-trial/four-playlist protocol
+completed with zero skips; [dated results and reproducibility](./EVALUATION.md)
+record the exploratory 0.1/K=200 winner, not validated production defaults.
+The historical playlist counts below precede mapping/quarantine losses; the
+report gives actual evaluated populations. K remains 100 and threshold explicit.
+
 A dev-only harness (`python -m beets_mix.evaluate`, not a beets subcommand) that answers "is it any good" with a number.
 
 For each evaluation playlist, over 20 seeded random trials:

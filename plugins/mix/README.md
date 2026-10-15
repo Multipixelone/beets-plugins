@@ -6,9 +6,11 @@ resolve playlists, contact Plex/network services, encode text, write the library
 or embedding store, persist proposals, or implement `apply`.
 
 This is not a complete production plugin. An offline evaluation harness is now
-available; real-library evaluation/threshold/K tuning, beets/Plex adapters,
-production CLI, apply safety, Nix wiring, skill and deployment remain pending.
-No empirical tuning or real-library latency is claimed.
+available, and the authorized exploratory real-library run completed on
+2026-10-15: [dated results](../../docs/mix/EVALUATION.md). Its 0.1/K=200 winner
+is not validated production tuning; K remains 100 and threshold explicit.
+Beets/Plex adapters, production CLI, apply safety, Nix wiring, skill and
+deployment remain pending; no production extend-latency claim is made.
 
 ## Reproduce the synthetic tests
 
@@ -279,6 +281,6 @@ names are reported, so callers must not put credentials in names.
 Offline synthetic regressions cover reproducibility, hidden-positive recovery,
 natural losses/denominators, shared pools, baseline asymmetry, kernel parity
 against `extend`, one-time preparation, album identity, aggregation and CLI
-safety. Full validation belongs to the independent runner. A real link run is
-blocked until approved access or complete explicit local inputs are available;
-no live results table, selected production knobs, or quality claim is invented.
+safety. Full validation belongs to the independent runner. The authorized full
+run and its limitations are recorded in the [2026-10-15 results](../../docs/mix/EVALUATION.md);
+no validated production knobs or subjective quality claim follow from it.

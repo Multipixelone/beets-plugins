@@ -6,7 +6,14 @@ This pass is backend only. A UI is a separate, later pass; the backend is shaped
 
 These documents capture the agreed v1 design (grilled 2026-10-13/14) before implementation.
 
+**2026-10-15 status:** The library and dev-only evaluator are implemented, and
+the authorized full exploratory run completed. See the [dated evaluation
+results](./EVALUATION.md) for the full grid, mapping losses and limitations.
+Threshold 0.1/K=200 is exploratory only; production defaults remain unchanged.
+Adapters, production CLI/apply and packaging remain later work.
+
 - [Domain language](./CONTEXT.md)
 - [Design](./DESIGN.md)
 - [Verification plan](./VERIFICATION.md)
+- [Exploratory evaluation results (2026-10-15)](./EVALUATION.md)
 - [Architecture decisions](./adr/)
