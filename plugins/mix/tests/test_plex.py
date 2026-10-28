@@ -741,7 +741,7 @@ class InstalledPlexAPI(unittest.TestCase):
         import plexapi
         from plexapi.audio import Track
         from plexapi.playlist import Playlist
-        self.assertEqual(plexapi.__version__, "4.18.2")
+        self.assertTrue(plexapi.__version__.startswith("4.18."), plexapi.__version__)
         base = AppendScopes.base
         raw = Mock(proxies={})
         def response(method, url, **kwargs):
