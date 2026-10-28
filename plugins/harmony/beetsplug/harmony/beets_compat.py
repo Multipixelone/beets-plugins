@@ -46,8 +46,8 @@ except ModuleNotFoundError:  # pragma: no cover - exercised by pure-module users
 from .album import NormalizedAlbum, normalized_credit, snapshot_album, title_identity_key
 
 
-# This is the release containing commit 63b69fa90656279bd3d41fa87ab68be1f98fdaae.
-_PINNED_BEETS_VERSION = "2.13.1"
+# Must match the beets-src pin in flake.nix.
+_PINNED_BEETS_VERSION = "2.14.1"
 
 
 @dataclass(frozen=True, slots=True)

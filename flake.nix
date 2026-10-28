@@ -6,7 +6,7 @@
   # inputs.nixpkgs.url = "github:doronbehar/nixpkgs/pkg/beets";
   inputs.flake-utils.url = "github:numtide/flake-utils";
   inputs.beets-src = {
-    url = "github:beetbox/beets/63b69fa90656279bd3d41fa87ab68be1f98fdaae";
+    url = "github:beetbox/beets/v2.14.1";
     flake = false;
   };
   inputs.beets-plexsync = {
@@ -168,7 +168,10 @@
         }).overrideAttrs (prev: {
           makeWrapperArgs = prev.makeWrapperArgs ++ [
             # gst-plugin-scanner inherits this environment; gst-python imports gi.
-            "--prefix PYTHONPATH : ${pythonPackages.pygobject3}/${pythonPackages.python.sitePackages}"
+            "--prefix"
+            "PYTHONPATH"
+            ":"
+            "${pythonPackages.pygobject3}/${pythonPackages.python.sitePackages}"
           ];
         });
 
