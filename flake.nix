@@ -168,7 +168,10 @@
         }).overrideAttrs (prev: {
           makeWrapperArgs = prev.makeWrapperArgs ++ [
             # gst-plugin-scanner inherits this environment; gst-python imports gi.
-            "--prefix PYTHONPATH : ${pythonPackages.pygobject3}/${pythonPackages.python.sitePackages}"
+            "--prefix"
+            "PYTHONPATH"
+            ":"
+            "${pythonPackages.pygobject3}/${pythonPackages.python.sitePackages}"
           ];
         });
 
